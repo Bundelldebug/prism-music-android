@@ -273,6 +273,8 @@ public class PrismUiTest {
         MainActivity a = c.get();
         fakeTrack(); idle(700);
         a.onTab(3, false); idle(700);
+        // the upright header pill beside the rail needs the tall header (it was cut off after a re-creation)
+        assertTrue("rail header tall enough", a.header.getHeight() >= Ui.dp(172));
         shot(a, "50_foldable_rail");
         a.onTab(1, false); idle(900);
         shot(a, "50b_foldable_explore");
@@ -328,6 +330,16 @@ public class PrismUiTest {
         MainActivity a = c.get();
         fakeTrack(); idle(700);
         assertTrue("unfolded screen uses the tablet UI when chosen", a.tabletUi());
+        // cover cards leave room for the rows below on this short-and-wide screen
+        assertTrue("poster height within 41% of the screen", Widgets.posterW() * 1.33f <= Ui.screenH * 0.41f);
+        // the in-app Spotify player WebView sits at index 0 of root: the sidebar must still land above the page
+        a.root.addView(new View(a), 0, new android.widget.FrameLayout.LayoutParams(1, 1));
+        a.openSidebar(false); idle(600);
+        int si = -1;
+        for (int i = 0; i < a.root.getChildCount(); i++) if (a.root.getChildAt(i) instanceof Sidebar) si = i;
+        assertTrue("sidebar above the page backdrop", si > a.root.indexOfChild(a.backdrop));
+        shot(a, "56b_foldable_sidebar_with_player");
+        a.closeSidebar(); idle(700);
         shot(a, "56_foldable_tablet_ui");
         a.onTab(3, false); idle(500);
         a.push(new Settings.AppearancePage(a)); idle(800);

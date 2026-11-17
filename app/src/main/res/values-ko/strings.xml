@@ -190,4 +190,14 @@
     <string name="unfold_tablet">태블릿 UI (위쪽 탭·사이드바)</string>
     <string name="unfold_note">폴더블을 펼친 안쪽 화면에 적용돼요. 태블릿 UI에서는 탭바에 사이드바 버튼이 생겨요.</string>
     <string name="sidebar">사이드바</string>
+    <string name="upd_group">업데이트</string>
+    <string name="upd_check">업데이트 확인</string>
+    <string name="upd_auto">자동으로 업데이트 확인</string>
+    <string name="upd_latest">최신 버전이에요</string>
+    <string name="upd_available">새 버전 %1$s</string>
+    <string name="upd_now">업데이트</string>
+    <string name="upd_later">나중에</string>
+    <string name="upd_downloading">업데이트를 내려받는 중…</string>
+    <string name="upd_allow">프리즘의 앱 설치를 허용한 뒤 다시 업데이트를 눌러 주세요.</string>
+    <string name="upd_failed">업데이트를 확인하지 못했어요</string>
 </resources>

@@ -113,8 +113,9 @@ final class Widgets {
     /** Width pages can actually use: the screen minus the foldable's right-hand rail. */
     static int contentW(MainActivity m) { return Ui.screenW - (m == null ? 0 : m.sideInset() + m.contentInsetPx()); }
 
-    static int posterW() { return Math.min(Ui.dp(300), (int) (Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.5f : 0.585f))); }
-    static int squareDp() { return (int) (Math.min(Ui.dp(180), Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.32f : 0.38f)) / Ui.density); }
+    /** Never taller than ~40% of the screen: on short-and-wide screens (unfolded foldable, landscape tablet) the rows below stay in view. */
+    static int posterW() { return Math.min((int) (Ui.screenH * 0.40f / 1.33f), Math.min(Ui.dp(300), (int) (Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.5f : 0.585f)))); }
+    static int squareDp() { return (int) (Math.min(Ui.screenH * 0.24f, Math.min(Ui.dp(180), Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.32f : 0.38f))) / Ui.density); }
 
     /** Tall poster card with dark bottom gradient and caption (home "greeting" row). */
     static View posterCard(Context c, Item it, View.OnClickListener click) {

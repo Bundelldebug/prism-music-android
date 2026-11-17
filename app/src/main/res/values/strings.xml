@@ -190,4 +190,14 @@
     <string name="unfold_tablet">Tablet layout (top tabs and sidebar)</string>
     <string name="unfold_note">Applies on the inner screen of a foldable. The tablet layout adds the sidebar button to the tab bar.</string>
     <string name="sidebar">Sidebar</string>
+    <string name="upd_group">Updates</string>
+    <string name="upd_check">Check for updates</string>
+    <string name="upd_auto">Check for updates automatically</string>
+    <string name="upd_latest">You have the latest version</string>
+    <string name="upd_available">New version %1$s</string>
+    <string name="upd_now">Update</string>
+    <string name="upd_later">Later</string>
+    <string name="upd_downloading">Downloading the update…</string>
+    <string name="upd_allow">Allow installs from Prism, then tap Update again.</string>
+    <string name="upd_failed">Couldn\'t check for updates</string>
 </resources>

@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.0";
+    static final String VERSION = "9.5.1";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -80,7 +80,10 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
         header = new Header(this, backdrop);
         header.setListener(this);
-        root.addView(header, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(120)));
+        root.addView(header, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, headerHeight()));
+        // the header's height depends on the screen shape (upright pill beside the foldable rail): keep it right
+        // whenever the window changes size, not only when the status bar inset changes
+        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitHeader());
 
         dock = new Dock(this, backdrop, new String[]{getString(R.string.tab_home), getString(R.string.tab_explore),
                 getString(R.string.tab_library), getString(R.string.tab_settings)});
@@ -101,10 +104,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             Ui.navInset = nav;
             Ui.imeInset = ime;
             dock.setImeOffset(ime);
+            // after a fold / unfold re-creation the inset is often unchanged, but this new screen may need another height
+            fitHeader();
             if (changed) {
-                // the foldable rail stands the header pill upright, so the header needs more height
-                header.getLayoutParams().height = st + Ui.dp(Dock.railFor(Ui.screenW, Ui.screenH) ? 172 : 88);
-                header.requestLayout();
                 for (NavStack s : tabs) if (s != null) s.applyInsets();
                 if (searchPage != null) searchPage.applyInsets();
                 np.requestLayout();
@@ -155,6 +157,8 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             Player.listeners.add(() -> LocalMusic.PlaybackService.update(app));
         }
         handleIntent(getIntent());
+        // new release on GitHub? (at most once a day, can be turned off in Settings → About)
+        if (state == null) root.postDelayed(() -> Updater.autoCheck(this), 3000);
         // tablet: the sidebar stays open across rotation / fold re-creation (only where the tablet UI applies)
         if (sidebarWanted) root.post(() -> { if (tabletUi()) openSidebar(false); });
         if (state != null) {
@@ -164,6 +168,21 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                 if (st0.getBoolean("np_open") && Player.track != null) root.postDelayed(np::open, 180);
             });
         }
+    }
+
+    /** The foldable rail stands the header pill upright, so the header needs more height there. */
+    private int headerHeight() {
+        int W = root != null && root.getWidth() > 0 ? root.getWidth() : Ui.screenW;
+        int H = root != null && root.getHeight() > 0 ? root.getHeight() : Ui.screenH;
+        return Ui.statusInset + Ui.dp(Dock.railFor(W, H) ? 172 : 88);
+    }
+
+    private void fitHeader() {
+        if (header == null) return;
+        int h = headerHeight();
+        if (header.getLayoutParams().height == h) return;
+        header.getLayoutParams().height = h;
+        header.post(header::requestLayout);
     }
 
     private static FrameLayout.LayoutParams match() {
@@ -450,7 +469,8 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (sidebar == null) {
             sidebar = new Sidebar(this);
             // above the page, below the header / dock / player
-            root.addView(sidebar, 1, new FrameLayout.LayoutParams((int) sw, ViewGroup.LayoutParams.MATCH_PARENT));
+            // right above the page backdrop (the in-app player WebView may sit before it at index 0)
+            root.addView(sidebar, root.indexOfChild(backdrop) + 1, new FrameLayout.LayoutParams((int) sw, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         sidebar.getLayoutParams().width = (int) sw;
         sidebar.setSelected(tab);

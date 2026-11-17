@@ -347,6 +347,22 @@ final class Settings {
             g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.music_service), "Spotify Web API", false, null);
             g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB", false, null);
             content.addView(g, Widgets.MW);
+            // updates from the GitHub releases
+            Widgets.Group u = new Widgets.Group(m, m.getString(R.string.upd_group));
+            View[] holder = new View[1];
+            View checkRow = u.row(Icons.DOWNLOAD, Ui.ACCENT, m.getString(R.string.upd_check), MainActivity.VERSION, true, v -> {
+                Object tv = holder[0].getTag();
+                if (tv instanceof TextView) ((TextView) tv).setText(R.string.loading);
+                Updater.check((r, err) -> {
+                    String s = err != null ? m.getString(R.string.upd_failed) : r == null ? m.getString(R.string.upd_latest) : m.getString(R.string.upd_available, r.version);
+                    if (tv instanceof TextView) ((TextView) tv).setText(s);
+                    else Toast.makeText(m, s, Toast.LENGTH_SHORT).show();
+                    if (r != null) Updater.offer(m, r);
+                });
+            });
+            holder[0] = checkRow;
+            toggleRow(u, Icons.CLOCK, m.getString(R.string.upd_auto), Updater.PREF_AUTO, true, null);
+            content.addView(u, Widgets.MW);
             TextView t = (TextView) Widgets.caption(m, m.getString(R.string.about_note));
             content.addView(t);
         }

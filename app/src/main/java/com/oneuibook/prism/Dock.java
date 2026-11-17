@@ -634,6 +634,8 @@ final class Dock extends FrameLayout {
     private float tabletBtn(int i) { return mini.left + Ui.dpf(30) + Ui.dpf(44) * i; }
     /** Tablet bar, right end: more · lyrics · queue, centres in px; i = 0 is the queue at the far right. */
     private float tabletRBtn(int i) { return mini.right - Ui.dpf(32) - Ui.dpf(46) * i; }
+    /** Right-hand buttons that fit: all three on a wide bar, only the queue when the bar is narrow (sidebar open on a small screen). */
+    private int rCount() { return mini.width() >= Ui.dpf(600) ? 3 : 1; }
     /** Left edge of the cover in the music bar — the player opens out of / closes into exactly this square. */
     private float miniArtX() { return tablet ? tabletBtn(4) + Ui.dpf(34) : mini.left + Ui.dpf(15); }
 
@@ -662,8 +664,8 @@ final class Dock extends FrameLayout {
             Icons.draw(c, Icons.NEXT, tabletBtn(3), mini.centerY(), Ui.dpf(22), fg);
             Icons.draw(c, "track".equals(Player.repeat) ? Icons.REPEAT_ONE : Icons.REPEAT, tabletBtn(4), mini.centerY(), Ui.dpf(20),
                     "off".equals(Player.repeat) ? dim : Ui.alpha(Ui.ACCENT, show));
-            Icons.draw(c, Icons.MORE, tabletRBtn(2), mini.centerY(), Ui.dpf(22), fg);
-            Icons.draw(c, Icons.LYRICS, tabletRBtn(1), mini.centerY(), Ui.dpf(22), fg);
+            if (rCount() > 2) Icons.draw(c, Icons.MORE, tabletRBtn(2), mini.centerY(), Ui.dpf(22), fg);
+            if (rCount() > 1) Icons.draw(c, Icons.LYRICS, tabletRBtn(1), mini.centerY(), Ui.dpf(22), fg);
             Icons.draw(c, Icons.LIST, tabletRBtn(0), mini.centerY(), Ui.dpf(22), fg);
             ax = miniArtX();
         }
@@ -687,7 +689,7 @@ final class Dock extends FrameLayout {
         float btnW = Ui.dpf(40);
         if (tablet) {
             // right side of the tablet bar shows only the title block; controls live on the left
-            float tx = ax + artS + Ui.dpf(10), avail = tabletRBtn(2) - Ui.dpf(28) - tx;
+            float tx = ax + artS + Ui.dpf(10), avail = tabletRBtn(rCount() - 1) - Ui.dpf(28) - tx;
             if (Player.track != null) {
                 title.setColor(Ui.alpha(Ui.text(), show));
                 sub.setColor(Ui.alpha(Ui.text2(), show));
@@ -824,7 +826,7 @@ final class Dock extends FrameLayout {
                 int[] kinds = {T_MINI_SHUF, T_MINI_PREV, T_MINI_PLAY, T_MINI_NEXT, T_MINI_REP};
                 for (int i = 0; i < 5; i++) if (Math.abs(x - tabletBtn(i)) < Ui.dpf(22)) return kinds[i];
                 int[] right = {T_MINI_QUEUE, T_MINI_LYR, T_MINI_MORE};
-                for (int i = 0; i < 3; i++) if (Math.abs(x - tabletRBtn(i)) < Ui.dpf(22)) return right[i];
+                for (int i = 0; i < rCount(); i++) if (Math.abs(x - tabletRBtn(i)) < Ui.dpf(22)) return right[i];
                 return T_MINI;
             }
             float btnW = Ui.dpf(40);

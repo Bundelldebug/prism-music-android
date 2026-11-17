@@ -190,4 +190,14 @@
     <string name="unfold_tablet">タブレットUI（上部タブ・サイドバー）</string>
     <string name="unfold_note">フォルダブルを開いた内側の画面に適用されます。タブレットUIではタブバーにサイドバーボタンが表示されます。</string>
     <string name="sidebar">サイドバー</string>
+    <string name="upd_group">アップデート</string>
+    <string name="upd_check">アップデートを確認</string>
+    <string name="upd_auto">アップデートを自動で確認</string>
+    <string name="upd_latest">最新バージョンです</string>
+    <string name="upd_available">新しいバージョン %1$s</string>
+    <string name="upd_now">アップデート</string>
+    <string name="upd_later">後で</string>
+    <string name="upd_downloading">アップデートをダウンロード中…</string>
+    <string name="upd_allow">プリズムからのインストールを許可してから、もう一度アップデートを押してください。</string>
+    <string name="upd_failed">アップデートを確認できませんでした</string>
 </resources>
