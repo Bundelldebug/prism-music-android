@@ -52,6 +52,16 @@ public class PrismUiTest {
         return null;
     }
 
+    /** True if some artwork view under {@code v} shows {@code url}. */
+    private static boolean findArt(View v, String url) {
+        if (v instanceof Img.ArtView && url.equals(((Img.ArtView) v).url)) return true;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) if (findArt(g.getChildAt(i), url)) return true;
+        }
+        return false;
+    }
+
     private static void idle(long ms) {
         for (long t = 0; t < ms; t += 16) Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16));
     }
@@ -389,5 +399,118 @@ public class PrismUiTest {
         shot(a, "21_home_ja");
         a.onTab(3, false); idle(700); shot(a, "22_settings_ja");
         a.push(new Settings.AppearancePage(a)); idle(800); shot(a, "23_appearance_ja");
+    }
+
+    @Test public void deviceMusicAndPlayerStyles() throws Exception {
+        android.app.Application app = RuntimeEnvironment.getApplication();
+        Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.READ_MEDIA_AUDIO);
+        MainActivity.prefs(app).edit().putString("source", "local").commit();
+        // home order: playlists right above charts by default
+        String[] def = Pages.homeOrder(app);
+        assertEquals("playlists", def[3]);
+        assertEquals("charts", def[4]);
+        ActivityController<MainActivity> c = launch("ko-w393dp-h852dp-xxhdpi");
+        MainActivity a = c.get();
+        // the app reads the (empty) device library in the background at start: let that finish first
+        for (int i = 0; i < 150 && !LocalMusic.loaded; i++) { Thread.sleep(20); idle(20); }
+        // a small fake library: one album with numbered tracks out of order
+        LocalMusic.app = app;
+        LocalMusic.songs.clear();
+        String[] names = {"Interlude", "Opening", "Finale", "Bonus"};
+        int[] nos = {2, 1, 3, 0};
+        for (int i = 0; i < names.length; i++) {
+            Player.Track t = new Player.Track();
+            t.id = "local:" + i; t.uri = "content://media/external/audio/media/" + i; t.name = names[i]; t.artist = "Prism Band";
+            t.album = "Glass"; t.albumId = 5; t.albumUri = "lalbum:5"; t.artistUri = "lartist:Prism Band";
+            t.trackNo = nos[i]; t.added = 100 + i; t.duration = 200000 + i * 1000;
+            LocalMusic.setArt(t);
+            LocalMusic.songs.add(t);
+        }
+        LocalMusic.loaded = true;
+        Widgets.Item album = LocalMusic.group("lalbum:5", LocalMusic.tracksFor("lalbum:5"), true);
+        a.push(new Pages.LocalListPage(a, album)); idle(900);
+        shot(a, "60_album_track_order");
+        a.pop(); idle(500);
+
+        // [1] cover change: images swap in place on every page, quickly, without rebuilding the home screen
+        a.reloadAll(); idle(800);
+        java.io.File cf = LocalMusic.coverFile("lalbum:5");
+        cf.getParentFile().mkdirs();
+        Bitmap cb = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888);
+        cb.eraseColor(0xFF3366FF);
+        try (FileOutputStream o = new FileOutputStream(cf)) { cb.compress(Bitmap.CompressFormat.JPEG, 90, o); }
+        String before = LocalMusic.songs.get(0).art;
+        long t0 = System.nanoTime();
+        LocalMusic.clearCover("lalbum:5");          // file → album thumbnail: same swap path as picking a cover
+        cf.getParentFile().mkdirs();
+        try (FileOutputStream o = new FileOutputStream(cf)) { cb.compress(Bitmap.CompressFormat.JPEG, 90, o); }
+        LocalMusic.refreshArt("lalbum:5");   // what setCover does after saving the picked image
+        idle(50);
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        String after = LocalMusic.songs.get(0).art;
+        assertTrue("cover swap fast (" + ms + " ms)", ms < 1500);
+        assertTrue("art key changed", !after.equals(before) && after.startsWith("file://"));
+        assertTrue("home shows the new cover", findArt(a.root, after));
+        idle(400);
+        shot(a, "59_home_after_cover");
+        LocalMusic.clearCover("lalbum:5"); idle(200);
+
+        // [4] multi-disc albums merge into one
+        Object[] d = LocalMusic.splitDisc("Pretty Rhythm Spectrum Disc 2");
+        assertEquals("Pretty Rhythm Spectrum", d[0]);
+        assertEquals(2, d[1]);
+        assertEquals(1, LocalMusic.splitDisc("Best Of (CD1)")[1]);
+        assertEquals(3, LocalMusic.splitDisc("앨범 디스크3")[1]);
+        assertEquals(2, LocalMusic.splitDisc("Live - Disc II")[1]);
+        assertTrue(LocalMusic.splitDisc("Best Vol. 2") == null);
+        assertTrue(LocalMusic.splitDisc("Disc 1") == null);
+        LocalMusic.songs.clear();
+        for (int disc = 1; disc <= 2; disc++) for (int n = 1; n <= 2; n++) {
+            Player.Track t = new Player.Track();
+            t.id = "local:d" + disc + n; t.uri = "content://media/external/audio/media/9" + disc + n; t.name = "Song " + disc + "-" + n;
+            t.artist = "Prism Band"; t.album = "Very Long Album Title For Testing The Big Header Wrapping Disc " + disc;
+            t.albumId = 70 + disc; t.trackNo = n; t.added = 10; t.artistUri = "lartist:Prism Band";
+            LocalMusic.keyAlbum(t, "Prism Band", true);
+            LocalMusic.songs.add(t);
+        }
+        for (Player.Track t : LocalMusic.songs) LocalMusic.setArt(t);
+        assertEquals("two discs → one album", 1, LocalMusic.group(true).size());
+        String key = LocalMusic.songs.get(0).albumUri;
+        Widgets.Item merged = LocalMusic.group(key, LocalMusic.tracksFor(key), true);
+        assertEquals("Very Long Album Title For Testing The Big Header Wrapping", merged.title);
+        // [5] long album title: wraps / shrinks instead of being cut
+        a.push(new Pages.LocalListPage(a, merged)); idle(900);
+        shot(a, "64_long_title_discs");
+        Page lp = a.currentPage();
+        assertTrue("big title not cut to one line", lp.bigTitle.getLineCount() >= 1 && lp.bigTitle.getLayout() != null
+                && lp.bigTitle.getLayout().getEllipsisCount(lp.bigTitle.getLineCount() - 1) == 0);
+        a.pop(); idle(500);
+
+        // [3] app style A / G: same chrome, glass vs frosted pills
+        shot(a, "62_style_A");
+        MainActivity.prefs(app).edit().putString("player_style", "oneui").commit();
+        Ui.gStyle = true;
+        a.invalidateChrome(); idle(400);
+        shot(a, "63_style_G");
+        // [2] G style player: cover, device row, title below it, wave seek bar, round controls, volume
+        fakeTrack();
+        a.np.applyStyle();
+        a.np.open(); idle(1400);
+        shot(a, "61_player_oneui");     // first frame starts the wave clock
+        idle(400);
+        shot(a, "61_player_oneui");     // the waves have risen by now
+        a.np.close(); idle(900);
+        Ui.gStyle = false;
+        // the media notification's prism icon, large, on a dark status-bar colour
+        android.graphics.drawable.Drawable ic = a.getDrawable(R.drawable.ic_stat_prism);
+        Bitmap ib = Bitmap.createBitmap(240, 240, Bitmap.Config.ARGB_8888);
+        Canvas icv = new Canvas(ib);
+        icv.drawColor(0xFF202124);
+        ic.setBounds(24, 24, 216, 216);
+        ic.draw(icv);
+        try (FileOutputStream o = new FileOutputStream(new File(OUT, "62_notification_icon.png"))) { ib.compress(Bitmap.CompressFormat.PNG, 100, o); }
+        MainActivity.prefs(app).edit().putString("player_style", "prism").putString("source", "spotify").commit();
+        a.np.applyStyle();
+        LocalMusic.songs.clear();
     }
 }

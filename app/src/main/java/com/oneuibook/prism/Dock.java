@@ -516,7 +516,8 @@ final class Dock extends FrameLayout {
     private void drawBarAndLens(Canvas canvas, float k) {
         boolean hw = canvas.isHardwareAccelerated();
         float l = lift.value * (1f - k);
-        if (hw && l > 0.01f) {
+        // G style has no lens: the selection capsule just grows and springs with the same lift (drawBar)
+        if (hw && l > 0.01f && !Ui.gStyle) {
             contentNode.setPosition(0, 0, getWidth(), getHeight());
             RecordingCanvas rc = contentNode.beginRecording(getWidth(), getHeight());
             try { drawBar(rc, k, l); } finally { contentNode.endRecording(); }
@@ -542,7 +543,7 @@ final class Dock extends FrameLayout {
 
     private void drawBar(Canvas c, float k, float l) {
         // glass: pill + search bubble (+ lens bulge while lifted), smooth-unioned only while lifted
-        barGlass.shapes(pill, pill.height() / 2f, circle, circle.height() / 2f, l > 0.02f ? lens : null, lens.height() / 2f);
+        barGlass.shapes(pill, pill.height() / 2f, circle, circle.height() / 2f, l > 0.02f && !Ui.gStyle ? lens : null, lens.height() / 2f);
         barGlass.smoothK = Ui.dpf(16) * l;
         barGlass.tint = Ui.barTint();
         barGlass.blurDp = Ui.barBlur();
@@ -553,10 +554,10 @@ final class Dock extends FrameLayout {
         barGlass.draw(c, this, backdrop);
 
         // resting selection capsule
-        float restA = (1f - l) * (1f - k);
+        float restA = Ui.gStyle ? (1f - k) : (1f - l) * (1f - k);
         if (restA > 0.01f) {
             // resting selection: a plain light-grey capsule
-            fill.setColor(Ui.alpha(Ui.dark ? 0x2EFFFFFF : 0x17000000, restA));
+            fill.setColor(Ui.alpha(Ui.gStyle ? (Ui.dark ? 0x3DFFFFFF : 0x1F000000) : (Ui.dark ? 0x2EFFFFFF : 0x17000000), restA));
             c.drawRoundRect(lens, lens.height() / 2f, lens.height() / 2f, fill);
         }
 

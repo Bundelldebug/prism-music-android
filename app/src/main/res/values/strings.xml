@@ -217,4 +217,23 @@
     <string name="eq_classical">Classical</string>
     <string name="eq_electronic">Electronic</string>
     <string name="eq_note">Applies to on-device music. Spotify plays as protected web audio that the equalizer can\'t reach. Bit-perfect output skips all processing, including the equalizer.</string>
+    <string name="sort_track">Track number</string>
+    <string name="sort_title">Title</string>
+    <string name="sort_artist">Artist</string>
+    <string name="sort_added">Recently added</string>
+    <string name="sort_duration">Length</string>
+    <string name="cover_set">Change cover</string>
+    <string name="cover_reset">Original cover</string>
+    <string name="home_recent">Recently played</string>
+    <string name="home_order">Home order</string>
+    <string name="home_order_reset">Reset to default order</string>
+    <string name="show_total">Show full length instead of time left</string>
+    <string name="player_style">Style</string>
+    <string name="player_style_prism">A style (glass)</string>
+    <string name="player_style_oneui">G style</string>
+    <string name="disc_n">Disc %1$d</string>
+    <string name="disc_other">Other</string>
+    <string name="merge_discs">Combine multi-disc albums</string>
+    <string name="merge_discs_note">Albums named like “Title Disc 1”, “Title CD2” or “Title (Disc 3)” are shown as one album “Title”, with each disc in order.</string>
+    <string name="style_note">A: glass that bends the light behind it. G: frosted, translucent pills with a media-player-style now playing screen and a wave seek bar. Animations are the same in both.</string>
 </resources>

@@ -214,6 +214,10 @@ final class Header extends View {
             titlePaint.setColor(Ui.alpha(fg, titleAlpha * contentAlpha));
             float avail = (pill.isEmpty() ? w - Ui.dpf(16) : pill.left - Ui.dpf(12)) - titleX;
             float rowCy = vertical ? pill.top + Ui.dpf(23) : pill.centerY();
+            // long names get smaller (17 → 13sp) before anything is cut off
+            float ts = 17f;
+            titlePaint.setTextSize(Ui.sp(ts));
+            while (ts > 13f && titlePaint.measureText(title) > avail) { ts -= 1f; titlePaint.setTextSize(Ui.sp(ts)); }
             CharSequence t = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END);
             float baseline = pill.isEmpty() ? backRect.centerY() + titlePaint.getTextSize() * 0.36f
                     : rowCy + titlePaint.getTextSize() * 0.36f;

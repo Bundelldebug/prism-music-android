@@ -190,6 +190,20 @@ final class Settings {
                 m.recreate();
             });
             content.addView(g, Widgets.MW);
+            // app style: A (glass) or G (frosted translucent pills); motion is the same in both
+            Widgets.Group sg = new Widgets.Group(m, m.getString(R.string.player_style));
+            String curSt = MainActivity.prefs(m).getString("player_style", "prism");
+            String[][] sts = {{"prism", m.getString(R.string.player_style_prism)}, {"oneui", m.getString(R.string.player_style_oneui)}};
+            for (String[] o : sts) sg.option(o[1], o[0].equals(curSt), v -> {
+                if (o[0].equals(MainActivity.prefs(m).getString("player_style", "prism"))) return;
+                MainActivity.prefs(m).edit().putString("player_style", o[0]).apply();
+                Ui.gStyle = "oneui".equals(o[0]);
+                m.np.applyStyle();
+                m.invalidateChrome();
+                rebuild();
+            });
+            content.addView(sg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.style_note)));
             if (isFoldable(m)) {
                 // unfolded inner screen: the foldable layout (right-hand tab rail) or the tablet one (top tabs + sidebar)
                 Widgets.Group uf = new Widgets.Group(m, m.getString(R.string.unfold_ui));
@@ -250,6 +264,51 @@ final class Settings {
             toggleRow(g, Icons.ARTIST, m.getString(R.string.home_artists), "home_artists", true, m::reloadContent);
             toggleRow(g, Icons.ALBUM, m.getString(R.string.home_new), "home_new", true, m::reloadContent);
             content.addView(g, Widgets.MW);
+
+            // device music: albums tagged "Name Disc 1", "Name Disc 2"… shown as one album
+            Widgets.Group dg = new Widgets.Group(m, m.getString(R.string.source_local));
+            toggleRow(dg, Icons.ALBUM, m.getString(R.string.merge_discs), "merge_discs", true, () -> LocalMusic.reload(m, m::reloadContent));
+            content.addView(dg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.merge_discs_note)));
+
+            // home order: each section with up / down buttons
+            Widgets.Group og = new Widgets.Group(m, m.getString(R.string.home_order));
+            String[] order = Pages.homeOrder(m);
+            for (int i = 0; i < order.length; i++) {
+                final int idx = i;
+                View r = og.row(0, 0, m.getString(Pages.homeTitle(order[i])), null, false, null);
+                LinearLayout row = (LinearLayout) r;
+                row.addView(moveButton(m, true, idx > 0, () -> moveHome(order, idx, -1)));
+                row.addView(moveButton(m, false, idx < order.length - 1, () -> moveHome(order, idx, 1)));
+            }
+            content.addView(og, Widgets.MW);
+            Widgets.Group rg = new Widgets.Group(m, null);
+            rg.row(Icons.REPEAT, Ui.ACCENT, m.getString(R.string.home_order_reset), null, false, v -> {
+                MainActivity.prefs(m).edit().remove("home_order").apply();
+                m.reloadContent();
+                rebuild();
+            });
+            content.addView(rg, Widgets.MW);
+        }
+
+        private void moveHome(String[] order, int i, int d) {
+            int j = i + d;
+            if (j < 0 || j >= order.length) return;
+            String t = order[i]; order[i] = order[j]; order[j] = t;
+            MainActivity.prefs(main).edit().putString("home_order", String.join(",", order)).apply();
+            main.reloadContent();
+            rebuild();
+        }
+
+        private static View moveButton(MainActivity m, boolean up, boolean enabled, Runnable r) {
+            Icons.IconView b = new Icons.IconView(m, Icons.CHEVRON_UP, 18, enabled ? Ui.ACCENT : Ui.text3());
+            if (!up) b.setRotation(180);
+            b.setLayoutParams(new LinearLayout.LayoutParams(Ui.dp(40), Ui.dp(40)));
+            if (enabled) {
+                b.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(Ui.pressed()), null, Ui.round(0xFFFFFFFF, 100)));
+                b.setOnClickListener(v -> r.run());
+            }
+            return b;
         }
     }
 
@@ -281,6 +340,7 @@ final class Settings {
             content.addView(a, Widgets.MW);
             Widgets.Group fx = new Widgets.Group(m, m.getString(R.string.set_player_screen));
             toggleRow(fx, Icons.ALBUM, m.getString(R.string.shrink_paused), "shrink_paused", true, null);
+            toggleRow(fx, Icons.CLOCK, m.getString(R.string.show_total), "show_total", false, Player::notifyAll0);
             fx.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.eq_title), m.getString(Eq.on(m) ? R.string.eq_state_on : R.string.eq_state_off), true, v -> m.push(new EqPage(m)));
             content.addView(fx, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.devices_note)));

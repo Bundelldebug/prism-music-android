@@ -20,6 +20,12 @@ final class Player {
     static final class Track {
         String id, uri, name, artist, album, albumUri, artistUri, art, artSmall;
         long duration;
+        /** On-device songs only: track number within the album (0 = none), disc, and when it was added. */
+        int trackNo, disc;
+        /** Merged multi-disc album: the album name without "Disc N" (null for ordinary albums). */
+        String albumGroup;
+        long added;
+        long albumId = -1;
 
         static Track from(JSONObject t) {
             if (t == null) return null;
@@ -196,6 +202,40 @@ final class Player {
             if (offsetUri != null) b.put("offset", new JSONObject().put("uri", offsetUri));
             startPlay(b, preview, offsetUri != null ? offsetUri : contextUri);
         } catch (Exception ignored) {}
+    }
+
+    // ---- volume (player-screen volume bar) ----
+    private static long lastVolSend;
+    private static int pendingVol = -1;
+
+    /**
+     * 0..1, or -1 if unknown. This phone (on-device songs, in-app Spotify): the media stream volume.
+     * Another Spotify Connect device: that device's volume_percent.
+     */
+    static float volume01(android.content.Context c) {
+        if (onThisPhone()) {
+            android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(android.content.Context.AUDIO_SERVICE);
+            int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+            return max <= 0 ? -1 : am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) / (float) max;
+        }
+        return volume < 0 ? -1 : volume / 100f;
+    }
+
+    static void setVolume01(android.content.Context c, float v, boolean done) {
+        v = Math.max(0f, Math.min(1f, v));
+        if (onThisPhone()) {
+            android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(android.content.Context.AUDIO_SERVICE);
+            int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(v * max), 0);
+            return;
+        }
+        // remote device: Web API call, throttled while dragging, always sent on release
+        volume = Math.round(v * 100);
+        long now = SystemClock.elapsedRealtime();
+        if (!done && now - lastVolSend < 300) { pendingVol = volume; return; }
+        lastVolSend = now;
+        pendingVol = -1;
+        Spotify.send("PUT", "/me/player/volume?volume_percent=" + volume, null, null);
     }
 
     // ---- what the sound actually comes out of ----

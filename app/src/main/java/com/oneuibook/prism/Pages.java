@@ -95,13 +95,15 @@ final class Pages {
         }
         c.addView(Widgets.section(m, m.getString(R.string.lib_albums)));
         LinearLayout r2 = Widgets.rail(c, 8);
-        for (Widgets.Item x : albums) Widgets.addToRail(r2, Widgets.squareCard(m, x, Widgets.squareDp(), v -> m.openItem(x)), Ui.dp(Widgets.squareDp()));
+        // rails stay short (the full lists live in the library): thousands of cards made the home screen hang
+        for (Widgets.Item x : albums.subList(0, Math.min(40, albums.size()))) Widgets.addToRail(r2, Widgets.squareCard(m, x, Widgets.squareDp(), v -> m.openItem(x)), Ui.dp(Widgets.squareDp()));
         List<Widgets.Item> songs = localSongs();
         c.addView(Widgets.section(m, m.getString(R.string.all_songs)));
         Widgets.trackColumns(c, songs.subList(0, Math.min(30, songs.size())), i -> m.playList(songs, i, null));
         c.addView(Widgets.section(m, m.getString(R.string.lib_artists)));
         LinearLayout r3 = Widgets.rail(c, 8);
-        for (Widgets.Item x : localGroups(false)) {
+        List<Widgets.Item> artists = localGroups(false);
+        for (Widgets.Item x : artists.subList(0, Math.min(40, artists.size()))) {
             x.type = "lartist";
             Widgets.addToRail(r3, Widgets.squareCard(m, x, Widgets.squareDp(), v -> m.openItem(x)), Ui.dp(Widgets.squareDp()));
         }
@@ -118,10 +120,36 @@ final class Pages {
             headerIcons = new int[0];
         }
 
+        private boolean isAlbum() { return group.uri != null && group.uri.startsWith("lalbum"); }
+
+        /** Sort for this kind of list: albums default to track order, everything else to recently added. */
+        private String sortKey() { return isAlbum() ? "lsort_album" : "lsort_list"; }
+        private String sort() { return MainActivity.prefs(main).getString(sortKey(), isAlbum() ? "track" : "added"); }
+
+        private List<Player.Track> sorted() {
+            List<Player.Track> l = new ArrayList<>(group.uri == null ? LocalMusic.songs : LocalMusic.tracksFor(group.uri));
+            final java.text.Collator col = java.text.Collator.getInstance();
+            switch (sort()) {
+                case "track":
+                    java.util.Collections.sort(l, (a, b) -> {
+                        if (a.disc != b.disc) return Integer.compare(a.disc, b.disc);
+                        // songs without a number go after the numbered ones, by title
+                        int ta = a.trackNo == 0 ? Integer.MAX_VALUE : a.trackNo, tb = b.trackNo == 0 ? Integer.MAX_VALUE : b.trackNo;
+                        return ta != tb ? Integer.compare(ta, tb) : col.compare(a.name, b.name);
+                    });
+                    break;
+                case "title": java.util.Collections.sort(l, (a, b) -> col.compare(a.name, b.name)); break;
+                case "artist": java.util.Collections.sort(l, (a, b) -> col.compare(a.artist, b.artist)); break;
+                case "duration": java.util.Collections.sort(l, (a, b) -> Long.compare(a.duration, b.duration)); break;
+                default: java.util.Collections.sort(l, (a, b) -> Long.compare(b.added, a.added));
+            }
+            return l;
+        }
+
         @Override void build() {
+            List<Player.Track> tracks = sorted();
             List<Widgets.Item> l = new ArrayList<>();
-            if (group.uri == null) l.addAll(localSongs());
-            else for (Player.Track t : LocalMusic.tracksFor(group.uri)) l.add(LocalMusic.item(t));
+            for (Player.Track t : tracks) l.add(LocalMusic.item(t));
             LinearLayout row = new LinearLayout(main);
             row.setPadding(Ui.dp(16), Ui.dp(8), Ui.dp(16), Ui.dp(10));
             row.addView(DetailPage.pillButton(main, Icons.PLAY_SMALL, main.getString(R.string.play), true, v -> main.playList(l, 0, null)),
@@ -132,10 +160,75 @@ final class Pages {
                 main.playList(l, (int) (Math.random() * l.size()), null);
             }), new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
             content.addView(row, Widgets.MW);
+            content.addView(sortBar(), Widgets.MW);
+            boolean numbers = isAlbum() && "track".equals(sort());
+            // several discs (merged "Disc 1 / Disc 2" albums, or disc tags): a heading before each disc
+            java.util.Set<Integer> discs = new java.util.TreeSet<>();
+            for (Player.Track t : tracks) discs.add(t.disc);
+            boolean discHeads = numbers && discs.size() > 1;
+            int lastDisc = Integer.MIN_VALUE;
             for (int i = 0; i < l.size(); i++) {
                 final int idx = i;
-                content.addView(Widgets.trackRow(main, l.get(i), 0, v -> main.playList(l, idx, null), null), Widgets.MW);
+                if (discHeads && tracks.get(i).disc != lastDisc) {
+                    lastDisc = tracks.get(i).disc;
+                    TextView dh = Ui.text(main, lastDisc > 0 ? main.getString(R.string.disc_n, lastDisc) : main.getString(R.string.disc_other), 15, Ui.semibold, Ui.text2());
+                    dh.setPadding(Ui.dp(20), Ui.dp(i == 0 ? 6 : 18), Ui.dp(20), Ui.dp(6));
+                    content.addView(dh, Widgets.MW);
+                }
+                LinearLayout r = (LinearLayout) Widgets.trackRow(main, l.get(i), 0, v -> main.playList(l, idx, null), null);
+                // album in track order: the track number sits at the very left, before the cover
+                Player.Track t = tracks.get(i);
+                if (numbers) {
+                    TextView n = Ui.text(main, t.trackNo > 0 ? String.valueOf(t.trackNo) : "–", 14, Ui.medium, Ui.text2());
+                    n.setGravity(Gravity.CENTER);
+                    r.addView(n, 0, new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(44)));
+                    r.setPadding(Ui.dp(8), r.getPaddingTop(), r.getPaddingRight(), r.getPaddingBottom());
+                }
+                content.addView(r, Widgets.MW);
             }
+        }
+
+        /** Sort chips, plus "set cover" / "reset cover" for albums. */
+        private View sortBar() {
+            MainActivity m = main;
+            android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(m);
+            hs.setHorizontalScrollBarEnabled(false);
+            LinearLayout bar = new LinearLayout(m);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setPadding(Ui.dp(16), Ui.dp(2), Ui.dp(16), Ui.dp(8));
+            hs.addView(bar);
+            String[][] opts = isAlbum()
+                    ? new String[][]{{"track", m.getString(R.string.sort_track)}, {"title", m.getString(R.string.sort_title)}, {"added", m.getString(R.string.sort_added)}, {"duration", m.getString(R.string.sort_duration)}}
+                    : new String[][]{{"added", m.getString(R.string.sort_added)}, {"title", m.getString(R.string.sort_title)}, {"artist", m.getString(R.string.sort_artist)}, {"duration", m.getString(R.string.sort_duration)}};
+            String cur = sort();
+            for (String[] o : opts) bar.addView(chip(o[1], o[0].equals(cur), v -> {
+                MainActivity.prefs(m).edit().putString(sortKey(), o[0]).apply();
+                rebuild();
+            }), chipLp());
+            if (isAlbum()) {
+                String albumId = group.uri;
+                bar.addView(chip(m.getString(R.string.cover_set), false, v -> m.pickCover(albumId)), chipLp());
+                if (LocalMusic.hasCover(albumId)) bar.addView(chip(m.getString(R.string.cover_reset), false, v -> {
+                    LocalMusic.clearCover(albumId);
+                }), chipLp());
+            }
+            return hs;
+        }
+
+        private static LinearLayout.LayoutParams chipLp() {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(34));
+            lp.rightMargin = Ui.dp(8);
+            return lp;
+        }
+
+        private TextView chip(String label, boolean on, View.OnClickListener click) {
+            TextView t = Ui.text(main, label, 14, on ? Ui.semibold : Ui.medium, on ? 0xFFFFFFFF : Ui.text());
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(Ui.dp(14), 0, Ui.dp(14), 0);
+            t.setBackground(Ui.round(on ? Ui.ACCENT : Ui.chip(), 100));
+            t.setOnClickListener(click);
+            Ui.press(t, 0.95f);
+            return t;
         }
     }
 
@@ -177,6 +270,26 @@ final class Pages {
     }
 
     // ------------------------------------------------------------------ Home
+    /** Default home order: "My playlists" sits right above "My charts". */
+    static final String[] HOME_DEFAULT = {"recent", "foryou", "artists", "playlists", "charts", "new"};
+    static final int[] HOME_TITLES = {R.string.home_recent, R.string.home_for_you, R.string.home_artists, R.string.home_playlists, R.string.home_charts, R.string.home_new};
+
+    /** The saved order, or the default if it is missing / from an older version (all six keys, each once). */
+    static String[] homeOrder(Context c) {
+        String s = MainActivity.prefs(c).getString("home_order", null);
+        if (s != null) {
+            String[] o = s.split(",");
+            java.util.Set<String> seen = new java.util.HashSet<>(java.util.Arrays.asList(o));
+            if (o.length == HOME_DEFAULT.length && seen.size() == o.length && seen.containsAll(java.util.Arrays.asList(HOME_DEFAULT))) return o;
+        }
+        return HOME_DEFAULT.clone();
+    }
+
+    static int homeTitle(String key) {
+        for (int i = 0; i < HOME_DEFAULT.length; i++) if (HOME_DEFAULT[i].equals(key)) return HOME_TITLES[i];
+        return R.string.tab_home;
+    }
+
     static final class HomePage extends Page {
         HomePage(MainActivity m) { super(m, m.getString(R.string.tab_home), true); }
 
@@ -186,7 +299,11 @@ final class Pages {
             if (!Spotify.loggedIn()) { connectPrompt(this, content); return; }
             int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
             int greet = h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening);
-            LinearLayout s1 = slot(), s2 = slot(), s3 = slot(), s4 = slot(), s5 = slot(), s6 = slot();
+            // sections in the user's order (Settings → Content → Home order)
+            Map<String, LinearLayout> slots = new java.util.HashMap<>();
+            for (String k : homeOrder(m)) slots.put(k, slot());
+            LinearLayout s1 = slots.get("recent"), s2 = slots.get("playlists"), s3 = slots.get("foryou"),
+                    s4 = slots.get("artists"), s5 = slots.get("charts"), s6 = slots.get("new");
             s1.addView(Widgets.section(m, m.getString(greet)));
             View sp = Widgets.spinner(m, 192);
             s1.addView(sp);
@@ -714,7 +831,8 @@ final class Pages {
         @Override void applyInsets() {
             super.applyInsets();
             // the artist photo runs edge-to-edge under the status bar and header
-            if ("artist".equals(item == null ? null : item.type)) content.setPadding(0, 0, main.sideInset(), main.bottomPadding());
+            // (on wide screens the photo is a card in the left column, below the header)
+            if ("artist".equals(item == null ? null : item.type) && !wideArtist()) content.setPadding(0, 0, main.sideInset(), main.bottomPadding());
         }
 
         @Override void build() {
@@ -835,7 +953,57 @@ final class Pages {
         // ------------------------------------------------------------ artist
         private LinearLayout topSlot;
 
+        /** Unfolded foldable / tablet: photo + name + buttons in a left column, songs and releases on the right. */
+        private boolean wideArtist() { return (Ui.screenW - main.sideInset() - main.contentInsetPx()) / Ui.density >= 600; }
+
+        private void buildArtistWide() {
+            MainActivity m = main;
+            int W = Ui.screenW - m.sideInset() - m.contentInsetPx();
+            int colW = (int) Math.min(W * 0.36f, Math.min(Ui.dp(400), Ui.screenH * 0.55f));
+            LinearLayout split = new LinearLayout(m);
+            split.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout left = new LinearLayout(m);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.setPadding(Ui.dp(20), Ui.dp(8), Ui.dp(8), 0);
+            FrameLayout card = new FrameLayout(m);
+            Img.ArtView photo = new Img.ArtView(m, 24);
+            photo.placeholderIcon = Icons.ARTIST;
+            photo.setUrl(Spotify.image(item.raw, 640));
+            card.addView(photo, new FrameLayout.LayoutParams(colW, colW));
+            card.setElevation(Ui.dpf(4));
+            card.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View v, android.graphics.Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(24)); }
+            });
+            left.addView(card, new LinearLayout.LayoutParams(colW, colW));
+            TextView name = Ui.text(m, item.title, 30, Ui.heavy, Ui.text());
+            name.setSingleLine(false);
+            name.setMaxLines(3);
+            name.setPadding(Ui.dp(4), Ui.dp(18), 0, Ui.dp(14));
+            left.addView(name, new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout btns = new LinearLayout(m);
+            btns.addView(pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true, v -> playAt(0, false)), new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+            btns.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
+            btns.addView(pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAt(0, true)), new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+            left.addView(btns, new LinearLayout.LayoutParams(colW, Ui.dp(46)));
+            split.addView(left, new LinearLayout.LayoutParams(colW + Ui.dp(28), ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout right = new LinearLayout(m);
+            right.setOrientation(LinearLayout.VERTICAL);
+            split.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            content.addView(split, Widgets.MW);
+            // every section below lands in the right-hand column
+            slotHost = right;
+            topSlot = slot();
+            topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
+            list = slot();
+            list.addView(Widgets.spinner(m, 120));
+            String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
+                    {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
+            for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
+            loadArtistTracks();
+        }
+
         private void buildArtist() {
+            if (wideArtist()) { buildArtistWide(); return; }
             MainActivity m = main;
             int W = Ui.screenW - m.sideInset() - m.contentInsetPx();
             int H = Math.min((int) (W * 0.92f), Ui.dp(480));

@@ -17,7 +17,7 @@ final class Icons {
             SHUFFLE = 16, LIST = 17, CHEVRON = 18, BACK = 19, CHECK = 20, REPEAT = 21, DEVICE = 22, NOTE = 23,
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
-            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46;
+            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -45,6 +45,28 @@ final class Icons {
         Path p = T;
         p.reset();
         switch (id) {
+            case VOLUME:
+            case VOLUME_LOW: {
+                // speaker cone, plus sound waves for the loud end
+                fill();
+                P.setPathEffect(ROUND1);
+                p.moveTo(3f, 9f); p.lineTo(7f, 9f); p.lineTo(12f, 4.5f); p.lineTo(12f, 19.5f); p.lineTo(7f, 15f); p.lineTo(3f, 15f); p.close();
+                c.drawPath(p, P);
+                stroke(1.9f);
+                R.set(10.5f, 8.5f, 17.5f, 15.5f);
+                c.drawArc(R, -50, 100, false, P);
+                if (id == VOLUME) { R.set(10f, 5f, 21.5f, 19f); c.drawArc(R, -52, 104, false, P); }
+                break;
+            }
+            case OUTPUT: {
+                // output device: speaker box with a play triangle cut into a ring (media output)
+                stroke(1.9f);
+                c.drawCircle(12f, 12f, 8.6f, P);
+                fill();
+                p.moveTo(10f, 8.2f); p.lineTo(16f, 12f); p.lineTo(10f, 15.8f); p.close();
+                c.drawPath(p, P);
+                break;
+            }
             case SIDEBAR: {
                 // window with a left pane (sidebar toggle)
                 stroke(1.9f);

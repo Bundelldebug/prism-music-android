@@ -48,6 +48,7 @@ final class Ui {
         glass = p.getBoolean("glass", true);
         glassT = readGlassT(p);
         unfoldTablet = "tablet".equals(p.getString("unfold_ui", "fold"));
+        gStyle = "oneui".equals(p.getString("player_style", "prism"));
         Typeface base = Typeface.SANS_SERIF;
         regular = Typeface.create(base, 400, false);
         medium = Typeface.create(base, 500, false);
@@ -94,6 +95,19 @@ final class Ui {
     static float glassT = 0.5f;
     /** Unfolded foldables: true = the tablet UI (top tabs, sidebar) instead of the foldable right-hand rail. */
     static boolean unfoldTablet;
+    /**
+     * App style. A (false) = the glass look; G (true) = frosted translucent pills: same shapes and springy motion,
+     * no refraction / lens / rim. Stored as player_style ("prism" = A, "oneui" = G).
+     */
+    static boolean gStyle;
+
+    /** G style fill: a neutral frosted tint, never so clear that the pill disappears; opaque fills stay opaque. */
+    static int gTint(int t) {
+        int a = t >>> 24;
+        int rgb = a >= 230 ? (t & 0xFFFFFF) : ((dark ? 0xFF2C2C2E : 0xFFFAFAFC) & 0xFFFFFF);
+        int ga = Math.max(a, dark ? 165 : 175);
+        return (ga << 24) | rgb;
+    }
     static int glassBlend(int opaque, int medium, int high) {
         return glassT >= 0.5f ? mix(medium, high, (glassT - 0.5f) * 2f) : mix(opaque, medium, glassT * 2f);
     }

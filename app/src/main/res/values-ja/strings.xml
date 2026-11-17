@@ -217,4 +217,23 @@
     <string name="eq_classical">クラシック</string>
     <string name="eq_electronic">エレクトロニック</string>
     <string name="eq_note">デバイス内の音楽に適用されます。Spotifyは保護されたウェブオーディオで再生されるため、イコライザーは適用されません。ビットパーフェクト出力中はイコライザーを含むすべての処理が行われません。</string>
+    <string name="sort_track">トラック番号</string>
+    <string name="sort_title">タイトル</string>
+    <string name="sort_artist">アーティスト</string>
+    <string name="sort_added">最近追加</string>
+    <string name="sort_duration">長さ</string>
+    <string name="cover_set">カバーを変更</string>
+    <string name="cover_reset">元のカバー</string>
+    <string name="home_recent">最近再生した項目</string>
+    <string name="home_order">ホームの表示順</string>
+    <string name="home_order_reset">デフォルトの順に戻す</string>
+    <string name="show_total">残り時間の代わりに曲の長さを表示</string>
+    <string name="player_style">スタイル</string>
+    <string name="player_style_prism">A スタイル（グラス）</string>
+    <string name="player_style_oneui">G スタイル</string>
+    <string name="disc_n">ディスク %1$d</string>
+    <string name="disc_other">その他</string>
+    <string name="merge_discs">複数ディスクのアルバムをまとめる</string>
+    <string name="merge_discs_note">「タイトル Disc 1」「タイトル CD2」「タイトル (ディスク 3)」のようにディスク番号の付いたアルバムを「タイトル」1つにまとめ、曲はディスク順に表示します。</string>
+    <string name="style_note">A：背景を屈折させるグラス。G：ぼかしのある半透明のピル、メディアプレーヤー風の再生画面とウェーブ再生バー。アニメーションはどちらも同じです。</string>
 </resources>

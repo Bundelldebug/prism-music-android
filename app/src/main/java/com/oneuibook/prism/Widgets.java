@@ -445,7 +445,8 @@ final class Widgets {
         float k = Ui.clamp(l, 0f, 1f);
         g.shapes(knob, knob.height() / 2f, null, 0, null, 0);
         g.alpha = 1f;
-        g.tint = Ui.mix(0xFFFFFFFF, Ui.dark ? 0x26FFFFFF : 0x14FFFFFF, k);
+        // G style: a plain white knob (no clearing lens); the size spring stays
+        g.tint = Ui.gStyle ? 0xFFFFFFFF : Ui.mix(0xFFFFFFFF, Ui.dark ? 0x26FFFFFF : 0x14FFFFFF, k);
         g.refractDp = 2f + 6f * k;
         g.edgeDp = 8f + 4f * k;
         g.outerDp = 4f;

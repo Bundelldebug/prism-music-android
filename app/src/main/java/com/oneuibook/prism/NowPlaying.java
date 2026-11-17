@@ -79,6 +79,10 @@ final class NowPlaying extends FrameLayout {
     private final LinearLayout chip;
     private final Icons.IconView star, more, prev, play, next, lyricsBtn, shuffleBtn, repeatBtn, queueBtn;
     private final Seek seek;
+    private final Icons.IconView outBtn;
+    private final VolumeBar vol;
+    /** Player style setting: false = Prism (default), true = One UI (media player card look). */
+    private boolean oneui;
     private final FrameLayout panelHost;
     private final LyricsView lyrics;
     private final ScrollView queueScroll;
@@ -147,6 +151,11 @@ final class NowPlaying extends FrameLayout {
         repeatBtn = icon(Icons.REPEAT, 24, 0xB3FFFFFF, v -> { Player.cycleRepeat(); Player.toast("track".equals(Player.repeat) ? R.string.repeat_one : ("context".equals(Player.repeat) ? R.string.repeat_all : R.string.repeat_off)); });
         queueBtn = icon(Icons.LIST, 24, 0xB3FFFFFF, v -> setPanel(panel == 2 ? 0 : 2));
         for (View v : new View[]{prev, play, next}) Ui.press(v, 0.82f);
+        // One UI style: output-device button at the end of the device row
+        outBtn = icon(Icons.OUTPUT, 24, 0xE6FFFFFF, v -> deviceMenu(chip));
+        outBtn.setVisibility(GONE);
+        vol = new VolumeBar(m);
+        content.addView(vol);
 
         panelHost = new FrameLayout(m);
         panelHost.setAlpha(0f);
@@ -293,6 +302,22 @@ final class NowPlaying extends FrameLayout {
         }
         float side = Ui.dpf(28);
         bottomY = H - Ui.navInset - Ui.dpf(38);
+        if (oneui) {
+            // G style: rounded cover → output-device row → title / artist → wave bar → controls → volume
+            float s1 = Ui.dpf(22);
+            float size = Math.min(W - s1 * 2, H * 0.42f);
+            artBig.set((W - size) / 2f, top + Ui.dpf(40), (W + size) / 2f, top + Ui.dpf(40) + size);
+            float sm = Ui.dpf(64);
+            artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
+            float devY = artBig.bottom + Ui.dpf(28);
+            titleBigY = devY + Ui.dpf(26);
+            titleSmallY = artSmall.centerY() - Ui.dpf(23);
+            seekY = titleBigY + Ui.dpf(86);
+            timesY = seekY + Ui.dpf(24);
+            ctrlY = Math.max(timesY + Ui.dpf(66), (timesY + bottomY) / 2f - Ui.dpf(30));
+            panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
+            return;
+        }
         float size = Math.min(W - side * 2, H * 0.44f);
         artBig.set((W - size) / 2f, top + Ui.dpf(46), (W + size) / 2f, top + Ui.dpf(46) + size);
         float sm = Ui.dpf(64);
@@ -328,9 +353,21 @@ final class NowPlaying extends FrameLayout {
             exact(elapsed, Ui.dp(70), Ui.dp(16));
             exact(remain, Ui.dp(70), Ui.dp(16));
             chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(180), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(20), MeasureSpec.EXACTLY));
-            exact(prev, Ui.dp(72), Ui.dp(72));
-            exact(play, Ui.dp(84), Ui.dp(84));
-            exact(next, Ui.dp(72), Ui.dp(72));
+            if (oneui) {
+                // round translucent buttons, like One UI's media player
+                exact(prev, Ui.dp(60), Ui.dp(60));
+                exact(play, Ui.dp(68), Ui.dp(68));
+                exact(next, Ui.dp(60), Ui.dp(60));
+                // the wave needs height above the line
+                exact(seek, colWi + Ui.dp(16), Ui.dp(40));
+                if (!wide) chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(220), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(30), MeasureSpec.EXACTLY));
+            } else {
+                exact(prev, Ui.dp(72), Ui.dp(72));
+                exact(play, Ui.dp(84), Ui.dp(84));
+                exact(next, Ui.dp(72), Ui.dp(72));
+            }
+            exact(outBtn, Ui.dp(40), Ui.dp(40));
+            exact(vol, colWi, Ui.dp(36));
             for (View v : new View[]{lyricsBtn, shuffleBtn, repeatBtn, queueBtn}) exact(v, Ui.dp(48), Ui.dp(48));
             exact(panelHost, wide ? (int) panelRect.width() : W, (int) panelRect.height());
         }
@@ -342,7 +379,9 @@ final class NowPlaying extends FrameLayout {
         @Override protected void onLayout(boolean ch, int l, int t, int r, int b) {
             int W = r - l, H = b - t;
             computeSlots(W, H);
+            outBtn.setVisibility(oneui && !wide ? VISIBLE : GONE);
             if (wide) { layoutWide(W); applyMode(); return; }
+            if (oneui) { layoutOneUi(W); applyMode(); return; }
             int side = Ui.dp(28);
             place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(14));
             place(title, side, (int) titleBigY);
@@ -366,8 +405,48 @@ final class NowPlaying extends FrameLayout {
             place(shuffleBtn, x0 + step - Ui.dp(24), by);
             place(repeatBtn, x0 + step * 2 - Ui.dp(24), by);
             place(queueBtn, x0 + span - Ui.dp(24), by);
+            placeVolume(side, (int) (ctrlY + Ui.dpf(48)), by);
             place(panelHost, 0, (int) panelRect.top);
             applyMode();
+        }
+
+        /** Volume bar between the controls and the bottom row, if there is room for it. */
+        private void placeVolume(int x, int minTop, int bottomRowTop) {
+            int h = vol.getMeasuredHeight();
+            int y = Math.max(minTop, (minTop + bottomRowTop - h) / 2);
+            boolean fits = y + h <= bottomRowTop - Ui.dp(4);
+            vol.setVisibility(fits ? VISIBLE : INVISIBLE);
+            place(vol, x, y);
+        }
+
+        /** One UI media player: cover card with the title on it, device row, seek, round controls, volume. */
+        private void layoutOneUi(int W) {
+            int side = Ui.dp(28);
+            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(14));
+            // output-device row right under the cover
+            int devY = (int) (artBig.bottom + Ui.dpf(28));
+            place(chip, side, devY - chip.getMeasuredHeight() / 2);
+            place(outBtn, W - side - Ui.dp(36), devY - Ui.dp(20));
+            // title / artist (outside the cover) with the like / more buttons, then the wave bar
+            place(title, side, (int) titleBigY);
+            place(artist, side, (int) titleBigY + Ui.dp(32));
+            place(star, W - side - Ui.dp(76), (int) titleBigY + Ui.dp(6));
+            place(more, W - side - Ui.dp(36), (int) titleBigY + Ui.dp(6));
+            place(seek, side - Ui.dp(8), (int) seekY - seek.getMeasuredHeight() + Ui.dp(10));
+            place(elapsed, side, (int) timesY);
+            place(remain, W - side - Ui.dp(70), (int) timesY);
+            int cy = (int) ctrlY, mid = W / 2;
+            int step = Math.min(Ui.dp(86), (W - side * 2) / 4);
+            place(shuffleBtn, side - Ui.dp(4), cy - Ui.dp(24));
+            place(prev, mid - step - Ui.dp(30), cy - Ui.dp(30));
+            place(play, mid - Ui.dp(34), cy - Ui.dp(34));
+            place(next, mid + step - Ui.dp(30), cy - Ui.dp(30));
+            place(repeatBtn, W - side - Ui.dp(44), cy - Ui.dp(24));
+            int by = (int) bottomY - Ui.dp(24);
+            place(lyricsBtn, side - Ui.dp(4), by);
+            place(queueBtn, W - side - Ui.dp(44), by);
+            placeVolume(side, cy + Ui.dp(48), by);
+            place(panelHost, 0, (int) panelRect.top);
         }
 
         private void place(View v, int x, int y) { v.layout(x, y, x + v.getMeasuredWidth(), y + v.getMeasuredHeight()); }
@@ -379,20 +458,22 @@ final class NowPlaying extends FrameLayout {
             place(title, x, (int) titleBigY);
             place(artist, x, (int) titleBigY + Ui.dp(30));
             place(star, x + cw - Ui.dp(84), (int) titleBigY + Ui.dp(6));
-            place(more, x + cw - Ui.dp(40), (int) titleBigY + Ui.dp(6));
+            place(seek, x - Ui.dp(8), (int) seekY - seek.getMeasuredHeight() / 2);
             place(seek, x - Ui.dp(8), (int) seekY - Ui.dp(13));
             place(elapsed, x, (int) timesY);
             place(remain, x + cw - Ui.dp(70), (int) timesY);
             place(chip, x + (cw - chip.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(2));
             int cy = (int) ctrlY, mid = x + cw / 2, step = Math.min(Ui.dp(96), cw / 4);
             place(shuffleBtn, mid - step * 2 - Ui.dp(24), cy - Ui.dp(24));
-            place(prev, mid - step - Ui.dp(36), cy - Ui.dp(36));
-            place(play, mid - Ui.dp(42), cy - Ui.dp(42));
-            place(next, mid + step - Ui.dp(36), cy - Ui.dp(36));
+            // centred on their slots whatever their size (round One UI buttons are smaller)
+            place(prev, mid - step - prev.getMeasuredWidth() / 2, cy - prev.getMeasuredHeight() / 2);
+            place(play, mid - play.getMeasuredWidth() / 2, cy - play.getMeasuredHeight() / 2);
+            place(next, mid + step - next.getMeasuredWidth() / 2, cy - next.getMeasuredHeight() / 2);
             place(repeatBtn, mid + step * 2 - Ui.dp(24), cy - Ui.dp(24));
             int by = (int) bottomY - Ui.dp(24);
             place(lyricsBtn, W - Ui.dp(40) - Ui.dp(48) * 2 - Ui.dp(12), by);
             place(queueBtn, W - Ui.dp(40) - Ui.dp(48), by);
+            placeVolume(x, cy + Ui.dp(52), by);
             place(panelHost, (int) panelRect.left, (int) panelRect.top);
         }
 
@@ -414,6 +495,8 @@ final class NowPlaying extends FrameLayout {
     private void applyMode() {
         if (wide) {
             // nothing moves in the two-pane layout: the pane simply shows lyrics or the queue
+            title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            artist.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             for (View v : new View[]{title, artist, star, more}) { v.setTranslationX(0); v.setTranslationY(0); v.setScaleX(1f); v.setScaleY(1f); }
             panelHost.setTranslationY(0);
             panelHost.setAlpha(panel == 0 ? 0f : 1f);
@@ -421,6 +504,15 @@ final class NowPlaying extends FrameLayout {
             return;
         }
         float k = mode;
+        // G style: the device row under the cover steps aside while lyrics / the queue are open
+        float rowA = oneui ? 1f - Ui.clamp(k * 1.6f, 0f, 1f) : 1f;
+        chip.setAlpha(rowA);
+        outBtn.setAlpha(rowA);
+        chip.setVisibility(rowA < 0.02f ? INVISIBLE : VISIBLE);
+        if (title.getGravity() != (Gravity.START | Gravity.CENTER_VERTICAL)) {
+            title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            artist.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        }
         float tx = Ui.lerp(0, artSmall.right + Ui.dpf(14) - Ui.dpf(28), k);
         float ty = Ui.lerp(0, titleSmallY - titleBigY, k);
         title.setPivotX(0); title.setPivotY(0);
@@ -476,7 +568,7 @@ final class NowPlaying extends FrameLayout {
         float ap = Ui.clamp(p * 1.08f, 0f, 1f);
         art.set(Ui.lerp(miniArt.left, mapped.left, ap), Ui.lerp(miniArt.top, mapped.top, ap),
                 Ui.lerp(miniArt.right, mapped.right, ap), Ui.lerp(miniArt.bottom, mapped.bottom, ap));
-        float artRadius = Ui.lerp(Ui.dpf(7), Ui.dpf(mode > 0.5f ? 8 : 12), ap);
+        float artRadius = Ui.lerp(Ui.dpf(7), Ui.dpf(mode > 0.5f ? 8 : (oneui && !wide ? 30 : 12)), ap);
 
         // soft shadow of the whole card while it is morphing
         clip.reset();
@@ -554,6 +646,7 @@ final class NowPlaying extends FrameLayout {
                 rect.top + h * 0.4f + (float) Math.sin(time * 0.05) * h * 0.06f);
         c.drawColor(pal[0]);
         c.drawBitmap(src, artBgM, artBgPaint);
+        drawPrismLight(c, time);
         if (vignette == null || vignetteW != w || vignetteH != h) {
             vignetteW = w; vignetteH = h;
             vignette = new RadialGradient(w / 2f, h / 2f, (float) Math.hypot(w, h) * 0.55f, new int[]{0x00000000, 0x00000000, 0x66000000},
@@ -593,6 +686,7 @@ final class NowPlaying extends FrameLayout {
             c.drawRect(rect, bgPaint);
         }
         bgPaint.setShader(null);
+        drawPrismLight(c, time);
         bgPaint.setColor(lightArt ? 0x4D000000 : 0x29000000);
         c.drawRect(rect, bgPaint);
         c.restoreToCount(sc);
@@ -620,6 +714,68 @@ final class NowPlaying extends FrameLayout {
             c.drawRoundRect(art, radius, radius, bgPaint);
             Icons.draw(c, Icons.NOTE, art.centerX(), art.centerY(), art.width() * 0.4f, 0x99FFFFFF);
         }
+        // One UI card: a soft dark fade at the bottom of the cover so the title on it stays readable
+        float sh = 0f;   // G style: the title sits below the cover now, no shade on the art
+        if (sh > 0.01f) {
+            float top = art.top + art.height() * 0.5f;
+            bgPaint.setShader(new LinearGradient(0, top, 0, art.bottom, 0x00000000, Ui.alpha(0xB3000000, sh), Shader.TileMode.CLAMP));
+            c.save();
+            c.clipRect(art.left, top, art.right, art.bottom);
+            c.drawRoundRect(art, radius, radius, bgPaint);
+            c.restore();
+            bgPaint.setShader(null);
+        }
+    }
+
+    // ---------------------------------------------------------------- prism light
+    private final Paint prismPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Matrix prismM = new Matrix();
+    private android.graphics.SweepGradient prismSweep;
+    private static final int[] SPECTRUM = {0xFFFF3B6B, 0xFFFF9F0A, 0xFFFFE14D, 0xFF34E89E, 0xFF22C3FF, 0xFF5E5CE6, 0xFFC86BFF, 0xFFFF3B6B};
+
+    /**
+     * What makes the moving background look like light through a prism: a slowly turning spectrum wash, plus three
+     * rainbow light shafts fanning out from one point and swinging gently, all added on top of the blurred cover.
+     */
+    private void drawPrismLight(Canvas c, double time) {
+        float w = rect.width(), h = rect.height();
+        if (w <= 0 || h <= 0) return;
+        if (prismSweep == null) prismSweep = new android.graphics.SweepGradient(0, 0, SPECTRUM, null);
+        prismPaint.setBlendMode(android.graphics.BlendMode.SCREEN);
+        // 1) spectrum wash, rotating about a point above the screen
+        float cx = rect.left + w * (0.5f + 0.18f * (float) Math.cos(time * 0.09)), cy = rect.top - h * 0.15f;
+        prismM.setRotate((float) Math.toDegrees(time * 0.12));
+        prismM.postTranslate(cx, cy);
+        prismSweep.setLocalMatrix(prismM);
+        prismPaint.setShader(prismSweep);
+        prismPaint.setAlpha(lightArt ? 40 : 56);
+        c.drawRect(rect, prismPaint);
+        // 2) three dispersed beams leaving the "prism" at the upper left
+        float ox = rect.left - w * 0.1f, oy = rect.top + h * 0.22f;
+        float len = (float) Math.hypot(w, h) * 1.3f;
+        for (int i = 0; i < 3; i++) {
+            double ang = Math.toRadians(14 + i * 13 + 6 * Math.sin(time * 0.21 + i * 1.7));
+            float spread = (float) Math.toRadians(5.5 + 1.5 * Math.sin(time * 0.33 + i));
+            float ex1 = ox + (float) Math.cos(ang - spread) * len, ey1 = oy + (float) Math.sin(ang - spread) * len;
+            float ex2 = ox + (float) Math.cos(ang + spread) * len, ey2 = oy + (float) Math.sin(ang + spread) * len;
+            Path beam = new Path();
+            beam.moveTo(ox, oy);
+            beam.lineTo(ex1, ey1);
+            beam.lineTo(ex2, ey2);
+            beam.close();
+            // colour runs across the beam (red edge → violet edge), fading out along its length
+            float mx = (ex1 + ex2) / 2f, my = (ey1 + ey2) / 2f;
+            prismPaint.setShader(new LinearGradient(ex1, ey1, ex2, ey2, SPECTRUM, null, Shader.TileMode.CLAMP));
+            prismPaint.setAlpha((int) ((lightArt ? 36 : 54) * (0.75f + 0.25f * (float) Math.sin(time * 0.5 + i * 2.1))));
+            c.save();
+            c.clipPath(beam);
+            Paint fade = prismPaint;
+            c.drawRect(rect, fade);
+            c.restore();
+            beam.reset();
+        }
+        prismPaint.setShader(null);
+        prismPaint.setBlendMode(null);
     }
 
     // ---------------------------------------------------------------- state
@@ -692,7 +848,35 @@ final class NowPlaying extends FrameLayout {
         v.animate().alpha(0f).setDuration(120).withEndAction(() -> { v.setText(s); v.animate().alpha(1f).setDuration(220).start(); }).start();
     }
 
+    /** Switches between the Prism and One UI player looks (Settings → Playback → Player style). */
+    void applyStyle() {
+        boolean o = "oneui".equals(MainActivity.prefs(getContext()).getString("player_style", "prism"));
+        if (o == oneui && outBtn.getTag() != null) return;
+        outBtn.setTag(Boolean.TRUE);
+        oneui = o;
+        seek.oneui = o;
+        outBtn.setVisibility(o && !wide ? VISIBLE : GONE);
+        // One UI: prev / play / next sit in round translucent buttons; device name is a plain label
+        for (Icons.IconView v : new Icons.IconView[]{prev, next}) v.setBackground(o ? Ui.round(0x29FFFFFF, 100) : null);
+        play.setBackground(o ? Ui.round(0x29FFFFFF, 100) : null);
+        prev.sizeDp = next.sizeDp = o ? 28 : 40;
+        play.sizeDp = o ? 32 : 46;
+        chip.setBackground(o ? null : Ui.round(0x24FFFFFF, 6));
+        chip.getChildAt(0).setVisibility(o ? GONE : VISIBLE);
+        chipText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 15 : 11);
+        chipText.setTextColor(o ? 0xE6FFFFFF : 0xB3FFFFFF);
+        chipText.setTypeface(o ? Ui.semibold : Ui.medium);
+        title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 21);
+        artist.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 17 : 19);
+        artist.setTextColor(0xB3FFFFFF);
+        Player.Track t = Player.track;
+        if (t != null) title.setText(t.name);
+        content.requestLayout();
+        invalidate();
+    }
+
     private void onPlayer() {
+        applyStyle();
         play.set(Player.playing ? Icons.PAUSE : Icons.PLAY, getVisibility() == VISIBLE);
         star.set(Player.liked ? Icons.STAR_FILL : Icons.STAR, getVisibility() == VISIBLE);
         star.setColor(Player.liked ? Ui.ACCENT : 0xFFFFFFFF);
@@ -704,20 +888,27 @@ final class NowPlaying extends FrameLayout {
         repeatBtn.setBackground(rep ? Ui.round(0x26FFFFFF, 24) : null);
         star.setVisibility(Player.local() ? INVISIBLE : VISIBLE);
         chipText.setText(Player.outputName(getContext()));
+        showTotal = Settings.pref(getContext(), "show_total", false);
         boolean shrink = Settings.pref(getContext(), "shrink_paused", true);
         artScale.to(Player.playing || !shrink ? 1f : 0.86f);
         tick();
     }
 
+    /** Player-screen setting: show the full length on the right instead of the time left. */
+    private boolean showTotal;
+
     private void tick() {
         Player.Track t = Player.track;
         if (t == null) return;
+        // hardware volume keys change the level too: follow it while the player is open
+        if (vol != null) vol.sync();
         long pos = Player.position();
         if (!seek.scrubbing) {
             seek.frac = t.duration > 0 ? pos / (float) t.duration : 0f;
             seek.invalidate();
             elapsed.setText(Ui.time(pos));
-            remain.setText("-" + Ui.time(Math.max(0, t.duration - pos)));
+            // either the time left (-2:48) or the song's full length (3:14), per the player-screen setting
+            remain.setText(showTotal ? Ui.time(t.duration) : "-" + Ui.time(Math.max(0, t.duration - pos)));
         }
         if (panel == 1) lyrics.setPosition(pos);
     }
@@ -1028,7 +1219,10 @@ final class NowPlaying extends FrameLayout {
             thick.onUpdate = this::invalidate;
         }
 
+        boolean oneui;
+
         @Override protected void onDraw(Canvas c) {
+            if (oneui) { drawOneUi(c); return; }
             float k = thick.value;
             float pad = Ui.dpf(8) - Ui.dpf(6) * k;
             float h = Ui.lerp(Ui.dpf(6), Ui.dpf(11), k);
@@ -1044,7 +1238,7 @@ final class NowPlaying extends FrameLayout {
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {
-            float pad = Ui.dpf(8);
+            float pad = Ui.dpf(oneui ? 10 : 8);
             float f = Ui.clamp((e.getX() - pad) / (getWidth() - pad * 2), 0f, 1f);
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -1069,13 +1263,165 @@ final class NowPlaying extends FrameLayout {
             return true;
         }
 
+        // ---- G style: wave seek bar (port of OneTaskBar 9.0 MediaWave) ----
+        private float waveK;                 // wave strength 0..1, eases with play / pause (0.26 s)
+        private long waveLast;
+        private final long waveT0 = SystemClock.uptimeMillis();
+        private final Path wavePath = new Path();
+
+        /** Height of one wave layer at t (0..1 along the played part) and its slope, as in MediaWave.Height. */
+        private static float waveHeight(double t, double phase, int layer, float[] slope) {
+            double angle = Math.PI * t, frequency = Math.PI * (4.2 + layer * .6);
+            double osc = frequency * t - phase * (1 + layer * .12) + layer * 1.8;
+            double env = Math.sin(angle), level = .71 + .29 * Math.sin(osc);
+            slope[0] = (float) (Math.PI * Math.sin(2 * angle) * level + env * env * .29 * frequency * Math.cos(osc));
+            return (float) (env * env * level);
+        }
+
+        /** Closed wave shape over [x0, x0+length], rising from the baseline, cubic segments keeping tangents. */
+        private void waveShape(Path out, float x0, float length, float base, float amp, double phase, int layer) {
+            out.reset();
+            int samples = Math.max(16, Math.min(64, (int) Math.ceil(length / Ui.dpf(20))));
+            float step = 1f / samples;
+            float[] s = new float[1];
+            waveHeight(0, phase, layer, s);
+            float prevSlope = s[0], px = x0, py = base;
+            out.moveTo(px, py);
+            for (int i = 1; i <= samples; i++) {
+                float t = i * step;
+                float lv = waveHeight(t, phase, layer, s);
+                float nx = x0 + length * t, ny = base - amp * lv;
+                float c1x = px + length * step / 3f, c1y = Ui.clamp(py - amp * prevSlope * step / 3f, base - amp, base);
+                float c2x = nx - length * step / 3f, c2y = Ui.clamp(ny + amp * s[0] * step / 3f, base - amp, base);
+                out.cubicTo(c1x, c1y, c2x, c2y, nx, ny);
+                px = nx; py = ny; prevSlope = s[0];
+            }
+            out.close();
+        }
+
+        /** G style bar: grey track, accent played part with three rolling translucent waves, glowing round thumb. */
+        private void drawOneUi(Canvas c) {
+            long now = SystemClock.uptimeMillis();
+            float dt = waveLast == 0 ? 0 : (now - waveLast) / 1000f;
+            waveLast = now;
+            float target = Player.playing && !scrubbing ? 1f : 0f;
+            waveK += (target - waveK) * Math.min(1f, dt / 0.26f * 1.6f);
+            if (Math.abs(target - waveK) < 0.002f) waveK = target;
+            float pad = Ui.dpf(10);
+            float span = Math.max(0, getWidth() - pad * 2);
+            float y = Math.max(Ui.dpf(6), getHeight() - Ui.dpf(7));
+            float len = span * Ui.clamp(frac, 0f, 1f), x = pad + len;
+            int acc = Ui.ACCENT;
+            int light = Ui.mix(acc, 0xFFFFFFFF, 0.5f);
+            // track
+            p.setColor(0x608E9695);
+            r.set(pad, y - Ui.dpf(1.6f), pad + span, y + Ui.dpf(1.6f));
+            c.drawRoundRect(r, Ui.dpf(1.6f), Ui.dpf(1.6f), p);
+            // waves over the played part
+            if (waveK > 0.001f && len > 0) {
+                double phase = (now - waveT0) / 1000.0 * 2.7;
+                int[] cols = {Ui.alpha(light, 112 / 255f), Ui.alpha(0xFFFFFFFF, 144 / 255f), Ui.alpha(acc, 144 / 255f)};
+                for (int layer = 0; layer < 3; layer++) {
+                    float amp = Math.max(0, y - Ui.dpf(3)) * (1 - layer * .14f) * waveK;
+                    waveShape(wavePath, pad, len, y, amp, phase, layer);
+                    p.setColor(cols[layer]);
+                    c.drawPath(wavePath, p);
+                }
+            }
+            if (len > 0) {
+                p.setColor(acc);
+                r.set(pad, y - Ui.dpf(1.8f), x, y + Ui.dpf(1.8f));
+                c.drawRoundRect(r, Ui.dpf(1.8f), Ui.dpf(1.8f), p);
+            }
+            // thumb: soft glow rings, white disc, accent core
+            float grow = 1f + 0.25f * thick.value;
+            for (int i = 0; i < 3; i++) {
+                p.setColor(Ui.alpha(acc, (i == 0 ? 15 : i == 1 ? 36 : 64) / 255f));
+                c.drawCircle(x, y, Ui.dpf(10 - i * 2) * grow, p);
+            }
+            p.setColor(0xFFFFFFFF);
+            c.drawCircle(x, y, Ui.dpf(6) * grow, p);
+            p.setColor(acc);
+            c.drawCircle(x, y, Ui.dpf(4.4f) * grow, p);
+            // keep rolling while playing (or while the waves settle), only when on screen
+            if ((waveK > 0.001f || target > 0) && isShown()) postInvalidateOnAnimation();
+            else waveLast = 0;
+        }
+
         private void updateTimes() {
             ViewGroup parent = (ViewGroup) getParent();
             if (parent == null) return;
             NowPlaying owner = (NowPlaying) parent.getParent();
             long pos = (long) (frac * Player.track.duration);
             owner.elapsed.setText(Ui.time(pos));
-            owner.remain.setText("-" + Ui.time(Player.track.duration - pos));
+            owner.remain.setText(owner.showTotal ? Ui.time(Player.track.duration) : "-" + Ui.time(Player.track.duration - pos));
+        }
+    }
+
+    // ================================================================ volume bar
+    /**
+     * Media volume: this phone's media stream (device music, in-app Spotify) or the Spotify Connect device's volume.
+     * Quiet speaker · bar · loud speaker, drag or tap anywhere on it.
+     */
+    private final class VolumeBar extends View {
+        private float value = -1f;
+        private boolean dragging;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+
+        VolumeBar(Context c) { super(c); }
+
+        void sync() {
+            if (dragging) return;
+            float v = Player.volume01(getContext());
+            if (v != value) { value = v; invalidate(); }
+        }
+
+        private float left() { return Ui.dpf(34); }
+        private float right() { return getWidth() - Ui.dpf(34); }
+
+        @Override protected void onDraw(Canvas c) {
+            float cy = getHeight() / 2f;
+            boolean known = value >= 0;
+            int dim = known ? 0xB3FFFFFF : 0x4DFFFFFF;
+            Icons.draw(c, Icons.VOLUME_LOW, Ui.dpf(12), cy, Ui.dpf(18), dim);
+            Icons.draw(c, Icons.VOLUME, getWidth() - Ui.dpf(12), cy, Ui.dpf(20), dim);
+            float h = Ui.dpf(dragging ? 7 : 5);
+            r.set(left(), cy - h / 2, right(), cy + h / 2);
+            p.setColor(0x3DFFFFFF);
+            c.drawRoundRect(r, h / 2, h / 2, p);
+            if (!known) return;
+            r.right = left() + (right() - left()) * value;
+            p.setColor(oneui ? Ui.ACCENT : 0xD9FFFFFF);
+            c.drawRoundRect(r, h / 2, h / 2, p);
+            if (oneui || dragging) {
+                p.setColor(0xFFFFFFFF);
+                c.drawCircle(r.right, cy, Ui.dpf(dragging ? 10 : 8), p);
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (value < 0) return false;
+            float v = Ui.clamp((e.getX() - left()) / (right() - left()), 0f, 1f);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    dragging = true;
+                    // fall through
+                case MotionEvent.ACTION_MOVE:
+                    value = v;
+                    Player.setVolume01(getContext(), v, false);
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    value = v;
+                    Player.setVolume01(getContext(), v, true);
+                    dragging = false;
+                    invalidate();
+                    return true;
+            }
+            return true;
         }
     }
 

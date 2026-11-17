@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.1";
+    static final String VERSION = "9.5.2";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -146,10 +146,12 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         setLightStatus(true);
 
         if (Spotify.loggedIn() && Spotify.userName == null) Spotify.loadProfile(null);
-        if (isLocalSource()) LocalMusic.load(this, this::reloadAll);
+        // on-device library is read once in the background even while Spotify is the source, so switching is instant
+        if (!LocalMusic.loaded && LocalMusic.hasPermission(this)) LocalMusic.load(this, () -> { if (isLocalSource()) reloadAll(); });
         startSpotifyPlayer();
         // keep the media session / foreground service in step with every playback change
         LocalMusic.app = getApplicationContext();
+        LocalMusic.artChanged = this::onAlbumArtChanged;
         // once per process: the notification must follow playback even after this window is gone
         if (!serviceHooked) {
             serviceHooked = true;
@@ -659,9 +661,43 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     boolean isLocalSource() { return isLocalSource(this); }
 
+    // ------------------------------------------------------------------ custom album covers (device music)
+    private String coverAlbum;
+
+    void pickCover(String albumKey) {
+        coverAlbum = albumKey;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+        try { startActivityForResult(i, 77); } catch (Exception e) { Toast.makeText(this, R.string.action_failed, Toast.LENGTH_SHORT).show(); }
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code, result, data);
+        if (code != 77 || result != RESULT_OK || data == null || data.getData() == null || coverAlbum == null) return;
+        String album = coverAlbum;
+        Uri img = data.getData();
+        Spotify.IO.execute(() -> {
+            // decode + save off the main thread; the swap on screen happens through LocalMusic.artChanged
+            boolean ok = LocalMusic.setCover(album, img);
+            if (!ok) Spotify.MAIN.post(() -> Toast.makeText(this, R.string.action_failed, Toast.LENGTH_SHORT).show());
+        });
+    }
+
+    /**
+     * An album's cover changed: swap the images in place on every page (home, library, album, mini bar…) and redo
+     * only the page in front (its cover buttons change). Rebuilding every page at once is what froze the home screen.
+     */
+    void onAlbumArtChanged(String from, String to) {
+        Img.replaceArt(root, from, to);
+        Page p = currentPage();
+        if (p instanceof Pages.LocalListPage) p.rebuild();
+    }
+
     void setSource(String s) {
         prefs(this).edit().putString("source", s).apply();
         if ("local".equals(s) && !LocalMusic.hasPermission(this)) LocalMusic.requestPermission(this);
+        // not read yet (e.g. permission granted after start): read it now and show it as soon as it is in
+        else if ("local".equals(s) && !LocalMusic.loaded) LocalMusic.load(this, () -> { if (isLocalSource()) reloadAll(); });
         reloadAll();
     }
 
@@ -754,9 +790,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     /** Opens spotify:album:… / spotify:artist:… after fetching its header data. */
     void openUri(String uri, String name) {
         if (uri == null) return;
-        if (uri.startsWith("lalbum:") || uri.startsWith("lartist:")) {
+        if (uri.startsWith("lalbum") || uri.startsWith("lartist:")) {
             List<Player.Track> l = LocalMusic.tracksFor(uri);
-            if (!l.isEmpty()) openItem(LocalMusic.group(uri, l, uri.startsWith("lalbum:")));
+            if (!l.isEmpty()) openItem(LocalMusic.group(uri, l, uri.startsWith("lalbum")));
             return;
         }
         String[] p = uri.split(":");

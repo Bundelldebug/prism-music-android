@@ -226,7 +226,10 @@ final class Glass {
                 float ox = tmp.left - pad, oy = tmp.top - pad;
                 node.setPosition(0, 0, w, h);
                 RenderEffect fx = null;
-                float br = blur ? Ui.dpf(blurDp) : 0f;
+                // G style: no refraction, rim or lens — a frosted, translucent pill (strong blur + tint)
+                boolean g = Ui.gStyle;
+                boolean useShader = shader != null && Glass.shadersOk && !g;
+                float br = g ? Ui.dpf(Math.max(blurDp, 20f)) : (blur ? Ui.dpf(blurDp) : 0f);
                 if (br > 0.5f) {
                     if (br != lastBlur || blurEffect == null) {
                         blurEffect = RenderEffect.createBlurEffect(br, br, Shader.TileMode.CLAMP);
@@ -234,7 +237,7 @@ final class Glass {
                     }
                     fx = blurEffect;
                 }
-                if (shader != null && Glass.shadersOk) {
+                if (useShader) {
                     // rebuild the effect only when something that feeds the shader actually changed:
                     // avoids allocating effects every frame while the page scrolls underneath
                     int sig = signature(-ox, -oy, br);
@@ -247,6 +250,8 @@ final class Glass {
                     }
                 } else {
                     node.setRenderEffect(fx);
+                    lastSig = 0;
+                    cachedFx = null;
                 }
                 RecordingCanvas rc = node.beginRecording(w, h);
                 try {
@@ -262,15 +267,15 @@ final class Glass {
                     node.endRecording();
                 }
                 canvas.save();
-                if (shader == null || !Glass.shadersOk) {
+                if (!useShader) {
                     canvas.clipPath(path);
                 }
                 canvas.translate(ox, oy);
-                if (shader == null || !Glass.shadersOk) {
+                if (!useShader) {
                     node.setAlpha(alpha);
                     canvas.drawRenderNode(node);
                     canvas.restore();
-                    fill.setColor(Ui.alpha(tint, alpha));
+                    fill.setColor(Ui.alpha(g ? Ui.gTint(tint) : tint, alpha));
                     canvas.drawPath(path, fill);
                 } else {
                     node.setAlpha(1f);

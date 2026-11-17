@@ -49,6 +49,21 @@ final class Img {
 
     static Bitmap cached(String url) { return url == null ? null : MEM.get(url); }
 
+    /** Warms the cache (background decode) so a later setUrl shows the image at once. */
+    static void prefetch(String url) { load(url, b -> {}); }
+
+    /** Swaps every artwork view showing {@code from} to {@code to}, anywhere under {@code v} (no rebuilds). */
+    static void replaceArt(View v, String from, String to) {
+        if (v instanceof ArtView) {
+            ArtView a = (ArtView) v;
+            if (from.equals(a.url)) a.setUrl(to);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) replaceArt(g.getChildAt(i), from, to);
+        }
+    }
+
     static void load(String url, Consumer<Bitmap> cb) {
         if (url == null || url.isEmpty()) { cb.accept(null); return; }
         Bitmap b = MEM.get(url);
@@ -62,10 +77,8 @@ final class Img {
         }
         POOL.execute(() -> {
             Bitmap bm = null;
-            if (url.startsWith("content://")) {
-                // on-device song: embedded album art via MediaStore thumbnails
-                try { bm = appContext.getContentResolver().loadThumbnail(android.net.Uri.parse(url), new android.util.Size(640, 640), null); }
-                catch (Exception ignored) {}
+            if (url.startsWith("content://") || url.startsWith("file://")) {
+                bm = localArt(url);
                 final Bitmap res = bm;
                 if (res != null) MEM.put(url, res);
                 Spotify.MAIN.post(() -> {
@@ -109,6 +122,38 @@ final class Img {
         });
     }
 
+    /**
+     * On-device artwork. "file://…?v=…" = a cover the user picked; "content://…albums/ID#song=URI" = the album's
+     * MediaStore thumbnail (one decode per album), else that song's embedded picture; plain content URI = a song.
+     */
+    private static Bitmap localArt(String url) {
+        try {
+            if (url.startsWith("file://")) {
+                String path = url.substring(7);
+                int q = path.indexOf('?');
+                if (q >= 0) path = path.substring(0, q);
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, o);
+                int s = 1;
+                while (Math.max(o.outWidth, o.outHeight) / (s * 2) >= 640) s *= 2;
+                BitmapFactory.Options d = new BitmapFactory.Options();
+                d.inSampleSize = s;
+                return BitmapFactory.decodeFile(path, d);
+            }
+            String main = url, song = null;
+            int h = url.indexOf("#song=");
+            if (h >= 0) { main = url.substring(0, h); song = url.substring(h + 6); }
+            android.util.Size sz = new android.util.Size(640, 640);
+            try {
+                Bitmap b = appContext.getContentResolver().loadThumbnail(android.net.Uri.parse(main), sz, null);
+                if (b != null) return b;
+            } catch (Exception ignored) {}
+            if (song != null) return appContext.getContentResolver().loadThumbnail(android.net.Uri.parse(song), sz, null);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private static String hash(String s) {
         try {
             byte[] d = MessageDigest.getInstance("SHA-1").digest(s.getBytes("UTF-8"));
@@ -146,7 +191,7 @@ final class Img {
     /** Rounded, center-cropped artwork with a placeholder and a short fade-in. */
     static class ArtView extends View {
         private Bitmap bmp;
-        private String url;
+        String url;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Paint ph = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();

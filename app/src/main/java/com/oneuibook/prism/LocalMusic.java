@@ -27,6 +27,7 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -57,14 +58,25 @@ final class LocalMusic {
 
     static boolean isLocal(Player.Track t) { return t != null && t.uri != null && t.uri.startsWith("content://"); }
 
-    /** Loads the library on a background thread. */
+    private static boolean loading;
+    private static final List<Runnable> afterLoad = new ArrayList<>();
+
+    /**
+     * Loads the library on a background thread (one MediaStore query, no per-file work). Calls made while a load is
+     * running just wait for it instead of starting another.
+     */
     static void load(Context c, Runnable done) {
         app = c.getApplicationContext();
         if (!hasPermission(c)) { if (done != null) done.run(); return; }
+        if (done != null) afterLoad.add(done);
+        if (loading) return;
+        loading = true;
         Spotify.IO.execute(() -> {
             List<Player.Track> l = new ArrayList<>();
             String[] cols = {MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST,
-                    MediaStore.Audio.Media.ALBUM, MediaStore.Audio.Media.ALBUM_ID, MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.DATE_ADDED};
+                    MediaStore.Audio.Media.ALBUM, MediaStore.Audio.Media.ALBUM_ID, MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.TRACK, MediaStore.Audio.Media.ALBUM_ARTIST};
+            boolean merge = mergeDiscs(app);
             try (Cursor cur = app.getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols,
                     MediaStore.Audio.Media.IS_MUSIC + "!=0", null, MediaStore.Audio.Media.DATE_ADDED + " DESC")) {
                 if (cur != null) while (cur.moveToNext()) {
@@ -77,21 +89,188 @@ final class LocalMusic {
                     String ar = cur.getString(2);
                     t.artist = ar == null || "<unknown>".equals(ar) ? app.getString(R.string.unknown_artist) : ar;
                     t.album = nz(cur.getString(3), "");
-                    t.albumUri = "lalbum:" + cur.getLong(4);
+                    t.albumId = cur.getLong(4);
                     t.artistUri = "lartist:" + t.artist;
-                    t.art = t.uri;
-                    t.artSmall = t.uri;
                     t.duration = cur.getLong(5);
+                    t.added = cur.getLong(6);
+                    int tr = cur.isNull(7) ? 0 : cur.getInt(7);
+                    t.disc = tr >= 1000 ? tr / 1000 : 0;     // MediaStore packs disc × 1000 + track
+                    t.trackNo = tr % 1000;
+                    String aa = cur.isNull(8) ? null : cur.getString(8);
+                    keyAlbum(t, aa, merge);
                     l.add(t);
                 }
             } catch (Exception ignored) {}
+            pickRepresentatives(l);
+            for (Player.Track t : l) setArt(t);
             Spotify.MAIN.post(() -> {
                 songs.clear();
                 songs.addAll(l);
                 loaded = true;
-                if (done != null) done.run();
+                loading = false;
+                List<Runnable> cbs = new ArrayList<>(afterLoad);
+                afterLoad.clear();
+                for (Runnable r : cbs) r.run();
             });
         });
+    }
+
+    /** Reads the library again (e.g. after the disc-merge setting changed). */
+    static void reload(Context c, Runnable done) {
+        loaded = false;
+        load(c, done);
+    }
+
+    // ---- multi-disc albums: "Name Disc 1" + "Name Disc 2" → one album "Name" ----
+    static boolean mergeDiscs(Context c) { return MainActivity.prefs(c).getBoolean("merge_discs", true); }
+
+    /**
+     * Trailing disc marker: "Disc 2", "Disk2", "CD 1", "디스크 2", "Disc II", optionally in () [] or after
+     * a dash / colon. Group 1 = the album name without it, group 2 = the number (digits or I–X).
+     */
+    static final java.util.regex.Pattern DISC = java.util.regex.Pattern.compile(
+            "^(.*?)[\\s\\-–—:_,]*[\\(\\[]?\\s*(?:disc|disk|cd|디스크)\\s*[\\.#]?\\s*(\\d{1,2}|[ivx]{1,4})\\s*[\\)\\]]?\\s*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE);
+
+    /** {base name, disc number} if the album name ends in a disc marker, else null. */
+    static Object[] splitDisc(String album) {
+        if (album == null) return null;
+        java.util.regex.Matcher m = DISC.matcher(album.trim());
+        if (!m.matches()) return null;
+        String base = m.group(1).trim();
+        if (base.isEmpty()) return null;
+        String n = m.group(2);
+        int disc;
+        if (n.matches("\\d+")) disc = Integer.parseInt(n);
+        else disc = roman(n.toUpperCase(java.util.Locale.ROOT));
+        return disc <= 0 ? null : new Object[]{base, disc};
+    }
+
+    private static int roman(String s) {
+        int total = 0, prev = 0;
+        for (int i = s.length() - 1; i >= 0; i--) {
+            char ch = s.charAt(i);
+            int v = ch == 'I' ? 1 : ch == 'V' ? 5 : ch == 'X' ? 10 : 0;
+            if (v < prev) total -= v; else { total += v; prev = v; }
+        }
+        return total;
+    }
+
+    /**
+     * Album key used for grouping. Plain albums: "lalbum:<MediaStore id>". Disc albums (merging on): one key for the
+     * base name + album artist, so every disc lands in the same album; the disc number fills in if the tags lack it.
+     */
+    static void keyAlbum(Player.Track t, String albumArtist, boolean merge) {
+        Object[] d = merge ? splitDisc(t.album) : null;
+        if (d == null) {
+            t.albumUri = "lalbum:" + t.albumId;
+            t.albumGroup = null;
+            return;
+        }
+        String base = (String) d[0];
+        if (t.disc == 0) t.disc = (Integer) d[1];
+        String who = albumArtist == null || albumArtist.isEmpty() || "<unknown>".equals(albumArtist) ? "" : albumArtist;
+        t.albumUri = "lalbumx:" + base.toLowerCase(java.util.Locale.ROOT) + "\u0001" + who.toLowerCase(java.util.Locale.ROOT);
+        t.albumGroup = base;
+    }
+
+    /** Album key → the track whose artwork stands for the album (first disc, first track). */
+    private static final Map<String, Player.Track> reps = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void pickRepresentatives(List<Player.Track> l) {
+        reps.clear();
+        for (Player.Track t : l) {
+            Player.Track r = reps.get(t.albumUri);
+            if (r == null || order(t) < order(r)) reps.put(t.albumUri, t);
+        }
+    }
+
+    private static long order(Player.Track t) {
+        return (t.disc == 0 ? 0 : t.disc) * 10000L + (t.trackNo == 0 ? 9999 : t.trackNo);
+    }
+
+    // ---- artwork: one image per album (not per song), or the user's own cover ----
+    /**
+     * Where the user's cover for an album is kept. Plain albums keep the old "<id>.jpg" name (covers picked in
+     * earlier versions still work); merged disc albums use a hash of their key.
+     */
+    static File coverFile(String albumKey) {
+        String name;
+        if (albumKey.startsWith("lalbum:")) name = albumKey.substring(7) + ".jpg";
+        else name = "x_" + Integer.toHexString(albumKey.hashCode()) + "_" + albumKey.length() + ".jpg";
+        return new File(new File(app.getFilesDir(), "covers"), name);
+    }
+
+    /**
+     * Album art key for the image pipeline: the user's cover file if set, else the MediaStore thumbnail of the
+     * album's representative song (one key, decoded once, shared by every song of the album, all discs included).
+     */
+    static void setArt(Player.Track t) {
+        File f = coverFile(t.albumUri);
+        String a;
+        if (f.exists()) a = "file://" + f.getAbsolutePath() + "?v=" + f.lastModified();
+        else {
+            Player.Track r = reps.get(t.albumUri);
+            if (r == null) r = t;
+            a = ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, r.albumId) + "#song=" + r.uri;
+        }
+        t.art = a;
+        t.artSmall = a;
+    }
+
+    /** Called on the main thread with (old art key, new art key) when an album's cover changes. */
+    static java.util.function.BiConsumer<String, String> artChanged;
+
+    /** Uses an image the user picked as the cover of the whole album (every song, the player and the notification). */
+    static boolean setCover(String albumKey, Uri image) {
+        try {
+            File out = coverFile(albumKey);
+            out.getParentFile().mkdirs();
+            android.graphics.ImageDecoder.Source src = android.graphics.ImageDecoder.createSource(app.getContentResolver(), image);
+            Bitmap b = android.graphics.ImageDecoder.decodeBitmap(src, (dec, info, s) -> {
+                int max = Math.max(info.getSize().getWidth(), info.getSize().getHeight());
+                if (max > 1200) dec.setTargetSampleSize(Math.max(1, max / 1200));
+                dec.setAllocator(android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE);
+            });
+            // square centre crop, like every other cover
+            int s = Math.min(b.getWidth(), b.getHeight());
+            Bitmap sq = Bitmap.createBitmap(b, (b.getWidth() - s) / 2, (b.getHeight() - s) / 2, s, s);
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(out)) { sq.compress(Bitmap.CompressFormat.JPEG, 92, o); }
+            // decode the new cover off the main thread too, so the swap on screen is instant
+            Img.prefetch("file://" + out.getAbsolutePath() + "?v=" + out.lastModified());
+            Spotify.MAIN.post(() -> refreshArt(albumKey));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static void clearCover(String albumKey) {
+        File f = coverFile(albumKey);
+        if (f.exists()) f.delete();
+        refreshArt(albumKey);
+    }
+
+    static boolean hasCover(String albumKey) { return coverFile(albumKey).exists(); }
+
+    /**
+     * Main thread. Re-points every song of the album at the new art key and tells the screen to swap images in place
+     * (no page rebuilds: rebuilding every page at once is what froze the home screen).
+     */
+    static void refreshArt(String albumKey) {
+        String old = null;
+        for (Player.Track t : songs) if (albumKey.equals(t.albumUri)) { if (old == null) old = t.art; setArt(t); }
+        for (Player.Track t : queue) if (albumKey.equals(t.albumUri)) setArt(t);
+        String now = null;
+        for (Player.Track t : songs) if (albumKey.equals(t.albumUri)) { now = t.art; break; }
+        Player.Track cur = Player.track;
+        if (cur != null && albumKey.equals(cur.albumUri)) {
+            setArt(cur);
+            if (now == null) now = cur.art;
+            for (Runnable r : new ArrayList<>(Player.trackListeners)) r.run();
+            Player.notifyAll0();
+        }
+        if (artChanged != null && old != null && now != null && !old.equals(now)) artChanged.accept(old, now);
     }
 
     private static String nz(String s, String d) { return s == null ? d : s; }
@@ -132,7 +311,7 @@ final class LocalMusic {
         i.type = album ? "lalbum" : "lartist";
         i.id = key;
         i.uri = key;
-        i.title = album ? (f.album.isEmpty() ? f.name : f.album) : f.artist;
+        i.title = album ? (f.albumGroup != null ? f.albumGroup : f.album.isEmpty() ? f.name : f.album) : f.artist;
         i.subtitle = album ? f.artist : "";
         i.image = f.art;
         i.count = l.size();
@@ -424,7 +603,7 @@ final class LocalMusic {
                     .build());
             PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
             Notification n = new Notification.Builder(this, CH)
-                    .setSmallIcon(R.drawable.ic_stat_note)
+                    .setSmallIcon(R.drawable.ic_stat_prism)
                     .setContentTitle(t.name)
                     .setContentText(t.artist)
                     .setLargeIcon(art)
