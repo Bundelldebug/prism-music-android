@@ -1,0 +1,11 @@
+# signing key and its outputs: never publish
+*.jks
+*.keystore
+*.apk
+*.idsig
+dist/
+# local toolchain location
+toolchain.path
+# generated test screenshots / caches
+tests/ui/output/
+tests/ui/.cache/

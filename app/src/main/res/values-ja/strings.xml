@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">プリズム</string>
+
+    <string name="tab_home">ホーム</string>
+    <string name="tab_explore">見つける</string>
+    <string name="tab_library">ライブラリ</string>
+    <string name="tab_settings">設定</string>
+    <string name="search">検索</string>
+    <string name="search_hint">曲、アーティスト、アルバム</string>
+
+    <string name="greet_morning">おはようございます</string>
+    <string name="greet_afternoon">こんにちは</string>
+    <string name="greet_evening">こんばんは</string>
+    <string name="home_playlists">マイプレイリスト</string>
+    <string name="home_for_you">あなたへのおすすめ</string>
+    <string name="home_artists">よく聴くアーティスト</string>
+    <string name="home_charts">マイチャート</string>
+    <string name="chart_short">過去4週間</string>
+    <string name="chart_medium">過去6か月</string>
+    <string name="chart_long">全期間</string>
+    <string name="home_new">ニューリリース</string>
+
+    <string name="n_tracks">%d曲</string>
+    <string name="n_minutes">%d分</string>
+    <string name="empty">まだ何もありません</string>
+    <string name="load_failed">読み込めませんでした。接続を確認して、もう一度お試しください。</string>
+    <string name="loading">読み込み中…</string>
+
+    <string name="connect_message">Spotifyアカウントを連携すると、ここにあなたの音楽が表示されます。</string>
+    <string name="setup_message">Spotifyを使うには、まずSpotify開発者アプリのClient IDを入力してください。</string>
+    <string name="connect_spotify">Spotifyと連携</string>
+    <string name="setup_spotify">Spotifyの設定</string>
+    <string name="connected">連携済み</string>
+    <string name="not_connected">未連携</string>
+    <string name="connected_as">%sとして連携しました</string>
+    <string name="login_failed">Spotifyへのログインに失敗しました: %s</string>
+
+    <string name="lib_liked">お気に入りの曲</string>
+    <string name="lib_playlists">プレイリスト</string>
+    <string name="lib_albums">アルバム</string>
+    <string name="lib_artists">アーティスト</string>
+    <string name="lib_recent">最近再生した項目</string>
+    <string name="lib_signin">ログインしてライブラリを同期しましょう</string>
+    <string name="lib_recently_saved">最近保存した曲</string>
+
+    <string name="play">再生</string>
+    <string name="shuffle">シャッフル</string>
+    <string name="artist">アーティスト</string>
+    <string name="albums">アルバム</string>
+    <string name="artists">アーティスト</string>
+    <string name="playlists">プレイリスト</string>
+    <string name="songs">曲</string>
+    <string name="browse_genres">ジャンルを見る</string>
+    <string name="no_results">検索結果はありません</string>
+    <string name="tracks_unavailable">Spotifyはこのプレイリストの曲リストをアプリに公開していません。再生やSpotifyで開くことはできます。</string>
+    <string name="open_in_spotify">Spotifyで開く</string>
+    <string name="open_spotify_app">Spotifyアプリを開く</string>
+    <string name="go_album">アルバムへ移動</string>
+    <string name="go_artist">アーティストへ移動</string>
+    <string name="like">お気に入りに追加</string>
+    <string name="unlike">お気に入りから削除</string>
+    <string name="add_to_queue">キューに追加</string>
+    <string name="added_to_queue">キューに追加しました</string>
+    <string name="choose_device">再生デバイスを選択</string>
+    <string name="up_next">次に再生</string>
+    <string name="queue_empty">キューに曲はありません</string>
+    <string name="no_lyrics">この曲の歌詞はありません</string>
+    <string name="lyrics_off">設定でオンライン歌詞がオフになっています</string>
+
+    <string name="nothing_playing">再生中の曲はありません</string>
+    <string name="login_needed">先にSpotifyと連携してください</string>
+    <string name="premium_needed">Spotifyの再生にはPremiumアカウントが必要です。</string>
+    <string name="playback_failed">再生を開始できませんでした</string>
+    <string name="opening_spotify">Spotifyを開いています…</string>
+    <string name="action_failed">問題が発生しました</string>
+
+    <string name="set_account">アカウント</string>
+    <string name="set_application">アプリケーション</string>
+    <string name="set_general">一般</string>
+    <string name="set_appearance">画面</string>
+    <string name="set_content">コンテンツ</string>
+    <string name="set_playback">再生</string>
+    <string name="set_lyrics">歌詞</string>
+    <string name="set_storage">ストレージ管理</string>
+    <string name="set_about">情報</string>
+    <string name="set_spotify_account">Spotifyアカウント</string>
+    <string name="set_status">状態</string>
+    <string name="set_developer">開発者アプリ</string>
+    <string name="logout">ログアウト</string>
+    <string name="free_note">Spotify Freeアカウントです。閲覧はできますが、Spotifyは他のアプリからの再生操作をPremiumアカウントにのみ許可しています。曲はSpotifyアプリで開きます。</string>
+    <string name="not_set">未設定</string>
+    <string name="copied">コピーしました</string>
+    <string name="open_dashboard">Spotify開発者ダッシュボードを開く</string>
+    <string name="setup_steps">1. Spotify開発者ダッシュボードでアプリを作成し、Web APIを選択します。\n2. Redirect URIsに %1$s を追加します。\n3.（開発モード）User Managementに自分のSpotifyアカウントを追加します。\n4. 上にアプリのClient IDを貼り付けて「Spotifyと連携」を押します。\nパッケージ名: %2$s</string>
+    <string name="client_id_help">Spotify開発者アプリに表示されているClient IDを貼り付けてください。PKCE方式のためClient Secretは不要です。</string>
+    <string name="save">保存</string>
+    <string name="cancel">キャンセル</string>
+    <string name="set_language">言語</string>
+    <string name="lang_system">システムのデフォルト</string>
+    <string name="set_theme">テーマ</string>
+    <string name="theme_system">システムのデフォルト</string>
+    <string name="theme_light">ライト</string>
+    <string name="theme_dark">ダーク</string>
+    <string name="set_effects">エフェクト</string>
+    <string name="glass_effect">グラス効果</string>
+    <string name="glass_note">屈折・レンズ効果はAndroid 13以降で動作します。オフにするとシンプルな半透明表示になります。</string>
+    <string name="set_home_sections">ホームのセクション</string>
+    <string name="devices">Spotify Connectデバイス</string>
+    <string name="no_devices">デバイスが見つかりません。先にデバイスでSpotifyを開いてください。</string>
+    <string name="set_player_screen">再生画面</string>
+    <string name="shrink_paused">一時停止中はアルバムアートを縮小</string>
+    <string name="devices_note">再生はSpotify（このスマートフォンまたはSpotify Connectデバイス）で行われ、このアプリはリモコン兼ライブラリブラウザとして動作します。</string>
+    <string name="lyrics_online">オンライン同期歌詞</string>
+    <string name="lyrics_note">Spotify Web APIには歌詞機能がありません。オンにすると、歌詞を探すために曲名・アーティスト・アルバム・長さがLRCLIB（lrclib.net）に送信されます。</string>
+    <string name="image_cache">画像キャッシュ</string>
+    <string name="cache_size">サイズ</string>
+    <string name="clear_cache">キャッシュを削除</string>
+    <string name="cleared">削除しました</string>
+    <string name="version">バージョン</string>
+    <string name="music_service">音楽サービス</string>
+    <string name="lyrics_source">歌詞</string>
+    <string name="about_note">プリズムは独立したアプリで、Spotifyとは提携していません。SpotifyはSpotify ABの商標です。</string>
+
+    <string name="source_local">このデバイスの音楽</string>
+    <string name="unknown_artist">不明なアーティスト</string>
+    <string name="this_device">このデバイス</string>
+    <string name="this_phone">このスマートフォン</string>
+    <string name="wired_earphones">有線イヤホン</string>
+    <string name="playback_channel">音楽の再生</string>
+    <string name="local_permission">スマートフォンに保存された音楽を再生するには、音楽ファイルへのアクセス許可が必要です。</string>
+    <string name="allow">許可する</string>
+    <string name="local_empty">デバイスに音楽ファイルが見つかりませんでした。</string>
+    <string name="recently_added">最近追加した項目</string>
+    <string name="all_songs">すべての曲</string>
+    <string name="repeat_off">リピートオフ</string>
+    <string name="repeat_all">全曲リピート</string>
+    <string name="repeat_one">1曲リピート</string>
+    <string name="shuffle_on">シャッフルオン</string>
+    <string name="shuffle_off">シャッフルオフ</string>
+    <string name="hidden_playlist">再生できないプレイリストのため非表示にしました</string>
+    <string name="prism_player_starting">プリズムプレーヤーを準備しています。まもなく再生されます。</string>
+    <string name="prism_player_failed">アプリ内でSpotifyを再生できませんでした（Premiumアカウントが必要です）。</string>
+    <string name="relogin_streaming">アプリ内で直接再生するには、設定 → Spotifyで「再連携」を押してください。</string>
+    <string name="reconnect">再連携</string>
+    <string name="needed_for_inapp">アプリ内再生に必要</string>
+    <string name="popular_songs">人気曲</string>
+    <string name="singles_eps">シングル・EP</string>
+    <string name="appears_on">参加作品</string>
+    <string name="compilations">コンピレーション</string>
+    <string name="show_all">すべて表示</string>
+    <string name="set_interface">インターフェース</string>
+    <string name="keep_expanded">タブバーを常に展開</string>
+    <string name="raise_controls">下部コントロールの高さ</string>
+    <string name="raise_note">下部のタブバー・検索・ミュージックバーを画面下端からどれだけ浮かせるかを決めます。</string>
+    <string name="continue_playing">続けて再生</string>
+    <string name="autoplay">自動再生</string>
+    <string name="more_actions">その他</string>
+    <string name="glass_level">グラスの透明度</string>
+    <string name="glass_high">高（透明）</string>
+    <string name="glass_medium">中</string>
+    <string name="glass_opaque">不透明</string>
+    <string name="glass_default">デフォルト</string>
+    <string-array name="genres">
+        <item>すべて</item>
+        <item>K-POP</item>
+        <item>ポップ</item>
+        <item>ヒップホップ</item>
+        <item>R&amp;B</item>
+        <item>J-POP</item>
+        <item>ロック</item>
+        <item>インディー</item>
+        <item>ジャズ</item>
+        <item>クラシック</item>
+        <item>バラード</item>
+        <item>エレクトロニック</item>
+    </string-array>
+    <string name="bp_group">ビットパーフェクト</string>
+    <string name="bp_title">ビットパーフェクト再生（USB DAC）</string>
+    <string name="bp_note">デバイス内の音楽を元のサンプルレート・ビット深度のまま、リサンプリング・ミキシング・エフェクトなしでUSB DACに送ります。Android 14以降と対応するDACが必要です。オンの間は他の音が鳴らないことがあり、音量はDAC側で調整します。Spotifyはビットパーフェクトで再生できません。</string>
+    <string name="bp_needs_14">Android 14以降が必要</string>
+    <string name="bp_no_dac">USB DACが接続されていません</string>
+    <string name="bp_unsupported">%1$sはビットパーフェクトに対応していません</string>
+    <string name="bp_ready">%1$s · 使用可能</string>
+    <string name="bp_no_match">DACに%1$sのビットパーフェクトモードがありません</string>
+    <string name="bp_active">ビットパーフェクト · %1$s / %2$s</string>
+    <string name="bp_failed">Androidがビットパーフェクト形式を拒否しました</string>
+    <string name="unfold_ui">展開時の画面</string>
+    <string name="unfold_fold">フォルダブルUI（横の縦タブ）</string>
+    <string name="unfold_tablet">タブレットUI（上部タブ・サイドバー）</string>
+    <string name="unfold_note">フォルダブルを開いた内側の画面に適用されます。タブレットUIではタブバーにサイドバーボタンが表示されます。</string>
+    <string name="sidebar">サイドバー</string>
+</resources>
