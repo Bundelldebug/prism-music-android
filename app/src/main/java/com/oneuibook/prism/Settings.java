@@ -281,6 +281,7 @@ final class Settings {
             content.addView(a, Widgets.MW);
             Widgets.Group fx = new Widgets.Group(m, m.getString(R.string.set_player_screen));
             toggleRow(fx, Icons.ALBUM, m.getString(R.string.shrink_paused), "shrink_paused", true, null);
+            fx.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.eq_title), m.getString(Eq.on(m) ? R.string.eq_state_on : R.string.eq_state_off), true, v -> m.push(new EqPage(m)));
             content.addView(fx, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.devices_note)));
             Widgets.Group bp = new Widgets.Group(m, m.getString(R.string.bp_group));
@@ -295,6 +296,41 @@ final class Settings {
             content.addView(bp, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.bp_note)));
         }
+    }
+
+    // ------------------------------------------------------------------ equalizer
+    static final class EqPage extends Sub {
+        EqPage(MainActivity m) { super(m, R.string.eq_title); }
+
+        @Override void build() {
+            MainActivity m = main;
+            Widgets.Group g = new Widgets.Group(m, null);
+            toggleRow(g, Icons.WAVE, m.getString(R.string.eq_use), Eq.PREF_ON, false, () -> { Eq.apply(m); rebuildSoon(); });
+            content.addView(g, Widgets.MW);
+            // the ten bands in a card
+            Widgets.Group bg = new Widgets.Group(m, m.getString(R.string.eq_bands));
+            Eq.Bands bands = new Eq.Bands(m);
+            bands.setPadding(0, Ui.dp(8), 0, Ui.dp(8));
+            bands.changed = this::rebuildSoon;
+            bg.card.addView(bands, Widgets.MW);
+            content.addView(bg, Widgets.MW);
+            Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.eq_presets));
+            int cur = MainActivity.prefs(m).getInt(Eq.PREF_PRESET, 0);
+            for (int i = 0; i < Eq.PRESET_NAMES.length; i++) {
+                final int idx = i;
+                pg.option(m.getString(Eq.PRESET_NAMES[i]), i == cur, v -> {
+                    Eq.setPreset(m, idx);
+                    if (!Eq.on(m)) Eq.setOn(m, true);
+                    rebuild();
+                });
+            }
+            if (cur < 0) pg.option(m.getString(R.string.eq_custom), true, null);
+            content.addView(pg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.eq_note)));
+        }
+
+        /** Refresh the preset ticks once a slider or switch has settled (not mid-gesture). */
+        private void rebuildSoon() { Spotify.MAIN.postDelayed(() -> { if (isAttachedToWindow()) rebuild(); }, 350); }
     }
 
     // ------------------------------------------------------------------ lyrics

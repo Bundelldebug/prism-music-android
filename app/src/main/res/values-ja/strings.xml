@@ -200,4 +200,21 @@
     <string name="upd_downloading">アップデートをダウンロード中…</string>
     <string name="upd_allow">プリズムからのインストールを許可してから、もう一度アップデートを押してください。</string>
     <string name="upd_failed">アップデートを確認できませんでした</string>
+    <string name="eq_title">イコライザー</string>
+    <string name="eq_use">イコライザーを使う</string>
+    <string name="eq_bands">10バンド</string>
+    <string name="eq_presets">プリセット</string>
+    <string name="eq_custom">カスタム</string>
+    <string name="eq_state_on">オン</string>
+    <string name="eq_state_off">オフ</string>
+    <string name="eq_flat">フラット</string>
+    <string name="eq_bass">低音強調</string>
+    <string name="eq_treble">高音強調</string>
+    <string name="eq_vocal">ボーカル</string>
+    <string name="eq_rock">ロック</string>
+    <string name="eq_pop">ポップ</string>
+    <string name="eq_jazz">ジャズ</string>
+    <string name="eq_classical">クラシック</string>
+    <string name="eq_electronic">エレクトロニック</string>
+    <string name="eq_note">デバイス内の音楽に適用されます。Spotifyは保護されたウェブオーディオで再生されるため、イコライザーは適用されません。ビットパーフェクト出力中はイコライザーを含むすべての処理が行われません。</string>
 </resources>

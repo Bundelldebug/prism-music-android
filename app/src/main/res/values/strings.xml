@@ -200,4 +200,21 @@
     <string name="upd_downloading">Downloading the update…</string>
     <string name="upd_allow">Allow installs from Prism, then tap Update again.</string>
     <string name="upd_failed">Couldn\'t check for updates</string>
+    <string name="eq_title">Equalizer</string>
+    <string name="eq_use">Use equalizer</string>
+    <string name="eq_bands">10 bands</string>
+    <string name="eq_presets">Presets</string>
+    <string name="eq_custom">Custom</string>
+    <string name="eq_state_on">On</string>
+    <string name="eq_state_off">Off</string>
+    <string name="eq_flat">Flat</string>
+    <string name="eq_bass">Bass boost</string>
+    <string name="eq_treble">Treble boost</string>
+    <string name="eq_vocal">Vocal</string>
+    <string name="eq_rock">Rock</string>
+    <string name="eq_pop">Pop</string>
+    <string name="eq_jazz">Jazz</string>
+    <string name="eq_classical">Classical</string>
+    <string name="eq_electronic">Electronic</string>
+    <string name="eq_note">Applies to on-device music. Spotify plays as protected web audio that the equalizer can\'t reach. Bit-perfect output skips all processing, including the equalizer.</string>
 </resources>

@@ -344,6 +344,14 @@ public class PrismUiTest {
         a.onTab(3, false); idle(500);
         a.push(new Settings.AppearancePage(a)); idle(800);
         shot(a, "57_unfold_setting");
+        // equalizer screen: ten bands, presets; picking a preset turns it on and stores the curve
+        a.push(new Settings.EqPage(a)); idle(800);
+        Eq.setPreset(a, 1); idle(100);
+        assertEquals(6f, Eq.gain(a, 0), 0.01f);
+        a.pop(); idle(500);
+        a.push(new Settings.EqPage(a)); idle(800);
+        shot(a, "58_equalizer");
+        Eq.setPreset(a, 0);
         MainActivity.prefs(RuntimeEnvironment.getApplication()).edit().remove("unfold_ui").commit();
         Ui.unfoldTablet = false;
     }

@@ -1,4 +1,4 @@
-# 프리즘 (Prism) — 9.5.1
+# 프리즘 (Prism) — 9.5.2
 
 글래스 효과 UI를 가진 안드로이드 음악 앱. 음악 서비스는 Spotify와 기기 음악, 한국어/영어/일본어 지원.
 외부 라이브러리 없이 안드로이드 기본 API만으로 처음부터 작성했고, 아이콘·그래픽도 모두 직접 그렸습니다.
@@ -22,6 +22,8 @@ Gradle 없이 JDK 21 + Android build-tools 35.0.0 + platform android-35 로 빌�
 2. Redirect URI에 `prismmusic://callback` 추가
 3. (개발 모드) User Management에 본인 Spotify 계정 추가
 4. 앱 → 설정 → Spotify → Client ID 입력 → Spotify 연결 (PKCE, Client Secret 불필요)
+
+10밴드 이퀄라이저: 설정 → 재생 → 이퀄라이저 (기기 음악에 적용, 31Hz~16kHz ±12dB, 프리셋).
 
 비트퍼펙트: Android 14 이상 + USB DAC에서 기기 음악을 원본 샘플레이트·비트 깊이로 출력(설정 → 재생).
 

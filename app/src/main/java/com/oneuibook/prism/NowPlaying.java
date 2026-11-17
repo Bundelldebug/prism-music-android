@@ -894,6 +894,7 @@ final class NowPlaying extends FrameLayout {
         if (!Player.local()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> setPanel(2)));
         e.add(new GlassMenu.Entry(c.getString(R.string.set_lyrics), Icons.LYRICS, false, () -> setPanel(1)));
+        e.add(new GlassMenu.Entry(c.getString(R.string.eq_title), Icons.WAVE, false, () -> { close(); main.push(new Settings.EqPage(main)); }));
         GlassMenu.sheet(main, anchorOf(v), c.getString(R.string.more_actions), e, v);
     }
 

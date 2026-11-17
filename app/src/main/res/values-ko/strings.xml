@@ -200,4 +200,21 @@
     <string name="upd_downloading">업데이트를 내려받는 중…</string>
     <string name="upd_allow">프리즘의 앱 설치를 허용한 뒤 다시 업데이트를 눌러 주세요.</string>
     <string name="upd_failed">업데이트를 확인하지 못했어요</string>
+    <string name="eq_title">이퀄라이저</string>
+    <string name="eq_use">이퀄라이저 사용</string>
+    <string name="eq_bands">10밴드</string>
+    <string name="eq_presets">프리셋</string>
+    <string name="eq_custom">사용자 지정</string>
+    <string name="eq_state_on">켜짐</string>
+    <string name="eq_state_off">꺼짐</string>
+    <string name="eq_flat">기본(플랫)</string>
+    <string name="eq_bass">저음 강조</string>
+    <string name="eq_treble">고음 강조</string>
+    <string name="eq_vocal">보컬</string>
+    <string name="eq_rock">록</string>
+    <string name="eq_pop">팝</string>
+    <string name="eq_jazz">재즈</string>
+    <string name="eq_classical">클래식</string>
+    <string name="eq_electronic">일렉트로닉</string>
+    <string name="eq_note">기기 음악 재생에 적용돼요. Spotify는 보호된 웹 오디오로 재생돼 이퀄라이저가 적용되지 않아요. 비트퍼펙트 출력 중에는 이퀄라이저를 포함한 모든 처리가 빠져요.</string>
 </resources>

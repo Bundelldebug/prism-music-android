@@ -186,6 +186,8 @@ final class LocalMusic {
         // bit-perfect USB output must be set before the player opens its stream
         try { BitPerfect.prepare(app, Uri.parse(t.uri)); } catch (Exception ignored) {}
         mp = new MediaPlayer();
+        // 10-band equalizer rides on this player's audio session
+        try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
         mp.setWakeMode(app, android.os.PowerManager.PARTIAL_WAKE_LOCK);
         mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
