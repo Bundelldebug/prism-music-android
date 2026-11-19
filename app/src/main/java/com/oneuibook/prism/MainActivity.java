@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.2";
+    static final String VERSION = "9.5.3";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -37,6 +37,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     Header header;
     Dock dock;
     NowPlaying np;
+    AodOverlay aod;
     private final NavStack[] tabs = new NavStack[4];
     private int tab;
     private Pages.SearchPage searchPage;
@@ -92,6 +93,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
         np = new NowPlaying(this, dock);
         root.addView(np, match());
+
+        aod = new AodOverlay(this);
+        root.addView(aod, match());
 
         setContentView(root);
 
@@ -305,8 +309,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             int W = getWidth() > 0 ? getWidth() : Ui.screenW;
             p.setTranslationX(W);
             p.setElevation(Ui.dpf(1));
-            p.animate().translationX(0).setDuration(460).setInterpolator(Ui.EMPHASIZED).start();
-            prev.animate().translationX(-W * 0.28f).alpha(0.9f).setDuration(460).setInterpolator(Ui.EMPHASIZED).start();
+            android.animation.TimeInterpolator interp = Ui.gStyle ? Ui.ONEUI_SINE_90 : Ui.EMPHASIZED;
+            p.animate().translationX(0).setDuration(Ui.gStyle ? 400 : 460).setInterpolator(interp).start();
+            prev.animate().translationX(-W * 0.28f).alpha(0.9f).setDuration(Ui.gStyle ? 400 : 460).setInterpolator(interp).start();
             syncHeader();
         }
 
@@ -315,8 +320,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             Page p = stack.remove(stack.size() - 1);
             Page prev = top();
             int W = getWidth();
-            p.animate().translationX(W).setDuration(380).setInterpolator(Ui.EMPHASIZED).withEndAction(() -> removeView(p)).start();
-            prev.animate().translationX(0).alpha(1f).setDuration(380).setInterpolator(Ui.EMPHASIZED).start();
+            android.animation.TimeInterpolator interp = Ui.gStyle ? Ui.ONEUI_SINE_80 : Ui.EMPHASIZED;
+            p.animate().translationX(W).setDuration(Ui.gStyle ? 350 : 380).setInterpolator(interp).withEndAction(() -> removeView(p)).start();
+            prev.animate().translationX(0).alpha(1f).setDuration(Ui.gStyle ? 350 : 380).setInterpolator(interp).start();
             syncHeader();
             return true;
         }
@@ -706,8 +712,13 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (code == 41) LocalMusic.load(this, this::reloadAll);
     }
 
+    void openAod() {
+        if (aod != null) aod.open();
+    }
+
     @SuppressWarnings("deprecation")
     @Override public void onBackPressed() {
+        if (aod != null && aod.isOpen()) { aod.close(); return; }
         if (GlassMenu.dismissAny(root)) return;
         if (np.getVisibility() == View.VISIBLE && playerP > 0.5f) { np.close(); return; }
         if (searching) { onExitSearch(); return; }
@@ -745,6 +756,36 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     void invalidateChrome() {
         header.invalidate();
         dock.invalidate();
+    }
+
+    /** Re-applies style (A / G) or accent color across all chrome, sidebar, player, and pages without losing position. */
+    void refreshAppearance() {
+        getWindow().getDecorView().setBackgroundColor(Ui.bg());
+        backdrop.setBackgroundColor(Ui.bg());
+        np.applyStyle();
+        dock.select(tab, false);
+        dock.requestLayout();
+        invalidateChrome();
+        if (sidebar != null) {
+            boolean wasOpen = sidebar.getVisibility() == View.VISIBLE && sideP > 0.5f;
+            root.removeView(sidebar);
+            sidebar = null;
+            if (wasOpen && tabletUi()) openSidebar(false);
+        }
+        Page cur = currentPage();
+        int keepY = cur == null ? 0 : cur.scroll.getScrollY();
+        for (NavStack s : tabs) {
+            if (s == null) continue;
+            for (Page p : s.stack) {
+                p.setGrouped(p.grouped);
+                p.rebuild();
+            }
+        }
+        if (searchPage != null) {
+            searchPage.setGrouped(searchPage.grouped);
+            searchPage.rebuild();
+        }
+        if (cur != null && keepY > 0) cur.scroll.post(() -> cur.scroll.scrollTo(0, keepY));
     }
 
     void reloadAll() {

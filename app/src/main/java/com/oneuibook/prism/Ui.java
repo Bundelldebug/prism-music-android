@@ -28,13 +28,40 @@ final class Ui {
     static int screenW, screenH;
     static int statusInset, navInset, imeInset;
 
-    static final int ACCENT = 0xFFE92D44;
+    static final int ACCENT_DEFAULT = 0xFFE92D44;
+    static int ACCENT = ACCENT_DEFAULT;
+    static final String[] ACCENT_KEYS = {"red", "blue", "violet", "teal", "green", "orange", "pink", "dynamic"};
+    static final int[] ACCENT_COLORS = {0xFFE92D44, 0xFF387AFF, 0xFF7B61FF, 0xFF0FB59D, 0xFF28B457, 0xFFF26D21, 0xFFE84593, 0};
+    static final int[] ACCENT_LABELS = {R.string.accent_red, R.string.accent_blue, R.string.accent_violet, R.string.accent_teal,
+            R.string.accent_green, R.string.accent_orange, R.string.accent_pink, R.string.accent_dynamic};
     static final TimeInterpolator EMPHASIZED = new PathInterpolator(0.2f, 0f, 0f, 1f);
     static final TimeInterpolator DECEL = new PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
     static final TimeInterpolator STANDARD = new PathInterpolator(0.2f, 0f, 0f, 1f);
     static final TimeInterpolator ACCEL = new PathInterpolator(0.3f, 0f, 0.8f, 0.15f);
+    // One UI 9.x official motion curves (from SESL / memory & incallui reference APKs)
+    static final TimeInterpolator ONEUI_RECOIL_PRESS = new PathInterpolator(0f, 0f, 1f, 1f);
+    static final TimeInterpolator ONEUI_RECOIL_RELEASE = new PathInterpolator(0.22f, 0.25f, 0f, 1f);
+    static final TimeInterpolator ONEUI_SINE_80 = new PathInterpolator(0.33f, 0f, 0.20f, 1f);
+    static final TimeInterpolator ONEUI_SINE_90 = new PathInterpolator(0.33f, 0f, 0.10f, 1f);
+    static final TimeInterpolator ONEUI_POPUP_ENTER = new PathInterpolator(0.365f, 0.483f, 0f, 1.215f);
 
     static Typeface regular, medium, semibold, bold, heavy;
+
+    static String accentKey(SharedPreferences p) { return p.getString("accent_color", "red"); }
+
+    static int resolveAccent(Context c, String key) {
+        if ("dynamic".equals(key)) {
+            try {
+                int col = c.getColor(dark ? android.R.color.system_accent1_300 : android.R.color.system_accent1_600);
+                return (col & 0xFFFFFF) | 0xFF000000;
+            } catch (Throwable ignored) {
+                return ACCENT_DEFAULT;
+            }
+        }
+        for (int i = 0; i < ACCENT_KEYS.length; i++)
+            if (ACCENT_KEYS[i].equals(key) && ACCENT_COLORS[i] != 0) return ACCENT_COLORS[i];
+        return ACCENT_DEFAULT;
+    }
 
     static void init(Context c, SharedPreferences p) {
         density = c.getResources().getDisplayMetrics().density;
@@ -49,6 +76,7 @@ final class Ui {
         glassT = readGlassT(p);
         unfoldTablet = "tablet".equals(p.getString("unfold_ui", "fold"));
         gStyle = "oneui".equals(p.getString("player_style", "prism"));
+        ACCENT = resolveAccent(c, accentKey(p));
         Typeface base = Typeface.SANS_SERIF;
         regular = Typeface.create(base, 400, false);
         medium = Typeface.create(base, 500, false);
@@ -71,18 +99,21 @@ final class Ui {
     static float dpf(float v) { return v * density; }
     static float sp(float v) { return v * density * fontScale; }
 
-    // ---- palette ----
-    static int bg() { return dark ? 0xFF000000 : 0xFFFFFFFF; }
-    static int groupedBg() { return dark ? 0xFF000000 : 0xFFF2F2F7; }
-    static int card() { return dark ? 0xFF1C1C1E : 0xFFFFFFFF; }
-    static int text() { return dark ? 0xFFFFFFFF : 0xFF000000; }
-    static int text2() { return dark ? 0x99EBEBF5 : 0x993C3C43; }
+    // ---- palette (G style matches One UI 8.5/9.x recording & reference APKs) ----
+    static int bg() { return dark ? (gStyle ? 0xFF010102 : 0xFF000000) : (gStyle ? 0xFFF2F2F5 : 0xFFFFFFFF); }
+    static int groupedBg() { return dark ? (gStyle ? 0xFF010102 : 0xFF000000) : (gStyle ? 0xFFF2F2F5 : 0xFFF2F2F7); }
+    static int card() { return dark ? (gStyle ? 0xFF17171A : 0xFF1C1C1E) : (gStyle ? 0xFFFFFFFF : 0xFFFFFFFF); }
+    static int text() { return dark ? (gStyle ? 0xFFFCFCFF : 0xFFFFFFFF) : (gStyle ? 0xFF010102 : 0xFF000000); }
+    static int text2() { return dark ? (gStyle ? 0xFF99999E : 0x99EBEBF5) : (gStyle ? 0xFF77777A : 0x993C3C43); }
     static int text3() { return dark ? 0x66EBEBF5 : 0x4D3C3C43; }
-    static int chip() { return dark ? 0xFF1C1C1E : 0xFFF2F1F6; }
-    static int separator() { return dark ? 0x33FFFFFF : 0x1F000000; }
+    static int chip() { return dark ? (gStyle ? 0xFF252528 : 0xFF1C1C1E) : (gStyle ? 0xFFE8E8ED : 0xFFF2F1F6); }
+    static int separator() { return dark ? (gStyle ? 0x1EFFFFFF : 0x33FFFFFF) : (gStyle ? 0x10000000 : 0x1F000000); }
     static int placeholder() { return dark ? 0xFF2C2C2E : 0xFFE9E9EE; }
     static int glassTint() { return dark ? 0x5C1C1C1E : 0x5CFAFAFC; }
     static int glassStroke() { return dark ? 0x33FFFFFF : 0x24000000; }
+    static int gStroke() { return dark ? 0x1FFFFFFF : 0x12000000; }
+    static int gOutlineTop() { return dark ? 0x24FFFFFF : 0xB2FFFFFF; }
+    static float cardRadius() { return gStyle ? 26f : 16f; }
     /**
      * Glass level, one setting for every floating surface so the tab bar and the music bar always match.
      * "high" = high transparency (Prism's original look), "medium" = denser frost.
@@ -101,11 +132,13 @@ final class Ui {
      */
     static boolean gStyle;
 
-    /** G style fill: a neutral frosted tint, never so clear that the pill disappears; opaque fills stay opaque. */
+    /** G style fill: One UI 9.x basic_token_effect_blur_surface (#CCFCFCFF light / #CC3A3A3D dark), responsive to glassT. */
     static int gTint(int t) {
         int a = t >>> 24;
-        int rgb = a >= 230 ? (t & 0xFFFFFF) : ((dark ? 0xFF2C2C2E : 0xFFFAFAFC) & 0xFFFFFF);
-        int ga = Math.max(a, dark ? 165 : 175);
+        if (a >= 242) return t;
+        int rgb = (dark ? 0xFF3A3A3D : 0xFFFCFCFF) & 0xFFFFFF;
+        int minA = Math.round(lerp(dark ? 236f : 244f, dark ? 182f : 188f, glassT));
+        int ga = Math.max(a, minA);
         return (ga << 24) | rgb;
     }
     static int glassBlend(int opaque, int medium, int high) {
@@ -124,7 +157,7 @@ final class Ui {
         return "high".equals(old) ? 1f : 0.5f;
     }
 
-    static int pressed() { return dark ? 0x1FFFFFFF : 0x0F000000; }
+    static int pressed() { return dark ? (gStyle ? 0x33FFFFFF : 0x1FFFFFFF) : (gStyle ? 0x1A000000 : 0x0F000000); }
 
     static int alpha(int color, float a) {
         return (Math.round(Color.alpha(color) * Math.max(0f, Math.min(1f, a))) << 24) | (color & 0xFFFFFF);
@@ -161,16 +194,20 @@ final class Ui {
         return g;
     }
 
-    /** Press feedback: shrink a little while touched, spring back on release. */
+    /** Press feedback: in G style uses One UI 9.x SESL Recoil (100ms linear press, 350ms cubic 0.22,0.25,0,1 release). */
     static void press(View v, float scale) {
         v.setOnTouchListener((view, e) -> {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    view.animate().scaleX(scale).scaleY(scale).setDuration(140).setInterpolator(STANDARD).start();
+                    view.animate().scaleX(scale).scaleY(scale)
+                            .setDuration(gStyle ? 100 : 140)
+                            .setInterpolator(gStyle ? ONEUI_RECOIL_PRESS : STANDARD).start();
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    view.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(new Overshoot(1.6f)).start();
+                    view.animate().scaleX(1f).scaleY(1f)
+                            .setDuration(gStyle ? 350 : 420)
+                            .setInterpolator(gStyle ? ONEUI_RECOIL_RELEASE : new Overshoot(1.6f)).start();
                     break;
             }
             return false;

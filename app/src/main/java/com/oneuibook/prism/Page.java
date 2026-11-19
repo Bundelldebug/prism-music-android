@@ -54,20 +54,41 @@ abstract class Page extends FrameLayout {
     boolean largeTop() { return true; }
 
     void addBigTitle() {
-        bigTitle = Ui.text(getContext(), title, 36, Ui.bold, Ui.text());
-        bigTitle.setLetterSpacing(-0.01f);
+        // G style sub-pages (except long-title detail lists like LocalListPage) show their title cleanly in the top bar
+        boolean gRoot = Ui.gStyle && !back;
+        boolean gSubClean = Ui.gStyle && back && !(this instanceof Pages.LocalListPage);
+        bigTitle = Ui.text(getContext(), title, gRoot ? 34 : 36, Ui.bold, Ui.text());
+        bigTitle.setLetterSpacing(Ui.gStyle ? -0.02f : -0.01f);
+        if (gSubClean) {
+            // keep bigTitle non-null for scroll helpers, collapsed invisibly so content starts right under "< Title"
+            bigTitle.setVisibility(GONE);
+            content.addView(bigTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
+            return;
+        }
         // long names (album titles…) shrink and wrap instead of being cut off: up to 3 lines, 36sp down to 24sp
-        int avail = Ui.screenW - main.sideInset() - main.contentInsetPx() - Ui.dp(34);
-        float size = fitTitleSize(title, avail);
+        int avail = Ui.screenW - main.sideInset() - main.contentInsetPx() - Ui.dp(Ui.gStyle ? 44 : 34);
+        float size = Math.min(gRoot ? 34f : 36f, fitTitleSize(title, avail));
         bigTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size);
         bigTitle.setSingleLine(false);
         bigTitle.setMaxLines(3);
         bigTitle.setLineSpacing(0, 1.05f);
+        if (gRoot) {
+            boolean wideScreen = main.sideInset() > 0 || main.tabletUi();
+            // One UI 8.5/9.x Expanding App Bar: phone portrait centres title with top breathing room;
+            // unfolded foldable / tablet keeps compact left-aligned title so it never collides with rail or top tabs
+            bigTitle.setGravity(wideScreen ? android.view.Gravity.START : android.view.Gravity.CENTER);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            int topM = Ui.dp(wideScreen ? 16 : (Ui.cover() ? 32 : 84));
+            int botM = Ui.dp(wideScreen ? 10 : (Ui.cover() ? 16 : 34));
+            lp.setMargins(Ui.dp(24), topM, Ui.dp(24), botM);
+            content.addView(bigTitle, lp);
+            return;
+        }
         boolean oneLine = lines(title, avail, size) <= 1;
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 oneLine ? Ui.dp(50) : ViewGroup.LayoutParams.WRAP_CONTENT);
         // short 16:10 cover screens: tighter title spacing so more content fits
-        lp.setMargins(Ui.dp(18), Ui.dp(Ui.cover() ? 4 : 14), Ui.dp(16), Ui.dp(Ui.cover() ? 0 : 6));
+        lp.setMargins(Ui.dp(Ui.gStyle ? 24 : 18), Ui.dp(Ui.cover() ? 4 : 14), Ui.dp(Ui.gStyle ? 20 : 16), Ui.dp(Ui.cover() ? 0 : 6));
         content.addView(bigTitle, lp);
     }
 
@@ -97,6 +118,10 @@ abstract class Page extends FrameLayout {
     void show() {
         if (!started) {
             started = true;
+            if (Ui.gStyle && back && !(this instanceof Pages.LocalListPage) && bigTitle != null && bigTitle.getVisibility() == VISIBLE) {
+                bigTitle.setVisibility(GONE);
+                bigTitle.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
+            }
             if (getBackground() == null) setBackgroundColor(grouped ? Ui.groupedBg() : Ui.bg());
             build();
         }
@@ -120,9 +145,10 @@ abstract class Page extends FrameLayout {
     /** 0 → large title fully visible, 1 → small header title shown. */
     float titleProgress() {
         int y = scroll.getScrollY();
+        if (Ui.gStyle && back && !(this instanceof Pages.LocalListPage)) return 1f;
         if (bigTitle == null) return Ui.clamp((y - Ui.dp(140)) / (float) Ui.dp(24), 0f, 1f);
-        float start = bigTitle.getTop() - Ui.statusInset - Ui.dp(40);
-        return Ui.clamp((y - start) / (float) Ui.dp(18), 0f, 1f);
+        float start = bigTitle.getTop() - Ui.statusInset - Ui.dp(Ui.gStyle ? 24 : 40);
+        return Ui.clamp((y - start) / (float) Ui.dp(22), 0f, 1f);
     }
 
     float blurProgress() { return Ui.clamp(scroll.getScrollY() / (float) Ui.dp(20), 0f, 1f); }

@@ -331,11 +331,13 @@ final class Player {
     }
 
     private static void startPlay(JSONObject body, Track preview, String openUri) {
+        final boolean wasPlaying = playing && !local();
         LocalMusic.stopForOther();
+        boolean changed = false;
         if (preview != null) {
-            boolean changed = track == null || !preview.id.equals(track.id);
+            changed = track == null || !preview.id.equals(track.id);
             track = preview;
-            if (changed) { liked = false; for (Runnable r : new ArrayList<>(trackListeners)) r.run(); checkLiked(); }
+            if (changed) { liked = false; for (Runnable r : new ArrayList<>(trackListeners)) r.run(); }
         }
         playing = true;
         progress = 0;
@@ -345,11 +347,13 @@ final class Player {
         SpotifyWeb.activate();
         SpotifyWeb.whenReady(() -> {
             String dev = SpotifyWeb.deviceId;
-            SpotifyWeb.switchTrack(() -> command("PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri));
+            SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay("PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, true));
             deviceId = dev;
             Spotify.MAIN.postDelayed(Player::applyWantedRepeat, 900);
             later();
-        }, () -> { command("PUT", "/me/player/play", body.toString(), openUri); later(); });
+        }, () -> { commandPlay("PUT", "/me/player/play", body.toString(), openUri, false); later(); });
+        // defer secondary metadata call so it never competes with the first play request
+        if (changed) Spotify.MAIN.postDelayed(Player::checkLiked, 700);
     }
 
     // ---- repeat survives track/context changes ----
@@ -365,10 +369,34 @@ final class Player {
 
     private static void later() { Spotify.MAIN.postDelayed(Player::refresh, 700); }
 
+    /** High-priority playback command on the dedicated PLAY_IO lane, with a fast retry if the device just registered. */
+    private static void commandPlay(String method, String path, String body, String openUri, boolean allowFastRetry) {
+        if (!Spotify.loggedIn()) { toast(R.string.login_needed); return; }
+        Spotify.sendPlay(method, path, body, new Spotify.Cb() {
+            @Override public void ok(JSONObject o) { }
+            @Override public void err(int code, String message) {
+                if (code == 404) {
+                    if (allowFastRetry && SpotifyWeb.ready() && path.contains("device_id=")) {
+                        Spotify.MAIN.postDelayed(() -> commandPlay(method, path, body, openUri, false), 250);
+                    } else {
+                        recoverNoDevice(method, path, body, openUri);
+                    }
+                } else if (code == 403 && (!Spotify.isPremium() || String.valueOf(message).toLowerCase().contains("premium"))) {
+                    toast(R.string.premium_needed);
+                    refresh();
+                } else if (code == 401) {
+                    toast(R.string.login_needed);
+                } else {
+                    refresh();
+                }
+            }
+        });
+    }
+
     /** Sends a player command; recovers from "no active device" by transferring or launching Spotify. */
     private static void command(String method, String path, String body, String openUri) {
         if (!Spotify.loggedIn()) { toast(R.string.login_needed); return; }
-        Spotify.send(method, path, body, new Spotify.Cb() {
+        Spotify.sendPlay(method, path, body, new Spotify.Cb() {
             @Override public void ok(JSONObject o) { }
             @Override public void err(int code, String message) {
                 if (code == 404) {

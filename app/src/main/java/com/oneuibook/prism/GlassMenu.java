@@ -94,7 +94,7 @@ final class GlassMenu extends FrameLayout {
             r.setGravity(Gravity.CENTER_VERTICAL);
             r.setPadding(Ui.dp(anyCheck ? 12 : 18), 0, Ui.dp(18), 0);
             if (anyCheck) {
-                Icons.IconView ck = new Icons.IconView(m, Icons.CHECK, 17, fg);
+                Icons.IconView ck = new Icons.IconView(m, Icons.CHECK, 17, Ui.gStyle ? Ui.ACCENT : fg);
                 ck.setVisibility(e.checked ? VISIBLE : INVISIBLE);
                 LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22));
                 cl.rightMargin = Ui.dp(8);
@@ -113,8 +113,8 @@ final class GlassMenu extends FrameLayout {
         }
         list.setAlpha(0f);
         addView(list, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        p.stiffness = 260f;
-        p.damping = 0.68f;
+        p.stiffness = Ui.gStyle ? 320f : 260f;
+        p.damping = Ui.gStyle ? 0.78f : 0.68f;
         p.onUpdate = this::onProgress;
         p.onEnd = () -> {
             if (closing) {
@@ -125,8 +125,8 @@ final class GlassMenu extends FrameLayout {
         };
         cur.set(anchor);
         blobRadius = anchor.height() / 2f;
-        // menus opened from the header pill take the pill's place while they are open
-        fromHeader = RectF.intersects(anchor, headerPillInRoot(m));
+        // in G style the header pill stays visible while the One UI popup card scales cleanly from its corner
+        fromHeader = !Ui.gStyle && RectF.intersects(anchor, headerPillInRoot(m));
         if (fromHeader) m.header.setPillHidden(true);
     }
 
@@ -179,6 +179,27 @@ final class GlassMenu extends FrameLayout {
      */
     private void onProgress() {
         float v = p.value;
+        if (Ui.gStyle) {
+            // One UI 8.5/9.x popup card: clean corner-anchored scale 0.78 -> 1.0 + alpha fade, no liquid blob
+            float sc = Ui.lerp(0.78f, 1f, Ui.clamp(v, 0f, 1.08f));
+            float px = anchor.centerX() > getWidth() / 2f ? target.right : target.left;
+            float py = anchor.centerY() < getHeight() * 0.55f ? target.top : target.bottom;
+            float w = target.width() * sc, h = target.height() * sc;
+            float l = px == target.right ? target.right - w : target.left;
+            float t = py == target.top ? target.top : target.bottom - h;
+            cur.set(l, t, l + w, t + h);
+            blobRadius = Ui.dpf(26f) * sc;
+            applyMaterial(Ui.clamp(v, 0f, 1f));
+            glass.alpha = Ui.clamp(v * 1.4f, 0f, 1f);
+            float ca = Ui.clamp((v - 0.15f) / 0.65f, 0f, 1f);
+            list.setAlpha(ca);
+            list.setPivotX(px - target.left);
+            list.setPivotY(py - target.top);
+            list.setScaleX(sc);
+            list.setScaleY(sc);
+            invalidate();
+            return;
+        }
         float gather = Ui.clamp(v / 0.42f, 0f, 1f);
         float swell = Ui.clamp((v - 0.28f) / 0.72f, 0f, 1.2f);
         gather = gather * gather * (3f - 2f * gather);
@@ -192,7 +213,7 @@ final class GlassMenu extends FrameLayout {
         w *= 1f + travel;
         h *= 1f - travel * 0.5f;
         cur.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
-        blobRadius = Ui.lerp(Math.min(w, h) * 0.5f, Ui.dpf(22), Ui.clamp(swell, 0f, 1f));
+        blobRadius = Ui.lerp(Math.min(w, h) * 0.5f, Ui.dpf(Ui.gStyle ? 26f : 22f), Ui.clamp(swell, 0f, 1f));
         applyMaterial(Ui.clamp(swell, 0f, 1f));
         float ca = Ui.clamp((v - 0.55f) / 0.45f, 0f, 1f);
         list.setAlpha(ca);

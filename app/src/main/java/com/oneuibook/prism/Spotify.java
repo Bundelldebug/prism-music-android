@@ -38,6 +38,8 @@ final class Spotify {
     static final String API = "https://api.spotify.com/v1";
 
     static final ExecutorService IO = Executors.newFixedThreadPool(8);
+    /** Dedicated lane for playback commands so home/explore/probe traffic never delays first play. */
+    static final ExecutorService PLAY_IO = Executors.newSingleThreadExecutor();
     private static final ExecutorService PROBE = Executors.newFixedThreadPool(8);
     static final Handler MAIN = new Handler(Looper.getMainLooper());
     static SharedPreferences prefs;
@@ -312,6 +314,25 @@ final class Spotify {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Object[]> e) { return size() > 160; }
     });
     private static boolean cacheable(String method, String path) { return "GET".equals(method) && !path.startsWith("/me/player") && fixtures == null; }
+
+    static void sendPlay(String method, String path, String body, Cb cb) {
+        PLAY_IO.execute(() -> {
+            try {
+                JSONObject o = call(method, path, body);
+                if (cb != null) MAIN.post(() -> cb.ok(o));
+            } catch (Exception e) {
+                int code = e instanceof ApiError ? ((ApiError) e).code : 0;
+                String msg = String.valueOf(e.getMessage());
+                if (cb != null) MAIN.post(() -> cb.err(code, msg));
+            }
+        });
+    }
+
+    /** Refreshes an expired access token ahead of time so the SDK and first play request never block on OAuth. */
+    static void prewarm() {
+        if (!loggedIn() || fixtures != null) return;
+        PLAY_IO.execute(() -> { try { token(); } catch (Exception ignored) {} });
+    }
 
     static void send(String method, String path, String body, Cb cb) {
         final boolean cache = cacheable(method, path);

@@ -236,4 +236,19 @@
     <string name="merge_discs">複数ディスクのアルバムをまとめる</string>
     <string name="merge_discs_note">「タイトル Disc 1」「タイトル CD2」「タイトル (ディスク 3)」のようにディスク番号の付いたアルバムを「タイトル」1つにまとめ、曲はディスク順に表示します。</string>
     <string name="style_note">A：背景を屈折させるグラス。G：ぼかしのある半透明のピル、メディアプレーヤー風の再生画面とウェーブ再生バー。アニメーションはどちらも同じです。</string>
+    <string name="set_accent">アクセントカラー</string>
+    <string name="accent_red">レッド</string>
+    <string name="accent_blue">ブルー</string>
+    <string name="accent_violet">バイオレット</string>
+    <string name="accent_teal">ミント</string>
+    <string name="accent_green">グリーン</string>
+    <string name="accent_orange">オレンジ</string>
+    <string name="accent_pink">ピンク</string>
+    <string name="accent_dynamic">システム</string>
+    <string name="accent_note">タブ選択、ボタン、スライダー、ウェーブ再生バーなどアプリ全体のメインカラーを変更します。</string>
+    <string name="aod_title">フルスクリーン AOD</string>
+    <string name="aod_open">フルスクリーン AOD を開く</string>
+    <string name="aod_dim">AOD で画面を暗くする</string>
+    <string name="aod_hint">ダブルタップまたは上にスワイプして終了</string>
+    <string name="aod_note">有機EL向けの純黒背景に時計・ジャケット・曲情報・シンプルな再生操作を表示し、焼き付き防止のため表示位置を定期的にわずかに動かします。</string>
 </resources>

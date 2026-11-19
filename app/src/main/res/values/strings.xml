@@ -236,4 +236,19 @@
     <string name="merge_discs">Combine multi-disc albums</string>
     <string name="merge_discs_note">Albums named like “Title Disc 1”, “Title CD2” or “Title (Disc 3)” are shown as one album “Title”, with each disc in order.</string>
     <string name="style_note">A: glass that bends the light behind it. G: frosted, translucent pills with a media-player-style now playing screen and a wave seek bar. Animations are the same in both.</string>
+    <string name="set_accent">Accent color</string>
+    <string name="accent_red">Prism Red</string>
+    <string name="accent_blue">Blue</string>
+    <string name="accent_violet">Violet</string>
+    <string name="accent_teal">Mint</string>
+    <string name="accent_green">Green</string>
+    <string name="accent_orange">Orange</string>
+    <string name="accent_pink">Pink</string>
+    <string name="accent_dynamic">System</string>
+    <string name="accent_note">Changes the primary color used across tabs, buttons, sliders, and the wave seek bar.</string>
+    <string name="aod_title">Full-screen AOD</string>
+    <string name="aod_open">Open full-screen AOD</string>
+    <string name="aod_dim">Dim screen in AOD</string>
+    <string name="aod_hint">Double-tap or swipe up to exit</string>
+    <string name="aod_note">Shows a pure-black OLED clock, cover art, track info and minimal playback controls, gently shifting position to help prevent burn-in.</string>
 </resources>

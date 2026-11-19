@@ -74,6 +74,39 @@ public class PrismUiTest {
         try (FileOutputStream o = new FileOutputStream(new File(OUT, name + ".png"))) { assertTrue(b.compress(Bitmap.CompressFormat.PNG, 100, o)); }
     }
 
+    private static void captureAnim(MainActivity a, String name, int frames, int stepMs) throws Exception {
+        File dir = new File(new File(OUT, "frames"), name);
+        if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); }
+        dir.mkdirs();
+        View d = a.getWindow().getDecorView();
+        int W = d.getWidth(), H = d.getHeight();
+        int w = (W / 2) & ~1, h = (H / 2) & ~1; // even dimensions for H.264 / 60fps video encoding (590x1278)
+        Bitmap full = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        Canvas fc = new Canvas(full);
+        org.robolectric.shadows.ShadowChoreographer.setPaused(true);
+        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(stepMs));
+        try {
+            for (int i = 0; i < frames; i++) {
+                d.measure(View.MeasureSpec.makeMeasureSpec(W, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(H, View.MeasureSpec.EXACTLY));
+                d.layout(0, 0, W, H);
+                full.eraseColor(0);
+                d.draw(fc);
+                Bitmap scaled = Bitmap.createScaledBitmap(full, w, h, true);
+                try (FileOutputStream o = new FileOutputStream(new File(dir, String.format("f_%03d.png", i)))) {
+                    scaled.compress(Bitmap.CompressFormat.PNG, 90, o);
+                }
+                scaled.recycle();
+                Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(stepMs));
+            }
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false);
+            org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(1));
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            full.recycle();
+        }
+    }
+
     private static void fakeTrack() {
         Player.Track t = new Player.Track();
         t.id = "x"; t.uri = "spotify:track:x"; t.name = "Supernova Love"; t.artist = "IVE, David Guetta"; t.album = "Supernova Love";
@@ -486,13 +519,13 @@ public class PrismUiTest {
                 && lp.bigTitle.getLayout().getEllipsisCount(lp.bigTitle.getLineCount() - 1) == 0);
         a.pop(); idle(500);
 
-        // [3] app style A / G: same chrome, glass vs frosted pills
+        // [3] app style A / G: same chrome, glass vs One UI 9.5 frosted pills + cards
         shot(a, "62_style_A");
         MainActivity.prefs(app).edit().putString("player_style", "oneui").commit();
         Ui.gStyle = true;
-        a.invalidateChrome(); idle(400);
+        a.refreshAppearance(); idle(600);
         shot(a, "63_style_G");
-        // [2] G style player: cover, device row, title below it, wave seek bar, round controls, volume
+        // [2] G style player: cover, pill output chip, title below it, wave seek bar, round controls, volume
         fakeTrack();
         a.np.applyStyle();
         a.np.open(); idle(1400);
@@ -500,7 +533,91 @@ public class PrismUiTest {
         idle(400);
         shot(a, "61_player_oneui");     // the waves have risen by now
         a.np.close(); idle(900);
+
+        // [6] Accent color customization + One UI 9.5 G style settings & player
+        assertEquals(0xFF387AFF, Ui.resolveAccent(app, "blue"));
+        assertEquals(0xFF7B61FF, Ui.resolveAccent(app, "violet"));
+        MainActivity.prefs(app).edit().putString("accent_color", "blue").commit();
+        Ui.ACCENT = Ui.resolveAccent(app, "blue");
+        a.refreshAppearance(); idle(400);
+        a.onTab(3, false); idle(500);
+        shot(a, "65_g_settings_blue");
+        a.push(new Settings.AppearancePage(a)); idle(600);
+        shot(a, "66_g_appearance_blue");
+        a.pop(); idle(400);
+        // open header menu in G style from the top-right header pill (ensure layout is drawn first)
+        a.onTab(0, false); idle(400);
+        shot(a, "63_style_G_blue_before_menu");
+        a.onHeaderButton(Icons.QUEUE, a.header.pillInRoot());
+        captureAnim(a, "g_menu_open", 28, 16);
+        shot(a, "68_g_menu_blue");
+        GlassMenu.dismissAny(a.root);
+        captureAnim(a, "g_menu_close", 22, 16);
+
+        // tab switch animation (Home -> Settings) in G style
+        a.dock.select(3, true);
+        a.onTab(3, false);
+        captureAnim(a, "g_tab_switch", 28, 16);
+
+        // page push & pop animation (Settings -> Appearance -> back) in G style
+        a.push(new Settings.AppearancePage(a));
+        captureAnim(a, "g_page_push", 26, 16);
+        a.pop();
+        captureAnim(a, "g_page_pop", 24, 16);
+
+        // G style unified bottom search bar preview
+        a.onSearch(); idle(600);
+        shot(a, "70_g_search_blue");
+        a.onExitSearch(); idle(600);
+
+        // now playing open, wave animation, close in G style (with long title/artist for centred marquee check)
+        Player.track.name = "Supernova Love (Extended Club Mix feat. Prism Orchestra)";
+        Player.track.artist = "IVE, David Guetta & The Prism Symphony Ensemble";
+        for (Runnable r : new java.util.ArrayList<>(Player.trackListeners)) r.run();
+        a.np.applyStyle();
+        a.np.open();
+        captureAnim(a, "g_player_open", 32, 16);
+        captureAnim(a, "g_player_wave", 36, 16);
+        shot(a, "67_g_player_blue");
+        // Full-screen OLED AOD open & close via Back
+        a.openAod(); idle(500);
+        assertTrue("AOD overlay open", a.aod.isOpen());
+        shot(a, "73_aod_fullscreen");
+        a.onBackPressed(); idle(500);
+        assertTrue("AOD closed on back", !a.aod.isOpen());
+        a.np.close();
+        captureAnim(a, "g_player_close", 28, 16);
+
+        // G style foldable (unfolded w690dp-h841dp) check: no overlap on rail or two-pane player
+        ActivityController<MainActivity> fc = launch("ko-w690dp-h841dp-xhdpi");
+        MainActivity fa = fc.get();
+        fakeTrack();
+        Player.track.name = "Supernova Love (Extended Club Mix)";
+        Player.track.artist = "IVE, David Guetta";
+        for (Runnable r : new java.util.ArrayList<>(Player.trackListeners)) r.run();
+        idle(700);
+        shot(fa, "71_g_foldable_rail");
+        fa.np.applyStyle();
+        fa.np.open(); idle(1400);
+        shot(fa, "72_g_foldable_player");
+        fa.np.close(); idle(600);
+
+        // G style dark mode settings preview
+        Ui.dark = true;
+        a.refreshAppearance(); idle(400);
+        a.onTab(3, false); idle(500);
+        shot(a, "69_g_dark_settings_blue");
+        Ui.dark = false;
+        // [7] Spotify first-play switchTrack skips fade delay when not previously playing
+        final boolean[] sent = {false};
+        SpotifyWeb.switchTrack(false, () -> sent[0] = true);
+        assertTrue("first-play switchTrack dispatches immediately", sent[0]);
+
+        // restore defaults
         Ui.gStyle = false;
+        MainActivity.prefs(app).edit().putString("accent_color", "red").putString("player_style", "prism").putString("source", "spotify").commit();
+        Ui.ACCENT = Ui.ACCENT_DEFAULT;
+        a.refreshAppearance(); idle(300);
         // the media notification's prism icon, large, on a dark status-bar colour
         android.graphics.drawable.Drawable ic = a.getDrawable(R.drawable.ic_stat_prism);
         Bitmap ib = Bitmap.createBitmap(240, 240, Bitmap.Config.ARGB_8888);
@@ -509,8 +626,6 @@ public class PrismUiTest {
         ic.setBounds(24, 24, 216, 216);
         ic.draw(icv);
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "62_notification_icon.png"))) { ib.compress(Bitmap.CompressFormat.PNG, 100, o); }
-        MainActivity.prefs(app).edit().putString("player_style", "prism").putString("source", "spotify").commit();
-        a.np.applyStyle();
         LocalMusic.songs.clear();
     }
 }

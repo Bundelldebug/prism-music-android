@@ -17,7 +17,7 @@ final class Icons {
             SHUFFLE = 16, LIST = 17, CHEVRON = 18, BACK = 19, CHECK = 20, REPEAT = 21, DEVICE = 22, NOTE = 23,
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
-            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49;
+            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -65,6 +65,21 @@ final class Icons {
                 fill();
                 p.moveTo(10f, 8.2f); p.lineTo(16f, 12f); p.lineTo(10f, 15.8f); p.close();
                 c.drawPath(p, P);
+                break;
+            }
+            case AOD: {
+                // crescent moon + small sparkle (Always-On Display mode)
+                stroke(1.8f);
+                p.moveTo(18.6f, 14.8f);
+                p.cubicTo(16.9f, 18.2f, 12.8f, 20.1f, 8.8f, 18.8f);
+                p.cubicTo(4.7f, 17.5f, 2.7f, 13.0f, 4.1f, 8.8f);
+                p.cubicTo(5.1f, 5.7f, 7.8f, 3.8f, 10.9f, 3.6f);
+                p.cubicTo(9.2f, 6.2f, 9.3f, 9.8f, 11.5f, 12.2f);
+                p.cubicTo(13.5f, 14.3f, 16.3f, 15.1f, 18.6f, 14.8f);
+                p.close();
+                c.drawPath(p, P);
+                fill();
+                c.drawCircle(18.2f, 6.4f, 1.3f, P);
                 break;
             }
             case SIDEBAR: {

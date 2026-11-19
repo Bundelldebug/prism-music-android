@@ -226,10 +226,10 @@ final class Glass {
                 float ox = tmp.left - pad, oy = tmp.top - pad;
                 node.setPosition(0, 0, w, h);
                 RenderEffect fx = null;
-                // G style: no refraction, rim or lens — a frosted, translucent pill (strong blur + tint)
+                // G style: no refraction, rim or lens — One UI 9.5 frosted translucent pill (smooth blur + clean tint)
                 boolean g = Ui.gStyle;
                 boolean useShader = shader != null && Glass.shadersOk && !g;
-                float br = g ? Ui.dpf(Math.max(blurDp, 20f)) : (blur ? Ui.dpf(blurDp) : 0f);
+                float br = g ? Ui.dpf(Math.max(blurDp, 22f)) : (blur ? Ui.dpf(blurDp) : 0f);
                 if (br > 0.5f) {
                     if (br != lastBlur || blurEffect == null) {
                         blurEffect = RenderEffect.createBlurEffect(br, br, Shader.TileMode.CLAMP);
@@ -288,8 +288,25 @@ final class Glass {
                 canvas.drawPath(path, fill);
             }
             if (strokeColor != 0) {
-                stroke.setColor(Ui.alpha(strokeColor, alpha));
-                canvas.drawPath(path, stroke);
+                if (Ui.gStyle) {
+                    // One UI 9.x blur component outline: subtle neutral border + top-to-bottom specular gradient highlight
+                    stroke.setShader(null);
+                    stroke.setStrokeWidth(Math.max(1f, Ui.dpf(0.75f)));
+                    stroke.setColor(Ui.alpha(Ui.gStroke(), alpha));
+                    canvas.drawPath(path, stroke);
+                    tmp.set(a);
+                    if (!b.isEmpty()) tmp.union(b);
+                    if (!c.isEmpty()) tmp.union(c);
+                    stroke.setStrokeWidth(Math.max(1.2f, Ui.dpf(1.1f)));
+                    stroke.setShader(new android.graphics.LinearGradient(0, tmp.top, 0, tmp.bottom,
+                            Ui.alpha(Ui.gOutlineTop(), alpha), 0x00FFFFFF, Shader.TileMode.CLAMP));
+                    canvas.drawPath(path, stroke);
+                    stroke.setShader(null);
+                    stroke.setStrokeWidth(Math.max(1f, Ui.dpf(0.6f)));
+                } else {
+                    stroke.setColor(Ui.alpha(strokeColor, alpha));
+                    canvas.drawPath(path, stroke);
+                }
             }
         }
 

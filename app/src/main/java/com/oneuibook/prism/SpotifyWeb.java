@@ -6,12 +6,22 @@ import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,8 +41,15 @@ final class SpotifyWeb {
 
     static boolean ready() { return deviceId != null; }
 
+    private static final String SDK_URL = "https://sdk.scdn.co/spotify-player.js";
+    private static final long SDK_TTL_MS = 24L * 60 * 60 * 1000;
+
     private static final String HTML = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            + "<script src='https://sdk.scdn.co/spotify-player.js'></script></head><body><script>\n"
+            + "<link rel='preconnect' href='https://apresolve.spotify.com' crossorigin>"
+            + "<link rel='preconnect' href='https://api.spotify.com' crossorigin>"
+            + "<link rel='preconnect' href='https://dealer.spotify.com' crossorigin>"
+            + "<link rel='preconnect' href='https://spclient.wg.spotify.com' crossorigin>"
+            + "<script src='" + SDK_URL + "'></script></head><body><script>\n"
             + "window.onSpotifyWebPlaybackSDKReady = function() {\n"
             + "  var player = new Spotify.Player({ name: 'Prism', volume: 1.0,\n"
             + "    getOAuthToken: function(cb) { cb(Prism.token()); } });\n"
@@ -48,6 +65,10 @@ final class SpotifyWeb {
             // short volume ramps: cutting a waveform mid-cycle (old song) or starting one at full level (new song)
             // is what produces the click when switching songs
             + "window.prismVol = 1;\n"
+            + "window.prismRestoreVol = function() {\n"
+            + "  window.prismFadeId = (window.prismFadeId || 0) + 1;\n"
+            + "  if (window.prismVol < 0.99 && window.prismPlayer) { window.prismVol = 1; try { window.prismPlayer.setVolume(1.0); } catch (e) {} }\n"
+            + "};\n"
             + "window.prismFade = function(to, ms, tag) {\n"
             + "  var p = window.prismPlayer; if (!p) { Prism.faded(tag); return; }\n"
             + "  var from = window.prismVol, t0 = performance.now(); window.prismFadeId = (window.prismFadeId || 0) + 1; var id = window.prismFadeId;\n"
@@ -83,17 +104,54 @@ final class SpotifyWeb {
             ((ViewGroup) web.getParent()).removeView(web);
     }
 
+    /** Cached spotify-player.js on disk so cold start doesn't wait on scdn.co before connecting. */
+    private static File sdkCacheFile(android.content.Context c) {
+        return new File(c.getApplicationContext().getCacheDir(), "spotify_sdk.js");
+    }
+
+    private static void refreshSdkCache(File f) {
+        Spotify.IO.execute(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(SDK_URL).openConnection();
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(15000);
+                if (c.getResponseCode() == 200) {
+                    File tmp = new File(f.getParentFile(), "spotify_sdk.js.tmp");
+                    try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tmp)) {
+                        byte[] buf = new byte[16384];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    }
+                    if (tmp.length() > 1024) tmp.renameTo(f);
+                    else tmp.delete();
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     static void start(Activity a, ViewGroup root) {
         if (web != null) { attach(a, root); return; }
         if (!Spotify.loggedIn() || !Spotify.hasScope("streaming")) return;
         failed = false;
+        Spotify.prewarm();
+        final File sdkFile = sdkCacheFile(a);
+        if (!sdkFile.isFile() || System.currentTimeMillis() - sdkFile.lastModified() > SDK_TTL_MS) refreshSdkCache(sdkFile);
         ctx = new android.content.MutableContextWrapper(a);
         web = new WebView(ctx);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        web.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                if (req != null && req.getUrl() != null && SDK_URL.equals(req.getUrl().toString()) && sdkFile.isFile() && sdkFile.length() > 1024) {
+                    try { return new WebResourceResponse("application/javascript", "utf-8", new FileInputStream(sdkFile)); }
+                    catch (Exception ignored) {}
+                }
+                return super.shouldInterceptRequest(view, req);
+            }
+        });
         web.setWebChromeClient(new WebChromeClient() {
             // Spotify's streams are DRM-protected (Widevine): allow protected media for this page only
             @Override public void onPermissionRequest(PermissionRequest r) {
@@ -151,20 +209,42 @@ final class SpotifyWeb {
     private static int fadeSeq;
     private static String lastStateId = "", fadeFromId = "";
 
+    static void switchTrack(Runnable send) { switchTrack(Player.playing, send); }
+
     /**
-     * Click-free switch without the wait: the play request goes out at once and the short fade-out runs while it is
-     * in flight (a Web API round trip is longer than the 110ms ramp), so the old song is already quiet when the new
-     * one starts. The level comes back on the first state of the new song, not after a timeout.
+     * Click-free switch without the wait: only fades when another song is actually playing on this device.
+     * On first play (or from paused), skips the fade-out/fade-in completely and ensures volume is 1.0 so audio starts
+     * immediately without an extra ramp delay.
      */
-    static void switchTrack(Runnable send) {
-        if (web == null || !ready() || !deviceId.equals(Player.deviceId)) { send.run(); return; }
+    static void switchTrack(boolean wasPlaying, Runnable send) {
+        if (web == null || !ready() || !wasPlaying || !deviceId.equals(Player.deviceId)) {
+            if (web != null && ready()) web.evaluateJavascript("window.prismRestoreVol && window.prismRestoreVol()", null);
+            fadeInPending = false;
+            send.run();
+            return;
+        }
         final int seq = ++fadeSeq;
         fadeFromId = lastStateId;
         fadeInPending = true;
-        if (Player.playing) web.evaluateJavascript("window.prismFade && window.prismFade(0, 110, 'out')", null);
+        web.evaluateJavascript("window.prismFade && window.prismFade(0, 110, 'out')", null);
         send.run();
         // fallback if no state with the new song arrives
         Spotify.MAIN.postDelayed(() -> { if (seq == fadeSeq) fadeIn(); }, 900);
+    }
+
+    /** Silently registers Prism as the active Connect device when nothing else is playing, cutting first-play latency. */
+    private static void preTransfer(String id) {
+        if (id == null || !Spotify.loggedIn() || Spotify.fixtures != null) return;
+        if (Player.playing || Player.hasDevice || LocalMusic.isLocal(Player.track)) return;
+        try {
+            JSONObject b = new JSONObject().put("device_ids", new JSONArray().put(id)).put("play", false);
+            Spotify.sendPlay("PUT", "/me/player", b.toString(), new Spotify.Cb() {
+                @Override public void ok(JSONObject o) {
+                    if (Player.deviceId == null) Player.deviceId = id;
+                    Player.hasDevice = true;
+                }
+            });
+        } catch (Exception ignored) {}
     }
 
     private static void fadeIn() {
@@ -183,9 +263,11 @@ final class SpotifyWeb {
         @JavascriptInterface public void onReady(String id) {
             Spotify.MAIN.post(() -> {
                 deviceId = id;
+                activate();
                 List<Runnable> l = new ArrayList<>(waiting);
                 waiting.clear();
                 for (Runnable r : l) r.run();
+                if (l.isEmpty()) preTransfer(id);
             });
         }
 

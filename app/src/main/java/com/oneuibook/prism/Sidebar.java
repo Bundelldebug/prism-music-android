@@ -29,7 +29,7 @@ final class Sidebar extends FrameLayout {
     Sidebar(MainActivity m) {
         super(m);
         this.m = m;
-        setBackgroundColor(Ui.dark ? 0xFF161618 : 0xFFF2F2F5);
+        setBackgroundColor(Ui.gStyle ? Ui.groupedBg() : (Ui.dark ? 0xFF161618 : 0xFFF2F2F5));
         setClickable(true);   // touches never fall through to the page beneath
 
         ScrollView sv = new ScrollView(m);
@@ -146,16 +146,18 @@ final class Sidebar extends FrameLayout {
         return r;
     }
 
-    /** Highlights the current tab with the grey capsule. */
+    /** Highlights the current tab with a capsule (accent-tinted in G style, grey in A style). */
     void setSelected(int tab) {
         for (int i = 0; i < tabRows.size(); i++) {
             LinearLayout r = tabRows.get(i);
             boolean on = i == tab;
-            android.graphics.drawable.Drawable base = on ? Ui.round(Ui.dark ? 0x33FFFFFF : 0x17000000, 100) : null;
+            int selCol = Ui.gStyle ? Ui.alpha(Ui.ACCENT, Ui.dark ? 0.22f : 0.13f) : (Ui.dark ? 0x33FFFFFF : 0x17000000);
+            android.graphics.drawable.Drawable base = on ? Ui.round(selCol, 100) : null;
             r.setBackground(new android.graphics.drawable.RippleDrawable(
                     android.content.res.ColorStateList.valueOf(Ui.pressed()), base, Ui.round(0xFFFFFFFF, 100)));
             TextView t = (TextView) r.getChildAt(1);
             t.setTypeface(on ? Ui.semibold : Ui.regular);
+            t.setTextColor(on && Ui.gStyle ? Ui.ACCENT : Ui.text());
         }
     }
 }

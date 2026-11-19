@@ -134,6 +134,7 @@ final class Eq {
 
         @Override protected void onDraw(Canvas c) {
             boolean en = on(getContext());
+            fill.setColor(Ui.ACCENT);
             float zero = yOf(0);
             c.drawLine(Ui.dpf(12), zero, getWidth() - Ui.dpf(12), zero, mid);
             for (int i = 0; i < FREQ.length; i++) {

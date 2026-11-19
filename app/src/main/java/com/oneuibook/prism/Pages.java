@@ -662,7 +662,7 @@ final class Pages {
                     if (l.isEmpty()) { list.addView(Widgets.caption(m, m.getString(R.string.empty))); return; }
                     LinearLayout card = new LinearLayout(m);
                     card.setOrientation(LinearLayout.VERTICAL);
-                    card.setBackground(Ui.round(Ui.card(), 13));
+                    card.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 26 : 13));
                     card.setClipToOutline(true);
                     for (int i = 0; i < l.size(); i++) {
                         final int idx = i;

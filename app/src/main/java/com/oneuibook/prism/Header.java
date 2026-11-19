@@ -143,6 +143,15 @@ final class Header extends View {
 
     int barBottom() { return Ui.statusInset + Ui.dp(60); }
 
+    /** Right-hand header pill bounds in root coordinates (ensuring layout is up to date). */
+    RectF pillInRoot() {
+        layoutRects();
+        float[] o = Glass.abs(this);
+        RectF a = new RectF(pill);
+        a.offset(o[0], o[1]);
+        return a;
+    }
+
     private void layoutRects() {
         float top = Ui.statusInset + Ui.dpf(14);
         // foldable inner screen: the pill stands upright, matching the vertical tab rail
@@ -190,32 +199,34 @@ final class Header extends View {
         }
         if (contentAlpha <= 0.01f) return;
         int fg = Ui.text();
-        // back button: grows out of a point with a little overshoot, shrinks away when leaving
+        // back button: in G style a clean borderless chevron (<) like One UI 9.x; in A style a glass circle
         float bp = backP.value;
-        float titleX = Ui.lerp(Ui.dpf(16), backRect.right + Ui.dpf(12), Ui.clamp(bp, 0f, 1f));
+        float titleX = Ui.lerp(Ui.dpf(Ui.gStyle ? 22 : 16), backRect.right + Ui.dpf(Ui.gStyle ? 6 : 12), Ui.clamp(bp, 0f, 1f));
         if (bp > 0.01f) {
             float s = Ui.lerp(0.35f, 1f, bp), ba = Ui.clamp(bp, 0f, 1f) * contentAlpha;
             RectF br = tmpRect;
             br.set(backRect.centerX() - backRect.width() / 2f * s, backRect.centerY() - backRect.height() / 2f * s,
                     backRect.centerX() + backRect.width() / 2f * s, backRect.centerY() + backRect.height() / 2f * s);
-            backGlass.shapes(br, br.height() / 2f, null, 0, null, 0);
-            backGlass.alpha = ba;
-            backGlass.tint = Ui.barTint();
-            backGlass.blurDp = Ui.barBlur();
-            backGlass.draw(c, this, backdrop);
-            Icons.draw(c, Icons.BACK, br.centerX() - Ui.dpf(1), br.centerY(), Ui.dpf(22) * s, Ui.alpha(fg, ba));
+            if (!Ui.gStyle) {
+                backGlass.shapes(br, br.height() / 2f, null, 0, null, 0);
+                backGlass.alpha = ba;
+                backGlass.tint = Ui.barTint();
+                backGlass.blurDp = Ui.barBlur();
+                backGlass.draw(c, this, backdrop);
+            }
+            Icons.draw(c, Icons.BACK, br.centerX() - Ui.dpf(1), br.centerY(), Ui.dpf(Ui.gStyle ? 24 : 22) * s, Ui.alpha(fg, ba));
             if (pressed == 99) {
                 fill.setColor(Ui.alpha(Ui.pressed(), press.value));
                 c.drawOval(br, fill);
             }
         }
-        // small title
+        // small title (20sp Bold in G style, matching One UI 9.x collapsed header / sub-page bar)
         if (titleAlpha > 0.01f && title.length() > 0) {
             titlePaint.setColor(Ui.alpha(fg, titleAlpha * contentAlpha));
             float avail = (pill.isEmpty() ? w - Ui.dpf(16) : pill.left - Ui.dpf(12)) - titleX;
             float rowCy = vertical ? pill.top + Ui.dpf(23) : pill.centerY();
-            // long names get smaller (17 → 13sp) before anything is cut off
-            float ts = 17f;
+            // long names get smaller before anything is cut off
+            float ts = Ui.gStyle ? 20f : 17f;
             titlePaint.setTextSize(Ui.sp(ts));
             while (ts > 13f && titlePaint.measureText(title) > avail) { ts -= 1f; titlePaint.setTextSize(Ui.sp(ts)); }
             CharSequence t = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END);
@@ -223,22 +234,23 @@ final class Header extends View {
                     : rowCy + titlePaint.getTextSize() * 0.36f;
             c.drawText(t, 0, t.length(), titleX, baseline - Ui.dpf(3) * (1f - titleAlpha), titlePaint);
         }
-        // glass pill buttons, morphing from the previous page's pill
+        // pill action buttons: in G style, float subtly when scrolled and stay minimal at top like One UI 9.x
         float k = morph.value;
         RectF from = fromPill.isEmpty() ? pointAt(pill.isEmpty() ? fromPill : pill) : fromPill;
         RectF to = pill.isEmpty() ? pointAt(fromPill) : pill;
         drawn.set(Ui.lerp(from.left, to.left, k), Ui.lerp(from.top, to.top, k), Ui.lerp(from.right, to.right, k), Ui.lerp(from.bottom, to.bottom, k));
         float pillA = pill.isEmpty() ? 1f - Ui.clamp(k, 0f, 1f) : (fromPill.isEmpty() ? Ui.clamp(k * 1.5f, 0f, 1f) : 1f);
         if (drawn.width() > 1 && pillA > 0.01f && !pillHidden) {
+            float surfaceA = Ui.gStyle ? Ui.clamp(0.18f + blurAlpha * 0.82f, 0f, 1f) : 1f;
             pillGlass.shapes(drawn, Math.min(drawn.width(), drawn.height()) / 2f, null, 0, null, 0);
-            pillGlass.alpha = contentAlpha * pillA;
+            pillGlass.alpha = contentAlpha * pillA * surfaceA;
             pillGlass.tint = Ui.barTint();
             pillGlass.blurDp = Ui.barBlur();
             // pressing the pill makes it glow white under the finger before the menu drops out of it
             pillGlass.pressX = touchX; pillGlass.pressY = touchY;
             pillGlass.pressR = Ui.dpf(40);
             pillGlass.pressAmt = pressed >= 0 && pressed != 99 ? press.value : 0f;
-            pillGlass.draw(c, this, backdrop);
+            if (pillGlass.alpha > 0.02f) pillGlass.draw(c, this, backdrop);
             // outgoing icons shrink away during the first half, incoming ones pop in during the second
             if (k < 0.5f && prevIcons.length > 0) drawIcons(c, prevIcons, drawn, 1f - k * 2f, fg);
             float inA = prevIcons.length == 0 && fromPill.isEmpty() ? Ui.clamp(k, 0f, 1f) : Ui.clamp(k * 2f - 1f, 0f, 1f);

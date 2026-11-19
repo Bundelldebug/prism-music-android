@@ -236,4 +236,19 @@
     <string name="merge_discs">여러 디스크 앨범 하나로 묶기</string>
     <string name="merge_discs_note">“제목 Disc 1”, “제목 CD2”, “제목 (디스크 3)”처럼 디스크 번호가 붙은 앨범을 “제목” 하나로 묶고, 안의 곡은 디스크 순서대로 보여줘요.</string>
     <string name="style_note">A: 뒤 화면을 굴절하는 글래스. G: 블러가 있는 반투명 알약, 미디어 플레이어형 재생 화면과 웨이브 재생 바. 애니메이션은 둘 다 같아요.</string>
+    <string name="set_accent">강조 색상</string>
+    <string name="accent_red">프리즘 레드</string>
+    <string name="accent_blue">블루</string>
+    <string name="accent_violet">바이올렛</string>
+    <string name="accent_teal">민트</string>
+    <string name="accent_green">그린</string>
+    <string name="accent_orange">오렌지</string>
+    <string name="accent_pink">핑크</string>
+    <string name="accent_dynamic">시스템</string>
+    <string name="accent_note">버튼, 탭 선택, 슬라이더, 웨이브 재생 바 등 앱의 주요 색상을 바꿔요.</string>
+    <string name="aod_title">전체화면 AOD</string>
+    <string name="aod_open">전체화면 AOD 열기</string>
+    <string name="aod_dim">AOD 저휘도 모드</string>
+    <string name="aod_hint">두 번 탭하거나 위로 스와이프하여 종료</string>
+    <string name="aod_note">OLED 화면에 맞춰 검은 배경으로 시계·앨범 아트·곡 정보·간단한 재생 버튼을 표시하고, 번인 방지를 위해 위치를 주기적으로 미세 이동해요.</string>
 </resources>

@@ -120,8 +120,9 @@ final class Widgets {
     /** Tall poster card with dark bottom gradient and caption (home "greeting" row). */
     static View posterCard(Context c, Item it, View.OnClickListener click) {
         int w = posterW(), h = (int) (w * (Ui.cover() ? 1.05f : 1.33f));
+        float rad = Ui.gStyle ? 26f : 18f;
         FrameLayout f = new FrameLayout(c);
-        Img.ArtView art = new Img.ArtView(c, 18);
+        Img.ArtView art = new Img.ArtView(c, rad);
         art.setUrl(it.raw != null ? Spotify.image(it.raw, 640) : it.image);
         f.addView(art, new FrameLayout.LayoutParams(w, h));
         View shade = new View(c) {
@@ -132,7 +133,7 @@ final class Widgets {
                 p.setShader(new LinearGradient(0, getHeight() * 0.55f, 0, getHeight(), new int[]{0x00000000, 0x33000000, 0x8C000000},
                         new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
                 r.set(0, 0, getWidth(), getHeight());
-                cv.drawRoundRect(r, Ui.dpf(14), Ui.dpf(14), p);
+                cv.drawRoundRect(r, Ui.dpf(Ui.gStyle ? 26f : 14f), Ui.dpf(Ui.gStyle ? 26f : 14f), p);
             }
         };
         f.addView(shade, new FrameLayout.LayoutParams(w, h));
@@ -157,7 +158,7 @@ final class Widgets {
         f.addView(txt, new FrameLayout.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         f.setLayoutParams(new LinearLayout.LayoutParams(w, h));
         f.setOnClickListener(click);
-        Ui.press(f, 0.96f);
+        Ui.press(f, Ui.gStyle ? 0.98f : 0.96f);
         return f;
     }
 
@@ -166,7 +167,7 @@ final class Widgets {
         int s = Ui.dp(sizeDp);
         LinearLayout v = new LinearLayout(c);
         v.setOrientation(LinearLayout.VERTICAL);
-        Img.ArtView art = new Img.ArtView(c, 9);
+        Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 22 : 9);
         art.circle = "artist".equals(it.type);
         if (art.circle) art.placeholderIcon = Icons.ARTIST;
         art.setUrl(it.image);
@@ -195,7 +196,7 @@ final class Widgets {
             v.addView(row, rl);
         }
         v.setOnClickListener(click);
-        Ui.press(v, 0.96f);
+        Ui.press(v, Ui.gStyle ? 0.98f : 0.96f);
         return v;
     }
 
@@ -206,7 +207,8 @@ final class Widgets {
         if (i < 8) {
             card.setAlpha(0f);
             card.setTranslationY(Ui.dpf(18));
-            card.animate().alpha(1f).translationY(0f).setStartDelay(i * 35L).setDuration(380).setInterpolator(Ui.EMPHASIZED)
+            card.animate().alpha(1f).translationY(0f).setStartDelay(i * 35L).setDuration(380)
+                    .setInterpolator(Ui.gStyle ? Ui.ONEUI_SINE_80 : Ui.EMPHASIZED)
                     .withEndAction(() -> { card.setAlpha(1f); card.setTranslationY(0f); }).start();
         }
     }
@@ -218,7 +220,7 @@ final class Widgets {
         v.setOrientation(LinearLayout.VERTICAL);
         FrameLayout tile = new FrameLayout(c);
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
-        g.setCornerRadius(Ui.dpf(9));
+        g.setCornerRadius(Ui.dpf(Ui.gStyle ? 22 : 9));
         tile.setBackground(g);
         TextView t = Ui.text(c, label, 16, Ui.heavy, 0xFFFFFFFF);
         t.setSingleLine(false);
@@ -247,7 +249,7 @@ final class Widgets {
             n.setGravity(Gravity.CENTER);
             r.addView(n, new LinearLayout.LayoutParams(Ui.dp(28), Ui.dp(44)));
         } else {
-            Img.ArtView art = new Img.ArtView(c, 6);
+            Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 12 : 6);
             art.setUrl(it.image);
             r.addView(art, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
         }
@@ -266,6 +268,7 @@ final class Widgets {
         if (more != null) m.setOnClickListener(more);
         r.setBackground(ripple());
         r.setOnClickListener(click);
+        if (Ui.gStyle) Ui.press(r, 0.99f);
         return r;
     }
 
@@ -287,7 +290,11 @@ final class Widgets {
         }
     }
 
-    static GradientDrawable chipBg(int color) { return Ui.round(color, 100); }
+    static GradientDrawable chipBg(int color) {
+        GradientDrawable g = Ui.round(color, 100);
+        if (Ui.gStyle && color != Ui.ACCENT) g.setStroke(Math.max(1, Ui.dp(0.8f)), Ui.dark ? 0x29FFFFFF : 0x1A000000);
+        return g;
+    }
 
     /** Selectable pill chips (explore filter row). */
     static final class Chips extends HorizontalScrollView {
@@ -351,16 +358,16 @@ final class Widgets {
             super(c);
             setOrientation(VERTICAL);
             if (header != null) {
-                TextView h = Ui.text(c, header, 14, Ui.regular, Ui.text2());
-                h.setPadding(Ui.dp(33), Ui.dp(24), Ui.dp(32), Ui.dp(8));
+                TextView h = Ui.text(c, header, Ui.gStyle ? 13.5f : 14f, Ui.gStyle ? Ui.semibold : Ui.regular, Ui.text2());
+                h.setPadding(Ui.dp(Ui.gStyle ? 28 : 33), Ui.dp(Ui.gStyle ? 22 : 24), Ui.dp(28), Ui.dp(8));
                 addView(h, MW);
             } else {
                 View sp = new View(c);
-                addView(sp, new LayoutParams(1, Ui.dp(14)));
+                addView(sp, new LayoutParams(1, Ui.dp(Ui.gStyle ? 16 : 14)));
             }
             card = new LinearLayout(c);
             card.setOrientation(VERTICAL);
-            card.setBackground(Ui.round(Ui.card(), 16));
+            card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
             card.setClipToOutline(true);
             LayoutParams lp = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.leftMargin = lp.rightMargin = Ui.dp(16);
@@ -373,20 +380,31 @@ final class Widgets {
                 View sep = new View(c);
                 sep.setBackgroundColor(Ui.separator());
                 LayoutParams sl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(0.5f)));
-                sl.leftMargin = icon != 0 ? Ui.dp(52) : Ui.dp(16);
+                sl.leftMargin = icon != 0 ? Ui.dp(Ui.gStyle ? 64 : 52) : Ui.dp(Ui.gStyle ? 20 : 16);
+                if (Ui.gStyle) sl.rightMargin = Ui.dp(20);
                 card.addView(sep, sl);
             }
             LinearLayout r = new LinearLayout(c);
             r.setGravity(Gravity.CENTER_VERTICAL);
-            r.setPadding(Ui.dp(16), 0, Ui.dp(14), 0);
-            r.setMinimumHeight(Ui.dp(53));
+            r.setPadding(Ui.dp(Ui.gStyle ? 18 : 16), 0, Ui.dp(Ui.gStyle ? 16 : 14), 0);
+            r.setMinimumHeight(Ui.dp(Ui.gStyle ? 56 : 53));
             if (icon != 0) {
-                Icons.IconView iv = new Icons.IconView(c, icon, 21, iconColor);
-                LayoutParams il = new LayoutParams(Ui.dp(22), Ui.dp(22));
-                il.rightMargin = Ui.dp(14);
-                r.addView(iv, il);
+                if (Ui.gStyle) {
+                    FrameLayout badge = new FrameLayout(c);
+                    badge.setBackground(Ui.round(Ui.alpha(iconColor, Ui.dark ? 0.22f : 0.12f), 100));
+                    Icons.IconView iv = new Icons.IconView(c, icon, 18, iconColor);
+                    badge.addView(iv, new FrameLayout.LayoutParams(Ui.dp(20), Ui.dp(20), Gravity.CENTER));
+                    LayoutParams il = new LayoutParams(Ui.dp(34), Ui.dp(34));
+                    il.rightMargin = Ui.dp(12);
+                    r.addView(badge, il);
+                } else {
+                    Icons.IconView iv = new Icons.IconView(c, icon, 21, iconColor);
+                    LayoutParams il = new LayoutParams(Ui.dp(22), Ui.dp(22));
+                    il.rightMargin = Ui.dp(14);
+                    r.addView(iv, il);
+                }
             }
-            TextView t = Ui.text(c, title, 17, Ui.regular, Ui.text());
+            TextView t = Ui.text(c, title, Ui.gStyle ? 16.5f : 17f, Ui.gStyle ? Ui.medium : Ui.regular, Ui.text());
             r.addView(t, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             if (value != null) {
                 TextView v = Ui.text(c, value, 15, Ui.regular, Ui.text2());
@@ -405,6 +423,7 @@ final class Widgets {
             if (click != null) {
                 r.setBackground(ripple());
                 r.setOnClickListener(click);
+                if (Ui.gStyle) Ui.press(r, 0.99f);
             }
             card.addView(r, MW);
             return r;
@@ -522,7 +541,9 @@ final class Widgets {
 
         private void drawTrack(Canvas c) {
             r.set(Ui.dpf(2), Ui.dpf(2), getWidth() - Ui.dpf(2), getHeight() - Ui.dpf(2));
-            p.setColor(Ui.mix(Ui.dark ? 0xFF39393D : 0xFFE9E9EA, 0xFF34C759, pos));
+            int off = Ui.gStyle ? (Ui.dark ? 0xFF45454A : 0xFFC7C7CC) : (Ui.dark ? 0xFF39393D : 0xFFE9E9EA);
+            int onCol = Ui.gStyle ? Ui.ACCENT : 0xFF34C759;
+            p.setColor(Ui.mix(off, onCol, pos));
             c.drawRoundRect(r, r.height() / 2, r.height() / 2, p);
         }
 
@@ -605,7 +626,8 @@ final class Widgets {
 
         private void drawTrack(Canvas c) {
             float cy = getHeight() / 2f, x = pad() + (getWidth() - pad() * 2) * value;
-            r.set(pad(), cy - Ui.dpf(2.5f), getWidth() - pad(), cy + Ui.dpf(2.5f));
+            float half = Ui.dpf(Ui.gStyle ? 3f : 2.5f);
+            r.set(pad(), cy - half, getWidth() - pad(), cy + half);
             p.setColor(Ui.dark ? 0xFF3A3A3C : 0xFFE5E5EA);
             c.drawRoundRect(r, r.height() / 2, r.height() / 2, p);
             r.right = x;
@@ -616,6 +638,27 @@ final class Widgets {
         @Override protected void onDraw(Canvas c) {
             float l = lens.value;
             float cx = pad() + (getWidth() - pad() * 2) * value, cy = getHeight() / 2f;
+            if (Ui.gStyle) {
+                // One UI 9.x SESL expand seekbar: track expands 5dp -> 13dp while dragging, thumb 9dp -> 12dp with 2dp accent stroke
+                float half = Ui.dpf(Ui.lerp(2.5f, 6.5f, l));
+                r.set(pad(), cy - half, getWidth() - pad(), cy + half);
+                p.setColor(Ui.dark ? 0xFF3A3A3D : 0xFFE4E4E7);
+                c.drawRoundRect(r, half, half, p);
+                r.right = Math.max(pad() + half * 2f, cx);
+                p.setColor(Ui.ACCENT);
+                c.drawRoundRect(r, half, half, p);
+                float rad = Ui.lerp(Ui.dpf(9.5f), Ui.dpf(12.5f), l);
+                p.setColor(0xFFFFFFFF);
+                p.setShadowLayer(Ui.dpf(4), 0, Ui.dpf(1.5f), 0x33000000);
+                c.drawCircle(cx, cy, rad, p);
+                p.clearShadowLayer();
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(Ui.dpf(2f));
+                p.setColor(Ui.ACCENT);
+                c.drawCircle(cx, cy, rad - Ui.dpf(1f), p);
+                p.setStyle(Paint.Style.FILL);
+                return;
+            }
             float w = Ui.lerp(Ui.dpf(30), Ui.dpf(46), l), h = Ui.lerp(Ui.dpf(20), Ui.dpf(32), l);
             knob.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
             if (c.isHardwareAccelerated() && Glass.shadersOk && Ui.glass) {
@@ -646,6 +689,7 @@ final class Widgets {
             p.setColor(Ui.ACCENT);
         }
         @Override protected void onDraw(Canvas c) {
+            p.setColor(Ui.ACCENT);
             float s = Ui.dpf(22);
             r.set(getWidth() / 2f - s / 2, getHeight() / 2f - s / 2, getWidth() / 2f + s / 2, getHeight() / 2f + s / 2);
             long t = android.os.SystemClock.uptimeMillis();
@@ -668,7 +712,7 @@ final class Widgets {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
         box.setPadding(Ui.dp(20), Ui.dp(24), Ui.dp(20), Ui.dp(22));
-        box.setBackground(Ui.round(Ui.dark ? 0xFF1C1C1E : 0xFFFFFFFF, 20));
+        box.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 26 : 20));
         box.setElevation(Ui.dpf(1));
         Icons.IconView iv = new Icons.IconView(c, icon, 30, Ui.text());
         box.addView(iv, new LinearLayout.LayoutParams(Ui.dp(34), Ui.dp(34)));

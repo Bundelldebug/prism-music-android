@@ -220,9 +220,12 @@ final class Dock extends FrameLayout {
                 || (miniShowAnim != null && miniShowAnim.isRunning()) || artPop < 1f;
     }
 
+    private boolean unifiedG() { return Ui.gStyle && !rail && !tablet; }
+    private int slotCount() { return unifiedG() ? 5 : 4; }
+
     void setCollapsed(boolean c) {
-        // nothing to slot in without a music bar, so the tab pill stays full size
-        float target = (c && miniVisible && !rail && !tablet && !Settings.pref(getContext(), "keep_expanded", false)) ? 1f : 0f;
+        // G style keeps its unified floating bottom bar clean and steady like One UI 8.5/9.x
+        float target = (c && miniVisible && !rail && !tablet && !unifiedG() && !Settings.pref(getContext(), "keep_expanded", false)) ? 1f : 0f;
         // slow scrolls call this on every scroll event: never restart an animation already heading there
         if (target == collapseTarget && (collapseAnim != null && collapseAnim.isRunning() || Math.abs(collapse - target) < 0.001f)) return;
         collapseTarget = target;
@@ -364,8 +367,13 @@ final class Dock extends FrameLayout {
         if (tablet) {
             // everything centres on the content area, which starts right of the sidebar while it is open
             float cl = contentLeft(), cw = W - cl;
-            float h = Ui.dpf(46), pw = Math.min(W * 0.42f, Ui.dpf(440)) + lead();
+            float h = Ui.dpf(46);
+            // keep safe clearance from the top-right header pill on narrower unfolded foldables (e.g. 690dp)
+            float maxPw = Math.max(Ui.dpf(220), cw - Ui.dpf(260));
+            float pw = Math.min(Math.min(W * 0.42f, Ui.dpf(440)) + lead(), maxPw);
             float left = cl + (cw - pw - gap - h) / 2f, top = Ui.statusInset + Ui.dpf(14);
+            float maxRight = W - Ui.dpf(130);
+            if (left + pw + gap + h > maxRight) left = Math.max(cl + Ui.dpf(16), maxRight - (pw + gap + h));
             // search: the tab pill and the search bubble melt into one field spanning both
             float fr = left + pw + gap + h;
             pill.set(left, top, Ui.lerp(left + pw, fr, search), top + h);
@@ -393,6 +401,19 @@ final class Dock extends FrameLayout {
             if (search > 0) mini.offset(0, Ui.dpf(30) * search);
             return;
         }
+        if (unifiedG()) {
+            // One UI 8.5/9.x: one centred floating pill holding tabs + search; search morphs the pill itself into a search bar
+            float barW = Math.min(W - Ui.dpf(32), Ui.dpf(420));
+            float h = Ui.lerp(Ui.dpf(60), Ui.dpf(54), search);
+            float left = (W - barW) / 2f, top = bottom - h;
+            pill.set(left, top, left + barW, bottom);
+            circle.setEmpty();
+            float gmh = Ui.dpf(54);
+            float expBottom = bottomY() - Ui.dpf(60) - Ui.dpf(8);
+            mini.set(left, expBottom - gmh, left + barW, expBottom);
+            if (search > 0) mini.offset(0, Ui.dpf(34) * search);
+            return;
+        }
         float h = barH();
         bottom += Ui.dpf(4) * cp; // the minimised row sits a little lower
         float top = bottom - h;
@@ -412,15 +433,16 @@ final class Dock extends FrameLayout {
     }
 
     private static final float SLOT_PAD = 14f;
+    private float slotPadPx() { return Ui.dpf(unifiedG() ? 5f : SLOT_PAD); }
     private float axisStart() { return rail ? pill.top : pill.left + lead(); }
     private float axisLen() { return rail ? pill.height() : pill.width() - lead(); }
-    private float slotW() { return (axisLen() - Ui.dpf(SLOT_PAD * 2)) / 4f; }
-    private float slotCenter(int i) { return axisStart() + Ui.dpf(SLOT_PAD) + slotW() * (i + 0.5f); }
+    private float slotW() { return (axisLen() - slotPadPx() * 2f) / (float) slotCount(); }
+    private float slotCenter(int i) { return axisStart() + slotPadPx() + slotW() * (i + 0.5f); }
     private float axisOf(float x, float y) { return rail ? y : x; }
 
     private int slotAt(float a) {
-        int i = (int) ((a - axisStart() - Ui.dpf(SLOT_PAD)) / slotW());
-        return Math.max(0, Math.min(3, i));
+        int i = (int) ((a - axisStart() - slotPadPx()) / slotW());
+        return Math.max(0, Math.min(slotCount() - 1, i));
     }
 
     private void computeLens() {
@@ -429,9 +451,10 @@ final class Dock extends FrameLayout {
         float l = lift.value;
         float thick = rail ? pill.width() : pill.height();
         float stretch = Math.min(Math.abs(lensVel) / 5000f, 0.22f) * l;
-        // capsule never wider than the slot plus a margin, so it can't spill out of the bar on wide screens
-        float restLen = Math.min(sw * 1.32f, sw + Ui.dpf(22)), restThick = thick - Ui.dpf(10);
-        float len = Ui.lerp(restLen, Math.min(sw * 1.62f, sw + Ui.dpf(46)), l) * (1f + stretch);
+        // G style unified bar: capsule matches one exact slot width so every tab sits dead-centre with symmetric margins
+        float restLen = unifiedG() ? sw : Math.min(sw * 1.32f, sw + Ui.dpf(22));
+        float restThick = thick - Ui.dpf(10);
+        float len = Ui.lerp(restLen, unifiedG() ? sw + Ui.dpf(6) : Math.min(sw * 1.62f, sw + Ui.dpf(46)), l) * (1f + stretch);
         float th = Ui.lerp(restThick, thick + Ui.dpf(16), l) * (1f - stretch * 0.35f);
         // the selection rides along with the morphing bar
         float a = morph < 1f && lift.value < 0.01f ? slotCenter(selected) : lensX.value;
@@ -467,10 +490,18 @@ final class Dock extends FrameLayout {
     private static int tabletFieldSpan(int W) { return (int) (Math.min(W * 0.42f, Ui.dpf(440)) + Ui.dpf(8 + 46)); }
     private int fieldLeft(int W, int H) {
         if (tabletFor(W, H)) return (W - tabletFieldSpan(W)) / 2 + Ui.dp(46);
+        if (Ui.gStyle && !railFor(W, H)) {
+            int barW = Math.min(W - Ui.dp(32), Ui.dp(420));
+            return (W - barW) / 2 + Ui.dp(46);
+        }
         return sideMargin(W, H) + Ui.dp(railFor(W, H) ? 44 : 48 + 8 + 44);
     }
     private int fieldWidth(int W, int H) {
         if (tabletFor(W, H)) return Math.max(1, tabletFieldSpan(W) - Ui.dp(46 + 18));
+        if (Ui.gStyle && !railFor(W, H)) {
+            int barW = Math.min(W - Ui.dp(32), Ui.dp(420));
+            return Math.max(1, barW - Ui.dp(46 + 44));
+        }
         return Math.max(1, W - sideMargin(W, H) - fieldLeft(W, H) - Ui.dp(18));
     }
 
@@ -494,11 +525,11 @@ final class Dock extends FrameLayout {
         layoutGeometry();
         computeLens();
         float k = rail ? search : Math.max(pillK(), search);
-        // field follows the morphing bubble
+        // field follows the morphing bubble (or the unified pill in G style)
         if (field.getVisibility() == VISIBLE) {
-            // keep the text vertically centred in the bubble, whatever its height (54dp phone, 60dp foldable)
-            field.setTranslationY(circle.centerY() - (field.getTop() + field.getHeight() / 2f));
-            if (tablet) field.setTranslationX(circle.left + Ui.dpf(46) - field.getLeft());
+            RectF host = unifiedG() ? pill : circle;
+            field.setTranslationY(host.centerY() - (field.getTop() + field.getHeight() / 2f));
+            if (tablet || unifiedG()) field.setTranslationX(host.left + Ui.dpf(46) - field.getLeft());
             field.setAlpha(Ui.clamp((search - 0.4f) / 0.6f, 0f, 1f));
         }
 
@@ -543,7 +574,8 @@ final class Dock extends FrameLayout {
 
     private void drawBar(Canvas c, float k, float l) {
         // glass: pill + search bubble (+ lens bulge while lifted), smooth-unioned only while lifted
-        barGlass.shapes(pill, pill.height() / 2f, circle, circle.height() / 2f, l > 0.02f && !Ui.gStyle ? lens : null, lens.height() / 2f);
+        RectF second = circle.isEmpty() ? null : circle;
+        barGlass.shapes(pill, pill.height() / 2f, second, second == null ? 0 : circle.height() / 2f, l > 0.02f && !Ui.gStyle ? lens : null, lens.height() / 2f);
         barGlass.smoothK = Ui.dpf(16) * l;
         barGlass.tint = Ui.barTint();
         barGlass.blurDp = Ui.barBlur();
@@ -556,8 +588,9 @@ final class Dock extends FrameLayout {
         // resting selection capsule
         float restA = Ui.gStyle ? (1f - k) : (1f - l) * (1f - k);
         if (restA > 0.01f) {
-            // resting selection: a plain light-grey capsule
-            fill.setColor(Ui.alpha(Ui.gStyle ? (Ui.dark ? 0x3DFFFFFF : 0x1F000000) : (Ui.dark ? 0x2EFFFFFF : 0x17000000), restA));
+            // G style: One UI 8.5/9.x crisp pill capsule (soft accent tint); A style: light-grey capsule
+            int capCol = Ui.gStyle ? Ui.alpha(Ui.ACCENT, Ui.dark ? 0.24f : 0.14f) : (Ui.dark ? 0x2EFFFFFF : 0x17000000);
+            fill.setColor(Ui.alpha(capCol, restA));
             c.drawRoundRect(lens, lens.height() / 2f, lens.height() / 2f, fill);
         }
 
@@ -577,7 +610,17 @@ final class Dock extends FrameLayout {
             Icons.draw(c, Icons.SIDEBAR, pill.left + Ui.dpf(8) + ld / 2f, pill.centerY(), Ui.dpf(21), Ui.alpha(Ui.text(), a));
         }
 
-        // search bubble glyph
+        if (unifiedG()) {
+            // G style search mode: search icon on the left + close (X) on the right inside the unified pill
+            float sa = Ui.clamp((search - 0.25f) / 0.75f, 0f, 1f);
+            if (sa > 0.01f) {
+                Icons.draw(c, Icons.SEARCH, pill.left + Ui.dpf(25), pill.centerY(), Ui.dpf(20), Ui.alpha(Ui.text2(), sa));
+                Icons.draw(c, Icons.CLOSE, pill.right - Ui.dpf(24), pill.centerY(), Ui.dpf(18), Ui.alpha(Ui.text2(), sa));
+            }
+            return;
+        }
+
+        // search bubble glyph (A style / rail / tablet)
         float sp = searchPress.value;
         float iconCx = Ui.lerp(circle.centerX(), circle.left + Ui.dpf(26), search);
         Icons.draw(c, Icons.SEARCH, iconCx, circle.centerY(), Ui.dpf(25) * (1f - 0.08f * sp) * Ui.lerp(1f, 0.82f, search),
@@ -589,14 +632,18 @@ final class Dock extends FrameLayout {
     }
 
     private void drawTabs(Canvas c, float k, int color, boolean accentPass) {
-        float iconSize = Ui.dpf(27);
+        boolean ug = unifiedG();
+        int count = slotCount();
+        float iconSize = Ui.dpf(ug ? 23 : 27);
         float labelA = Ui.clamp(1f - k * 2.2f, 0f, 1f);
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < count; i++) {
             float s = slotCenter(i);
             float cx = rail ? pill.centerX() : s;
             float cy = rail ? s : pill.centerY();
             float a;
-            if (rail) {
+            if (ug) {
+                a = Ui.clamp(1f - search * 2.4f, 0f, 1f);
+            } else if (rail) {
                 a = 1f;
             } else if (i == selected) {
                 cx = Ui.lerp(cx, pill.centerX(), k);
@@ -617,13 +664,15 @@ final class Dock extends FrameLayout {
                 c.drawText(labels[i], cx, cy + tabLabel.getTextSize() * 0.36f, tabLabel);
                 continue;
             }
-            float iy = rail ? cy : cy - Ui.dpf(7) * (1f - k);
+            int iconId = i < 4 ? TAB_ICONS[i] : Icons.SEARCH;
+            String text = i < 4 ? labels[i] : getContext().getString(R.string.search);
+            float iy = rail ? cy : cy - Ui.dpf(ug ? 7.5f : 7f) * (1f - k);
             int col = Ui.alpha(color, a);
-            Icons.draw(c, TAB_ICONS[i], cx, iy, iconSize * Ui.lerp(1f, 0.92f, k), col);
+            Icons.draw(c, iconId, cx, iy, iconSize * Ui.lerp(1f, 0.92f, k), col);
             if (labelA > 0.01f && !rail) {
                 label.setColor(Ui.alpha(color, a * labelA));
                 label.setTypeface(accentPass ? Ui.bold : Ui.medium);
-                c.drawText(labels[i], cx, cy + Ui.dpf(19.5f), label);
+                c.drawText(text, cx, cy + Ui.dpf(ug ? 18.5f : 19.5f), label);
             }
         }
     }
@@ -775,11 +824,17 @@ final class Dock extends FrameLayout {
                 barPress.to(0f);
                 if (t == T_TAB) {
                     int target = up ? slotAt(dragging ? lensX.value : axisOf(x, y)) : selected;
-                    boolean re = target == selected;
-                    selected = target;
-                    lensX.to(slotCenter(target));
-                    postDelayed(() -> lift.to(0f), dragging ? 60 : 200);
-                    if (up && listener != null) listener.onTab(target, re);
+                    if (unifiedG() && target == 4) {
+                        lensX.to(slotCenter(selected));
+                        postDelayed(() -> lift.to(0f), 120);
+                        if (up && listener != null) listener.onSearch();
+                    } else {
+                        boolean re = target == selected;
+                        selected = target;
+                        lensX.to(slotCenter(target));
+                        postDelayed(() -> lift.to(0f), dragging ? 60 : 200);
+                        if (up && listener != null) listener.onTab(target, re);
+                    }
                 } else if (t == T_MINI) {
                     miniPress.to(0f);
                     if (up && Math.hypot(x - downX, y - downY) < Ui.dpf(12) && listener != null) listener.onMini();
@@ -842,8 +897,11 @@ final class Dock extends FrameLayout {
         if (tablet && sideP > 0.5f) return T_NONE;
         if (tablet && !inSearch() && y >= pill.top - slop && y <= pill.bottom + slop && x >= pill.left && x < pill.left + lead() + Ui.dpf(6))
             return T_SIDE;
-        if (circle.contains(x, y) && !inSearch()) return T_SEARCH;
-        if (inSearch() && circle.contains(x, y)) return T_NONE;
+        if (unifiedG() && inSearch() && (pill.contains(x, y) || (y >= pill.top - slop && y <= pill.bottom + slop && x >= pill.left && x <= pill.right))) {
+            return x >= pill.right - Ui.dpf(48) ? T_HOME_CIRCLE : T_NONE;
+        }
+        if (!circle.isEmpty() && circle.contains(x, y) && !inSearch()) return T_SEARCH;
+        if (!circle.isEmpty() && inSearch() && circle.contains(x, y)) return T_NONE;
         if (pill.contains(x, y) || (y >= pill.top - slop && y <= pill.bottom + slop && x >= pill.left && x <= pill.right)) {
             return (rail ? search : Math.max(pillK(), search)) > 0.5f ? T_HOME_CIRCLE : T_TAB;
         }

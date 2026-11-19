@@ -190,7 +190,7 @@ final class Settings {
                 m.recreate();
             });
             content.addView(g, Widgets.MW);
-            // app style: A (glass) or G (frosted translucent pills); motion is the same in both
+            // app style: A (glass) or G (One UI 9.5 frosted translucent pills); motion is the same in both
             Widgets.Group sg = new Widgets.Group(m, m.getString(R.string.player_style));
             String curSt = MainActivity.prefs(m).getString("player_style", "prism");
             String[][] sts = {{"prism", m.getString(R.string.player_style_prism)}, {"oneui", m.getString(R.string.player_style_oneui)}};
@@ -198,12 +198,15 @@ final class Settings {
                 if (o[0].equals(MainActivity.prefs(m).getString("player_style", "prism"))) return;
                 MainActivity.prefs(m).edit().putString("player_style", o[0]).apply();
                 Ui.gStyle = "oneui".equals(o[0]);
-                m.np.applyStyle();
-                m.invalidateChrome();
-                rebuild();
+                m.refreshAppearance();
             });
             content.addView(sg, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.style_note)));
+            // accent color palette (8 presets including system dynamic color)
+            Widgets.Group cg = new Widgets.Group(m, m.getString(R.string.set_accent));
+            cg.card.addView(buildAccentPicker(m), Widgets.MW);
+            content.addView(cg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.accent_note)));
             if (isFoldable(m)) {
                 // unfolded inner screen: the foldable layout (right-hand tab rail) or the tablet one (top tabs + sidebar)
                 Widgets.Group uf = new Widgets.Group(m, m.getString(R.string.unfold_ui));
@@ -251,6 +254,63 @@ final class Settings {
             toggleRow(fx, Icons.APPEARANCE, m.getString(R.string.glass_effect), "glass", true, () -> { Ui.glass = pref(m, "glass", true); m.invalidateChrome(); });
             content.addView(fx, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.glass_note)));
+        }
+
+        private View buildAccentPicker(MainActivity m) {
+            String curKey = Ui.accentKey(MainActivity.prefs(m));
+            LinearLayout grid = new LinearLayout(m);
+            grid.setOrientation(LinearLayout.VERTICAL);
+            grid.setPadding(Ui.dp(10), Ui.dp(14), Ui.dp(10), Ui.dp(10));
+            int cols = 4;
+            LinearLayout row = null;
+            for (int i = 0; i < Ui.ACCENT_KEYS.length; i++) {
+                if (i % cols == 0) {
+                    row = new LinearLayout(m);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    if (i > 0) rlp.topMargin = Ui.dp(10);
+                    grid.addView(row, rlp);
+                }
+                final String key = Ui.ACCENT_KEYS[i];
+                final int color = Ui.resolveAccent(m, key);
+                final boolean sel = key.equals(curKey);
+                LinearLayout cell = new LinearLayout(m);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                cell.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                cell.setPadding(Ui.dp(2), Ui.dp(4), Ui.dp(2), Ui.dp(4));
+                cell.setTag("accent:" + key);
+
+                FrameLayout ring = new FrameLayout(m);
+                if (sel) {
+                    android.graphics.drawable.GradientDrawable rg = Ui.round(0x00000000, 100);
+                    rg.setStroke(Ui.dp(2.2f), color);
+                    ring.setBackground(rg);
+                }
+                FrameLayout dot = new FrameLayout(m);
+                dot.setBackground(Ui.round(color, 100));
+                if (sel) {
+                    Icons.IconView ck = new Icons.IconView(m, Icons.CHECK, 18, 0xFFFFFFFF);
+                    dot.addView(ck, new FrameLayout.LayoutParams(Ui.dp(20), Ui.dp(20), android.view.Gravity.CENTER));
+                }
+                ring.addView(dot, new FrameLayout.LayoutParams(Ui.dp(36), Ui.dp(36), android.view.Gravity.CENTER));
+                cell.addView(ring, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
+
+                TextView lbl = Ui.text(m, m.getString(Ui.ACCENT_LABELS[i]), 11.5f, sel ? Ui.semibold : Ui.regular, sel ? Ui.text() : Ui.text2());
+                lbl.setGravity(android.view.Gravity.CENTER);
+                LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                llp.topMargin = Ui.dp(4);
+                cell.addView(lbl, llp);
+
+                cell.setOnClickListener(v -> {
+                    if (key.equals(Ui.accentKey(MainActivity.prefs(m)))) return;
+                    MainActivity.prefs(m).edit().putString("accent_color", key).apply();
+                    Ui.ACCENT = Ui.resolveAccent(m, key);
+                    m.refreshAppearance();
+                });
+                Ui.press(cell, 0.92f);
+                row.addView(cell, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            }
+            return grid;
         }
     }
 
@@ -343,6 +403,11 @@ final class Settings {
             toggleRow(fx, Icons.CLOCK, m.getString(R.string.show_total), "show_total", false, Player::notifyAll0);
             fx.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.eq_title), m.getString(Eq.on(m) ? R.string.eq_state_on : R.string.eq_state_off), true, v -> m.push(new EqPage(m)));
             content.addView(fx, Widgets.MW);
+            Widgets.Group aodG = new Widgets.Group(m, m.getString(R.string.aod_title));
+            aodG.row(Icons.AOD, Ui.ACCENT, m.getString(R.string.aod_open), null, true, v -> m.openAod());
+            toggleRow(aodG, Icons.APPEARANCE, m.getString(R.string.aod_dim), "aod_dim", true, null);
+            content.addView(aodG, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.aod_note)));
             content.addView(Widgets.caption(m, m.getString(R.string.devices_note)));
             Widgets.Group bp = new Widgets.Group(m, m.getString(R.string.bp_group));
             View bpRow = toggleRow(bp, Icons.DEVICE, m.getString(R.string.bp_title), BitPerfect.PREF, false, () -> {
