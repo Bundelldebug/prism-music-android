@@ -1,7 +1,10 @@
 package com.oneuibook.prism;
 
 import android.animation.ValueAnimator;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
@@ -14,6 +17,7 @@ import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.os.Build;
 import android.os.SystemClock;
 import android.text.Layout;
 import android.text.StaticLayout;
@@ -76,7 +80,8 @@ final class NowPlaying extends FrameLayout {
     private final Content content;
     private final View handle;
     private final TextView title, artist, elapsed, remain, chipText;
-    private final LinearLayout chip;
+    private final GlassChip chip;
+    private final Icons.IconView chipIcon;
     private final Icons.IconView star, more, aodBtn, prev, play, next, lyricsBtn, shuffleBtn, repeatBtn, queueBtn;
     private final Seek seek;
     private final Icons.IconView outBtn;
@@ -133,14 +138,14 @@ final class NowPlaying extends FrameLayout {
         remain.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         content.addView(elapsed);
         content.addView(remain);
-        chip = new LinearLayout(m);
+        chip = new GlassChip(m);
         chip.setGravity(Gravity.CENTER);
-        chip.setPadding(Ui.dp(8), 0, Ui.dp(10), 0);
-        chip.setBackground(Ui.round(0x24FFFFFF, 6));
-        chip.addView(new Icons.IconView(m, Icons.DEVICE, 12, 0xB3FFFFFF), new LinearLayout.LayoutParams(Ui.dp(14), Ui.dp(14)));
-        chipText = Ui.text(m, "Spotify", 11, Ui.medium, 0xB3FFFFFF);
+        chip.setPadding(Ui.dp(12), Ui.dp(5), Ui.dp(13), Ui.dp(5));
+        chipIcon = new Icons.IconView(m, Icons.DEVICE, 13, chipFg());
+        chip.addView(chipIcon, new LinearLayout.LayoutParams(Ui.dp(15), Ui.dp(15)));
+        chipText = Ui.text(m, "Spotify", 12.5f, Ui.semibold, chipFg());
         LinearLayout.LayoutParams ctl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ctl.leftMargin = Ui.dp(4);
+        ctl.leftMargin = Ui.dp(5);
         chip.addView(chipText, ctl);
         chip.setOnClickListener(v -> deviceMenu(v));
         content.addView(chip);
@@ -365,7 +370,7 @@ final class NowPlaying extends FrameLayout {
             exact(seek, colWi + Ui.dp(16), Ui.dp(26));
             exact(elapsed, Ui.dp(70), Ui.dp(16));
             exact(remain, Ui.dp(70), Ui.dp(16));
-            chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(180), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(20), MeasureSpec.EXACTLY));
+            chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(200), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
             if (oneui) {
                 // round translucent buttons; scale down smoothly on narrower unfolded foldable columns so 5 buttons never collide
                 int btnS = wide ? Math.min(Ui.dp(54), Math.max(Ui.dp(40), (int) (colWi * 0.20f))) : Ui.dp(60);
@@ -375,7 +380,7 @@ final class NowPlaying extends FrameLayout {
                 exact(next, btnS, btnS);
                 // the wave needs height above the line
                 exact(seek, colWi + Ui.dp(16), Ui.dp(40));
-                chip.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(96), colWi - Ui.dp(124)), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(30), MeasureSpec.EXACTLY));
+                chip.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(96), colWi - Ui.dp(124)), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
             } else {
                 int btnS = wide ? Math.min(Ui.dp(64), Math.max(Ui.dp(44), (int) (colWi * 0.22f))) : Ui.dp(72);
                 int playS = wide ? Math.min(Ui.dp(74), Math.max(Ui.dp(52), (int) (colWi * 0.26f))) : Ui.dp(84);
@@ -541,9 +546,12 @@ final class NowPlaying extends FrameLayout {
         if (wide) {
             title.setGravity(wantGrav);
             artist.setGravity(wantGrav);
-            for (View v : new View[]{title, artist, star, more, aodBtn}) { v.setTranslationX(0); v.setTranslationY(0); v.setScaleX(1f); v.setScaleY(1f); }
-            chip.setAlpha(1f); chip.setVisibility(VISIBLE);
-            aodBtn.setAlpha(1f);
+            for (View v : new View[]{title, artist, star, more, aodBtn}) {
+                v.setTranslationX(0); v.setTranslationY(0);
+                if (!GlassMenu.isSourceHidden(v)) { v.setScaleX(1f); v.setScaleY(1f); }
+            }
+            if (!GlassMenu.isSourceHidden(chip)) { chip.setAlpha(1f); chip.setVisibility(VISIBLE); }
+            if (!GlassMenu.isSourceHidden(aodBtn)) aodBtn.setAlpha(1f);
             panelHost.setTranslationY(0);
             panelHost.setAlpha(panel == 0 ? 0f : 1f);
             invalidate();
@@ -552,10 +560,12 @@ final class NowPlaying extends FrameLayout {
         float k = mode;
         // G style: the device/action row under the cover steps aside while lyrics / the queue are open
         float rowA = oneui ? 1f - Ui.clamp(k * 1.6f, 0f, 1f) : 1f;
-        chip.setAlpha(rowA);
+        if (!GlassMenu.isSourceHidden(chip)) {
+            chip.setAlpha(rowA);
+            chip.setVisibility(rowA < 0.02f ? INVISIBLE : VISIBLE);
+        }
         outBtn.setAlpha(rowA);
-        aodBtn.setAlpha(rowA);
-        chip.setVisibility(rowA < 0.02f ? INVISIBLE : VISIBLE);
+        if (!GlassMenu.isSourceHidden(aodBtn)) aodBtn.setAlpha(rowA);
         int curGrav = (oneui && k < 0.35f) ? Gravity.CENTER : (Gravity.START | Gravity.CENTER_VERTICAL);
         if (title.getGravity() != curGrav) {
             title.setGravity(curGrav);
@@ -574,8 +584,8 @@ final class NowPlaying extends FrameLayout {
             star.setTranslationY(ty + Ui.dpf(2) * k);
             more.setTranslationY(ty + Ui.dpf(2) * k);
         } else {
-            star.setAlpha(rowA);
-            more.setAlpha(rowA);
+            if (!GlassMenu.isSourceHidden(star)) star.setAlpha(rowA);
+            if (!GlassMenu.isSourceHidden(more)) more.setAlpha(rowA);
             star.setTranslationY(0);
             more.setTranslationY(0);
         }
@@ -588,6 +598,9 @@ final class NowPlaying extends FrameLayout {
     /** Mirror of this screen, so glass menus opened over the player can refract it (like Backdrop). */
     final android.graphics.RenderNode node = new android.graphics.RenderNode("now-playing");
     boolean recorded;
+    /** Background + artwork mirror (without controls) so floating glass chips inside the player refract it. */
+    private final android.graphics.RenderNode bgNode = new android.graphics.RenderNode("np-bg");
+    private boolean bgRecorded;
 
     @Override public void draw(Canvas canvas) {
         if (!canvas.isHardwareAccelerated()) { super.draw(canvas); recorded = false; return; }
@@ -644,9 +657,26 @@ final class NowPlaying extends FrameLayout {
             glass.alpha = 1f;
             glass.draw(c, this, main.backdrop);
         }
-        if (bgMix > 0f) drawBackground(c, bgMix);
-        // artwork
-        drawArt(c, artRadius);
+        if (bgMix > 0f && c.isHardwareAccelerated()) {
+            bgNode.setPosition(0, 0, W, H);
+            android.graphics.RecordingCanvas brc = bgNode.beginRecording(W, H);
+            try {
+                int bsave = brc.save();
+                brc.clipPath(clip);
+                drawBackground(brc, bgMix);
+                drawArt(brc, artRadius);
+                brc.restoreToCount(bsave);
+            } finally {
+                bgNode.endRecording();
+            }
+            bgRecorded = true;
+            c.drawRenderNode(bgNode);
+        } else {
+            bgRecorded = false;
+            if (bgMix > 0f) drawBackground(c, bgMix);
+            // artwork
+            drawArt(c, artRadius);
+        }
         c.restoreToCount(save);
         super.dispatchDraw(c);
         // morphing: every frame; fully open: the slow mesh-gradient drift only needs ~30 fps
@@ -903,6 +933,12 @@ final class NowPlaying extends FrameLayout {
         v.animate().alpha(0f).setDuration(120).withEndAction(() -> { v.setText(s); if (oneui) v.setSelected(true); v.animate().alpha(1f).setDuration(220).start(); }).start();
     }
 
+    /** Foreground colour on the liquid-glass device chip, keeping contrast across light/dark and glassT. */
+    private int chipFg() {
+        if (Ui.dark) return 0xF2FFFFFF;
+        return (Ui.gStyle || Ui.glassT < 0.72f) ? 0xFF1C1C1E : 0xF2FFFFFF;
+    }
+
     /** Switches between the Prism (A) and One UI 9.5 (G) player looks. */
     void applyStyle() {
         boolean o = "oneui".equals(MainActivity.prefs(getContext()).getString("player_style", "prism"));
@@ -918,11 +954,10 @@ final class NowPlaying extends FrameLayout {
             play.setBackground(o ? Ui.round(0x3BFFFFFF, 100) : null);
             prev.sizeDp = next.sizeDp = o ? 26 : 40;
             play.sizeDp = o ? 32 : 46;
-            chip.setBackground(o ? Ui.round(0x24FFFFFF, 100) : Ui.round(0x24FFFFFF, 6));
-            chip.setPadding(Ui.dp(o ? 12 : 8), Ui.dp(o ? 5 : 3), Ui.dp(o ? 12 : 8), Ui.dp(o ? 5 : 3));
+            chip.setBackground(null);
+            chip.setPadding(Ui.dp(13), Ui.dp(5), Ui.dp(14), Ui.dp(5));
             chip.getChildAt(0).setVisibility(VISIBLE);
-            chipText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 13.5f : 11f);
-            chipText.setTextColor(o ? 0xF2FFFFFF : 0xB3FFFFFF);
+            chipText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 13f : 12f);
             chipText.setTypeface(o ? Ui.semibold : Ui.medium);
             title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 22 : 21);
             artist.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, o ? 16.5f : 19);
@@ -940,6 +975,10 @@ final class NowPlaying extends FrameLayout {
             if (t != null) { title.setText(t.name); artist.setText(t.artist); }
             content.requestLayout();
         }
+        int cfg = chipFg();
+        chipIcon.setColor(cfg);
+        chipText.setTextColor(cfg);
+        chip.invalidate();
         star.setColor(Player.liked ? Ui.ACCENT : 0xFFFFFFFF);
         int activeTint = o ? Ui.alpha(Ui.ACCENT, 0.32f) : 0x26FFFFFF;
         int activeFg = o ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
@@ -951,6 +990,11 @@ final class NowPlaying extends FrameLayout {
         seek.invalidate();
         if (vol != null) vol.invalidate();
         invalidate();
+    }
+
+    /** Immediately refreshes the volume bar from AudioManager / Spotify without waiting for the 250ms ticker. */
+    void syncVolumeNow() {
+        if (vol != null) vol.sync();
     }
 
     private void onPlayer() {
@@ -1113,9 +1157,24 @@ final class NowPlaying extends FrameLayout {
                 queueList.removeView(sp);
                 JSONArray q = o.optJSONArray("queue");
                 if (q == null || q.length() == 0) { queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF)); return; }
+                // Spotify /me/player/queue pads short albums/playlists up to 20 slots by repeating tracks cyclically:
+                // stop as soon as a track repeats (or loops back to the currently playing track).
+                java.util.HashSet<String> seen = new java.util.HashSet<>();
+                Player.Track playing = Player.track;
+                if (playing != null) {
+                    if (playing.uri != null && !playing.uri.isEmpty()) seen.add(playing.uri);
+                    if (playing.id != null && !playing.id.isEmpty()) seen.add(playing.id);
+                }
+                int added = 0;
                 for (int i = 0; i < Math.min(30, q.length()); i++) {
                     JSONObject tr = q.optJSONObject(i);
                     if (tr == null) continue;
+                    String uri = tr.optString("uri");
+                    String id = tr.optString("id");
+                    String key = !uri.isEmpty() ? uri : (!id.isEmpty() ? id : (tr.optString("name") + "\0" + Spotify.artists(tr)));
+                    if (seen.contains(key) || (!id.isEmpty() && seen.contains(id))) break;
+                    seen.add(key);
+                    if (!id.isEmpty()) seen.add(id);
                     LinearLayout r = new LinearLayout(c);
                     r.setGravity(Gravity.CENTER_VERTICAL);
                     r.setPadding(Ui.dp(28), Ui.dp(6), Ui.dp(28), Ui.dp(6));
@@ -1131,7 +1190,9 @@ final class NowPlaying extends FrameLayout {
                     final int at = i;
                     tapToPlay(r, () -> { Player.playFromQueue(q, at); Spotify.MAIN.postDelayed(NowPlaying.this::loadQueue, 1500); });
                     queueList.addView(r, Widgets.MW);
+                    added++;
                 }
+                if (added == 0) queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
             }
             @Override public void err(int code, String m) {
                 queueList.removeView(sp);
@@ -1264,6 +1325,17 @@ final class NowPlaying extends FrameLayout {
                     } else {
                         dragAnim = Ui.animate(dragY, 0f, 380, Ui.EMPHASIZED, a -> { dragY = (float) a.getAnimatedValue(); main.onPlayerProgress(openP); invalidate(); content.invalidate(); });
                     }
+                } else if (e.getActionMasked() == MotionEvent.ACTION_UP && openP > 0.9f
+                        && Math.hypot(e.getX() - downX, e.getY() - downY) < slop
+                        && art.contains(downX, downY) && art.contains(e.getX(), e.getY())) {
+                    // Tap album cover: open lyrics (or queue if lyrics are disabled); tap again to return, or toggle on wide screens
+                    if (wide) {
+                        setPanel(panel == 1 ? 2 : 1);
+                    } else if (panel == 0) {
+                        setPanel(Settings.pref(getContext(), "lyrics", true) ? 1 : 2);
+                    } else {
+                        setPanel(0);
+                    }
                 }
                 if (vt != null) { vt.recycle(); vt = null; }
                 return true;
@@ -1272,10 +1344,78 @@ final class NowPlaying extends FrameLayout {
         return true;
     }
 
+    private final BroadcastReceiver volumeRx = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent intent) {
+            if (vol != null) vol.sync();
+        }
+    };
+    private boolean volumeRxRegistered;
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (!volumeRxRegistered) {
+            try {
+                IntentFilter f = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
+                if (Build.VERSION.SDK_INT >= 33) getContext().registerReceiver(volumeRx, f, Context.RECEIVER_EXPORTED);
+                else getContext().registerReceiver(volumeRx, f);
+                volumeRxRegistered = true;
+            } catch (Throwable ignored) {}
+        }
+    }
+
     @Override protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        if (volumeRxRegistered) {
+            try { getContext().unregisterReceiver(volumeRx); } catch (Throwable ignored) {}
+            volumeRxRegistered = false;
+        }
         Player.listeners.remove(playerL);
         Player.trackListeners.remove(trackL);
+    }
+
+    // ================================================================ liquid-glass device pill
+    /** Output-device / Spotify Connect pill rendered with the same liquid-glass material & transparency setting as the bars. */
+    private final class GlassChip extends LinearLayout {
+        private final Glass.Surface pill = new Glass.Surface();
+        private final RectF bounds = new RectF();
+        private final android.graphics.RenderNode localBg = new android.graphics.RenderNode("chip-bg");
+
+        GlassChip(Context c) {
+            super(c);
+            setWillNotDraw(false);
+            pill.refractDp = 12f;
+            pill.edgeDp = 14f;
+            pill.rim = 0.28f;
+            pill.shadowAlpha = 0.14f;
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            bounds.set(0, 0, w, h);
+            float r = h / 2f;
+            pill.shapes(bounds, r, null, 0, null, 0);
+            pill.tint = Ui.barTint();
+            pill.blurDp = Ui.barBlur();
+            pill.strokeColor = Ui.glassStroke();
+            pill.alpha = 1f;
+            if (bgRecorded && c.isHardwareAccelerated()) {
+                float pad = Ui.dpf(pill.blurDp) * 2f + Ui.dpf(pill.refractDp);
+                int rw = (int) Math.ceil(w + pad * 2), rh = (int) Math.ceil(h + pad * 2);
+                localBg.setPosition((int) -pad, (int) -pad, (int) -pad + rw, (int) -pad + rh);
+                android.graphics.RecordingCanvas brc = localBg.beginRecording(rw, rh);
+                try {
+                    brc.translate(-getLeft() + pad, -getTop() + pad);
+                    brc.drawRenderNode(bgNode);
+                } finally {
+                    localBg.endRecording();
+                }
+                pill.extra = localBg;
+            } else {
+                pill.extra = null;
+            }
+            pill.draw(c, this, null);
+        }
     }
 
     // ================================================================ seek bar

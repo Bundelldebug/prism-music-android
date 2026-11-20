@@ -51,7 +51,8 @@ final class SpotifyWeb {
             + "<link rel='preconnect' href='https://spclient.wg.spotify.com' crossorigin>"
             + "<script src='" + SDK_URL + "'></script></head><body><script>\n"
             + "window.onSpotifyWebPlaybackSDKReady = function() {\n"
-            + "  var player = new Spotify.Player({ name: 'Prism', volume: 1.0,\n"
+            // disable SDK's own MediaSession so Android never routes background volume keys to a remote Spotify session
+            + "  var player = new Spotify.Player({ name: 'Prism', volume: 1.0, enableMediaSession: false,\n"
             + "    getOAuthToken: function(cb) { cb(Prism.token()); } });\n"
             + "  window.prismPlayer = player;\n"
             + "  player.addListener('ready', function(e) { Prism.onReady(e.device_id); });\n"

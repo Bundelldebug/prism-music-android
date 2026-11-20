@@ -532,6 +532,10 @@ final class LocalMusic {
             NotificationManager nm = getSystemService(NotificationManager.class);
             nm.createNotificationChannel(new NotificationChannel(CH, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW));
             session = new MediaSession(this, "prism");
+            // always route hardware volume keys to local STREAM_MUSIC (never a remote Spotify Connect speaker)
+            session.setPlaybackToLocal(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
             session.setCallback(new MediaSession.Callback() {
                 // route through Player so both on-device and in-app Spotify playback respond
                 @Override public void onPlay() { if (!Player.playing) Player.toggle(); }
@@ -586,6 +590,11 @@ final class LocalMusic {
             Bitmap art = Img.cached(t.art);
             if (art == null && t.art != null) Img.load(t.art, b -> { if (b != null && Player.track == t) post(); });
             holdWake(Player.playing && inApp());
+            // keep local STREAM_MUSIC volume routing active when backgrounded during in-app Spotify playback
+            session.setPlaybackToLocal(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
+            if (!session.isActive()) session.setActive(true);
             session.setMetadata(new MediaMetadata.Builder()
                     .putString(MediaMetadata.METADATA_KEY_TITLE, t.name)
                     .putString(MediaMetadata.METADATA_KEY_ARTIST, t.artist)

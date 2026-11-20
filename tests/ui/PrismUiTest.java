@@ -613,6 +613,53 @@ public class PrismUiTest {
         SpotifyWeb.switchTrack(false, () -> sent[0] = true);
         assertTrue("first-play switchTrack dispatches immediately", sent[0]);
 
+        // [8] 9.5.4 regression checks:
+        // (a) SpotifyWeb disables its own MediaSession so background hardware volume stays local
+        try {
+            java.lang.reflect.Field htmlF = SpotifyWeb.class.getDeclaredField("HTML");
+            htmlF.setAccessible(true);
+            String html = (String) htmlF.get(null);
+            assertTrue("SpotifyWeb disables WebView MediaSession", html.contains("enableMediaSession: false"));
+        } catch (Exception e) { throw new RuntimeException(e); }
+
+        // (b) Device connect sheet keeps chip hidden even when player ticker / applyMode runs
+        a.np.open(); idle(900);
+        try {
+            java.lang.reflect.Field chipF = NowPlaying.class.getDeclaredField("chip");
+            chipF.setAccessible(true);
+            View chipV = (View) chipF.get(a.np);
+            java.util.List<GlassMenu.Entry> devEntries = new java.util.ArrayList<>();
+            devEntries.add(new GlassMenu.Entry("This phone", Icons.DEVICE, true, () -> {}));
+            GlassMenu.sheet(a, new android.graphics.RectF(20, 400, 180, 432), "Devices", devEntries, chipV);
+            idle(300);
+            assertTrue("chip hidden while sheet is open", GlassMenu.isSourceHidden(chipV));
+            // simulate ticker / Player.refresh calling onPlayer -> applyMode
+            for (Runnable r : new java.util.ArrayList<>(Player.listeners)) r.run();
+            idle(300);
+            assertTrue("chip stays invisible after applyMode", chipV.getAlpha() == 0f);
+            GlassMenu.dismissAny(a.root);
+            idle(500);
+            assertTrue("chip restored after sheet closes", !GlassMenu.isSourceHidden(chipV) && chipV.getAlpha() > 0.9f);
+
+            // (c) Tapping the album cover toggles lyrics/queue panel automatically
+            java.lang.reflect.Field artF = NowPlaying.class.getDeclaredField("art");
+            artF.setAccessible(true);
+            android.graphics.RectF artR = (android.graphics.RectF) artF.get(a.np);
+            java.lang.reflect.Field panelF = NowPlaying.class.getDeclaredField("panel");
+            panelF.setAccessible(true);
+            assertEquals("panel starts closed", 0, panelF.getInt(a.np));
+            long downT = android.os.SystemClock.uptimeMillis();
+            android.view.MotionEvent dEv = android.view.MotionEvent.obtain(downT, downT, android.view.MotionEvent.ACTION_DOWN, artR.centerX(), artR.centerY(), 0);
+            android.view.MotionEvent uEv = android.view.MotionEvent.obtain(downT, downT + 40, android.view.MotionEvent.ACTION_UP, artR.centerX(), artR.centerY(), 0);
+            a.np.dispatchTouchEvent(dEv);
+            a.np.dispatchTouchEvent(uEv);
+            dEv.recycle(); uEv.recycle();
+            idle(600);
+            assertTrue("cover tap opens lyrics or queue", panelF.getInt(a.np) != 0);
+            a.np.syncVolumeNow();
+        } catch (Exception e) { throw new RuntimeException(e); }
+        a.np.close(); idle(600);
+
         // restore defaults
         Ui.gStyle = false;
         MainActivity.prefs(app).edit().putString("accent_color", "red").putString("player_style", "prism").putString("source", "spotify").commit();

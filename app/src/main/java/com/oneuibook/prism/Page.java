@@ -159,7 +159,6 @@ abstract class Page extends FrameLayout {
     LinearLayout slot() {
         LinearLayout s = new LinearLayout(getContext());
         s.setOrientation(LinearLayout.VERTICAL);
-        s.setLayoutTransition(Ui.appear());
         (slotHost != null ? slotHost : content).addView(s, Widgets.MW);
         return s;
     }

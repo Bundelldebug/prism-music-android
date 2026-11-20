@@ -42,13 +42,24 @@ final class GlassMenu extends FrameLayout {
     /** Bottom glass sheet that grows out of the button that opened it. */
     static GlassMenu sheet(MainActivity m, RectF anchor, String title, List<Entry> entries) { return sheet(m, anchor, title, entries, null); }
 
+    /** Sources currently hidden because a sheet/menu morphed out of them; callers must not reset their alpha. */
+    private static final java.util.Set<View> HIDDEN_SOURCES = new java.util.HashSet<>();
+
+    static boolean isSourceHidden(View v) { return v != null && HIDDEN_SOURCES.contains(v); }
+
     /** As {@link #sheet}, but {@code source} (the tapped button) disappears into the sheet and reappears when it closes. */
     static GlassMenu sheet(MainActivity m, RectF anchor, String title, List<Entry> entries, View source) {
         GlassMenu g = new GlassMenu(m, anchor, entries, true);
         g.sheet = true;
         g.source = source;
         // the button itself is taken over by the drop: a copy of it sinks into the glass (see drawGlyph)
-        if (source != null) { source.animate().cancel(); source.setAlpha(0f); source.setScaleX(1f); source.setScaleY(1f); }
+        if (source != null) {
+            HIDDEN_SOURCES.add(source);
+            source.animate().cancel();
+            source.setAlpha(0f);
+            source.setScaleX(1f);
+            source.setScaleY(1f);
+        }
         TextView t = Ui.text(m, title, 17, Ui.semibold, Ui.text());
         t.setGravity(Gravity.CENTER);
         g.list.addView(t, 0, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(52)));
@@ -252,6 +263,7 @@ final class GlassMenu extends FrameLayout {
     private void restoreSource() {
         if (restored || source == null) return;
         restored = true;
+        HIDDEN_SOURCES.remove(source);
         // the drop has shrunk back onto the button with the button's copy inside it: swap in place
         source.animate().cancel();
         source.setAlpha(1f); source.setScaleX(1f); source.setScaleY(1f);

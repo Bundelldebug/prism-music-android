@@ -229,13 +229,13 @@ final class Player {
             am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(v * max), 0);
             return;
         }
-        // remote device: Web API call, throttled while dragging, always sent on release
+        // remote device: Web API call, lightly throttled while dragging, always sent on release
         volume = Math.round(v * 100);
         long now = SystemClock.elapsedRealtime();
-        if (!done && now - lastVolSend < 300) { pendingVol = volume; return; }
+        if (!done && now - lastVolSend < 100) { pendingVol = volume; return; }
         lastVolSend = now;
         pendingVol = -1;
-        Spotify.send("PUT", "/me/player/volume?volume_percent=" + volume, null, null);
+        Spotify.sendPlay("PUT", "/me/player/volume?volume_percent=" + volume, null, null);
     }
 
     // ---- what the sound actually comes out of ----
@@ -344,6 +344,7 @@ final class Player {
         stamp = SystemClock.elapsedRealtime();
         optimistic();
         // play inside Prism (in-app Spotify Connect device) instead of handing off to the Spotify app
+        if (SpotifyWeb.web == null && activity instanceof MainActivity) ((MainActivity) activity).startSpotifyPlayer();
         SpotifyWeb.activate();
         SpotifyWeb.whenReady(() -> {
             String dev = SpotifyWeb.deviceId;

@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.3";
+    static final String VERSION = "9.5.4";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -64,6 +64,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         Spotify.init(p);
         Img.init(this);
         Player.activity = this;
+        setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
 
         Window w = getWindow();
         w.setDecorFitsSystemWindows(false);
@@ -150,9 +151,12 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         setLightStatus(true);
 
         if (Spotify.loggedIn() && Spotify.userName == null) Spotify.loadProfile(null);
+        // pre-warm OAuth token off-thread right away, and defer WebView creation past the first home frame
+        // so Chromium init never stalls the initial cover/track reveal
+        if (Spotify.loggedIn()) Spotify.prewarm();
         // on-device library is read once in the background even while Spotify is the source, so switching is instant
         if (!LocalMusic.loaded && LocalMusic.hasPermission(this)) LocalMusic.load(this, () -> { if (isLocalSource()) reloadAll(); });
-        startSpotifyPlayer();
+        root.postDelayed(this::startSpotifyPlayer, 220);
         // keep the media session / foreground service in step with every playback change
         LocalMusic.app = getApplicationContext();
         LocalMusic.artChanged = this::onAlbumArtChanged;
@@ -714,6 +718,20 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     void openAod() {
         if (aod != null) aod.open();
+    }
+
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        int code = event.getKeyCode();
+        if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP || code == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+                || code == android.view.KeyEvent.KEYCODE_VOLUME_MUTE) {
+            boolean handled = super.dispatchKeyEvent(event);
+            if (np != null) {
+                np.syncVolumeNow();
+                root.post(np::syncVolumeNow);
+            }
+            return handled;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @SuppressWarnings("deprecation")

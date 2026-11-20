@@ -39,7 +39,7 @@ final class Img {
 
     static Context appContext;
     /** Images get their own threads so artwork never queues behind API calls. */
-    private static final java.util.concurrent.ExecutorService POOL = java.util.concurrent.Executors.newFixedThreadPool(6);
+    private static final java.util.concurrent.ExecutorService POOL = java.util.concurrent.Executors.newFixedThreadPool(8);
 
     static void init(Context c) {
         appContext = c.getApplicationContext();
