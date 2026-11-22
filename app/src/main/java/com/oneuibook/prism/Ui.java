@@ -96,6 +96,13 @@ final class Ui {
         float ratio = screenH / (float) Math.max(1, screenW);
         return wd < 600 && ratio > 1f && ratio <= 1.75f;
     }
+
+    /** Wide foldable inner screen (4:3 aspect ratio, e.g. Galaxy Z Fold8 unfolded). */
+    static boolean wideInner() {
+        float wd = screenW / density, hd = screenH / density;
+        float minD = Math.min(wd, hd), maxD = Math.max(wd, hd);
+        return minD >= 600 && (maxD / Math.max(1f, minD)) <= 1.45f;
+    }
     static float dpf(float v) { return v * density; }
     static float sp(float v) { return v * density * fontScale; }
 

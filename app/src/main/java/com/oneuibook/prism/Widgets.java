@@ -114,12 +114,18 @@ final class Widgets {
     static int contentW(MainActivity m) { return Ui.screenW - (m == null ? 0 : m.sideInset() + m.contentInsetPx()); }
 
     /** Never taller than ~40% of the screen: on short-and-wide screens (unfolded foldable, landscape tablet) the rows below stay in view. */
-    static int posterW() { return Math.min((int) (Ui.screenH * 0.40f / 1.33f), Math.min(Ui.dp(300), (int) (Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.5f : 0.585f)))); }
-    static int squareDp() { return (int) (Math.min(Ui.screenH * 0.24f, Math.min(Ui.dp(180), Math.min(Ui.screenW, Ui.dp(700)) * (Ui.cover() ? 0.32f : 0.38f))) / Ui.density); }
+    static int posterW() {
+        float ratioW = Ui.cover() ? 0.54f : 0.585f;
+        return Math.min((int) (Ui.screenH * 0.40f / 1.33f), Math.min(Ui.dp(300), (int) (Math.min(Ui.screenW, Ui.dp(700)) * ratioW)));
+    }
+    static int squareDp() {
+        float ratioW = Ui.cover() ? 0.36f : 0.38f;
+        return (int) (Math.min(Ui.screenH * 0.25f, Math.min(Ui.dp(184), Math.min(Ui.screenW, Ui.dp(700)) * ratioW)) / Ui.density);
+    }
 
     /** Tall poster card with dark bottom gradient and caption (home "greeting" row). */
     static View posterCard(Context c, Item it, View.OnClickListener click) {
-        int w = posterW(), h = (int) (w * (Ui.cover() ? 1.05f : 1.33f));
+        int w = posterW(), h = (int) (w * (Ui.cover() ? 1.08f : 1.33f));
         float rad = Ui.gStyle ? 26f : 18f;
         FrameLayout f = new FrameLayout(c);
         Img.ArtView art = new Img.ArtView(c, rad);

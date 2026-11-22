@@ -436,8 +436,26 @@ final class Settings {
             boolean supported = NpuAudio.isSupported();
             boolean active = NpuAudio.enabled(m);
 
-            // 1) Master toggle & SoC status
+            // 1) Current chipset illustration hero card + master toggle
             Widgets.Group mg = new Widgets.Group(m, m.getString(R.string.npu_group));
+            LinearLayout hero = new LinearLayout(m);
+            hero.setOrientation(LinearLayout.HORIZONTAL);
+            hero.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            hero.setPadding(Ui.dp(16), Ui.dp(14), Ui.dp(16), Ui.dp(14));
+            NpuAudio.ChipSpec curChip = NpuAudio.currentChipSpec();
+            hero.addView(new NpuAudio.ChipArtView(m, curChip, NpuAudio.displaySoc(m)), new LinearLayout.LayoutParams(Ui.dp(62), Ui.dp(62)));
+            LinearLayout hcol = new LinearLayout(m);
+            hcol.setOrientation(LinearLayout.VERTICAL);
+            hcol.setPadding(Ui.dp(14), 0, 0, 0);
+            hcol.addView(Ui.text(m, NpuAudio.displaySoc(m), 16.5f, Ui.bold, Ui.text()), Widgets.MW);
+            TextView stTv = Ui.text(m, NpuAudio.status(m), 12.5f, Ui.regular, supported ? Ui.ACCENT : Ui.text2());
+            stTv.setSingleLine(false);
+            LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            stLp.topMargin = Ui.dp(3);
+            hcol.addView(stTv, stLp);
+            hero.addView(hcol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            mg.card.addView(hero, Widgets.MW);
+
             if (supported) {
                 toggleRow(mg, Icons.HEADPHONES, m.getString(R.string.npu_title), NpuAudio.PREF_ON, false, () -> {
                     NpuAudio.apply(m);
@@ -448,7 +466,7 @@ final class Settings {
                 View r = mg.row(Icons.HEADPHONES, Ui.text3(), m.getString(R.string.npu_title), m.getString(R.string.eq_state_off), false, null);
                 r.setAlpha(0.55f);
             }
-            mg.row(0, 0, NpuAudio.status(m), null, false, null);
+            mg.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.bpa_supported_socs), m.getString(R.string.bpa_supported_socs_sub), true, v -> m.push(new SupportedChipsetsPage(m)));
             content.addView(mg, Widgets.MW);
 
             // 2) Live output audio & Hi-Res tier card
@@ -465,7 +483,9 @@ final class Settings {
                     : (tier == AudioInfo.TIER_BLUE ? 0xFF38BDF8
                     : (tier == AudioInfo.TIER_GOLD ? 0xFFD4A017 : Ui.text2()));
             og.row(Icons.WAVE, tierColor, m.getString(R.string.bpa_hires_state), m.getString(tierRes), false, null);
+            toggleRow(og, Icons.APPEARANCE, m.getString(R.string.bpa_hires_glow), NpuAudio.PREF_HIRES_GLOW, true, Player::notifyAll0);
             content.addView(og, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.bpa_hires_glow_note)));
 
             // 3) Curated profiles
             Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.bpa_profile));
@@ -514,6 +534,60 @@ final class Settings {
                 };
             }
             g.card.addView(sl, Widgets.MW);
+        }
+    }
+
+    // ------------------------------------------------------------------ Supported Chipsets (15 Flagship SoCs)
+    static final class SupportedChipsetsPage extends Sub {
+        SupportedChipsetsPage(MainActivity m) { super(m, R.string.bpa_supported_socs); }
+
+        @Override void build() {
+            MainActivity m = main;
+            NpuAudio.ChipSpec current = NpuAudio.currentChipSpec();
+            addVendorGroup(m, "Qualcomm Snapdragon", NpuAudio.VENDOR_QUALCOMM, current);
+            addVendorGroup(m, "MediaTek Dimensity", NpuAudio.VENDOR_MEDIATEK, current);
+            addVendorGroup(m, "Samsung Exynos", NpuAudio.VENDOR_SAMSUNG, current);
+        }
+
+        private void addVendorGroup(MainActivity m, String title, int vendor, NpuAudio.ChipSpec current) {
+            Widgets.Group g = new Widgets.Group(m, title);
+            boolean first = true;
+            for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
+                if (cs.vendor != vendor) continue;
+                if (!first) {
+                    View div = new View(m);
+                    div.setBackgroundColor(Ui.separator());
+                    LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(0.6f)));
+                    dlp.leftMargin = Ui.dp(76);
+                    g.card.addView(div, dlp);
+                }
+                first = false;
+                LinearLayout row = new LinearLayout(m);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setPadding(Ui.dp(14), Ui.dp(10), Ui.dp(16), Ui.dp(10));
+                boolean hasArt = cs.drawableRes != 0;
+                if (hasArt) {
+                    row.addView(new NpuAudio.ChipArtView(m, cs, cs.id), new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(50)));
+                }
+                LinearLayout col = new LinearLayout(m);
+                col.setOrientation(LinearLayout.VERTICAL);
+                col.setPadding(hasArt ? Ui.dp(12) : Ui.dp(2), 0, Ui.dp(8), 0);
+                col.addView(Ui.text(m, cs.displayName(m), 15f, Ui.semibold, Ui.text()), Widgets.MW);
+                TextView sub = Ui.text(m, cs.id + " · " + cs.npu, 12f, Ui.regular, Ui.text2());
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                slp.topMargin = Ui.dp(2);
+                col.addView(sub, slp);
+                row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                if (current != null && current.id.equals(cs.id)) {
+                    TextView tag = Ui.text(m, m.getString(R.string.bpa_current_device), 11.5f, Ui.semibold, Ui.ACCENT);
+                    tag.setPadding(Ui.dp(9), Ui.dp(4), Ui.dp(9), Ui.dp(4));
+                    tag.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 100));
+                    row.addView(tag, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                }
+                g.card.addView(row, Widgets.MW);
+            }
+            content.addView(g, Widgets.MW);
         }
     }
 

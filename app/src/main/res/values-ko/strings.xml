@@ -250,7 +250,7 @@
     <string name="aod_open">전체화면 AOD 열기</string>
     <string name="aod_dim">AOD 저휘도 모드</string>
     <string name="aod_hint">두 번 탭하거나 위로 스와이프하여 종료</string>
-    <string name="aod_note">펼쳐진 미디어 플레이어 화면이 그대로 어두워지며 OLED 검은 배경으로 전환되고, 번인 방지를 위해 UI 전체가 티 나지 않게 주기적으로 미세 이동해요.</string>
+    <string name="aod_note">펼쳐진 미디어 플레이어 배경이 그 자리에서 멈춘 채 차분하게 어두워지며, 번인 방지를 위해 UI 전체가 티 나지 않게 미세 이동해요. 전원 버튼·두 번 탭·위로 스와이프로 바로 종료돼요.</string>
     <string name="pl_create">새 플레이리스트</string>
     <string name="pl_edit">플레이리스트 편집</string>
     <string name="pl_name_hint">플레이리스트 이름</string>
@@ -297,4 +297,10 @@
     <string name="bpa_open_detail">비트퍼펙트 어시스트 상세 설정</string>
     <string name="bpa_enable">비트퍼펙트 어시스트 켜기</string>
     <string name="bpa_disable">비트퍼펙트 어시스트 끄기</string>
+    <string name="bpa_supported_socs">지원 칩셋 종류</string>
+    <string name="bpa_supported_socs_sub">총 15종 지원</string>
+    <string name="bpa_current_device">현재 기기</string>
+    <string name="bpa_hires_glow">Hi-Res 3단계 글로우 효과</string>
+    <string name="bpa_hires_glow_note">Hi-Res 재생 시 커버 외곽 글로우(골드·블루·무지개)와 마스터 모드 고급 배경 효과를 표시해요.</string>
+    <string name="bpa_engine_attached">DSP 엔진 활성 · %1$s</string>
 </resources>

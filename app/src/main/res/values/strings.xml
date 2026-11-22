@@ -250,7 +250,7 @@
     <string name="aod_open">Open full-screen AOD</string>
     <string name="aod_dim">Dim screen in AOD</string>
     <string name="aod_hint">Double-tap or swipe up to exit</string>
-    <string name="aod_note">Smoothly dims the expanded media player onto a pure-black OLED screen and subtly shifts the entire UI to help prevent burn-in.</string>
+    <string name="aod_note">Freezes and gently dims the expanded player backdrop in place while subtly shifting the UI to prevent burn-in. Press power, double-tap, or swipe up to exit.</string>
     <string name="pl_create">New playlist</string>
     <string name="pl_edit">Edit playlist</string>
     <string name="pl_name_hint">Playlist name</string>
@@ -297,4 +297,10 @@
     <string name="bpa_open_detail">Open Bit-Perfect Assist settings</string>
     <string name="bpa_enable">Enable Bit-Perfect Assist</string>
     <string name="bpa_disable">Disable Bit-Perfect Assist</string>
+    <string name="bpa_supported_socs">Supported chipsets</string>
+    <string name="bpa_supported_socs_sub">15 chipsets supported</string>
+    <string name="bpa_current_device">This device</string>
+    <string name="bpa_hires_glow">Hi-Res 3-tier glow effects</string>
+    <string name="bpa_hires_glow_note">Shows the cover glow aura (Gold / Blue / Rainbow) and luxury Master backdrop during Hi-Res playback.</string>
+    <string name="bpa_engine_attached">DSP engine active · %1$s</string>
 </resources>

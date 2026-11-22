@@ -254,22 +254,31 @@ final class SpotifyWeb {
         web.evaluateJavascript("window.prismFade && window.prismFade(1, 180, 'in')", null);
     }
 
-    /** Optional Web Audio post-processing hook for supported flagship NPU devices (no-op if EME blocks media capture). */
-    static void setNpuEnhancer(boolean on, float airDb, float vocalDb) {
+    /** 5-stage Web Audio post-processing chain (Air/HighShelf/Vocal/Sub + DynamicsCompressor) for Spotify playback. */
+    static void setNpuEnhancer(boolean on, float airDb, float vocalDb, float subDb, float dynK) {
         if (web == null) return;
         final float aDb = on ? airDb : 0f;
         final float vDb = on ? vocalDb : 0f;
+        final float sDb = on ? subDb : 0f;
+        final float compRatio = on ? (1.2f + 1.4f * dynK) : 1.0f;
         Spotify.MAIN.post(() -> {
             if (web == null) return;
             String js = "try{window.__prismNpu=" + on + ";"
                     + "if(window.__prismNpu && !window.__prismNpuHooked){window.__prismNpuHooked=true;"
                     + "var AC=window.AudioContext||window.webkitAudioContext;"
                     + "if(AC){var ctx=new AC({latencyHint:'playback'});window.__prismAc=ctx;"
+                    + "var sub=ctx.createBiquadFilter();sub.type='lowshelf';sub.frequency.value=65;"
+                    + "var pk=ctx.createBiquadFilter();pk.type='peaking';pk.frequency.value=3200;pk.Q.value=0.85;"
                     + "var hs=ctx.createBiquadFilter();hs.type='highshelf';hs.frequency.value=10500;"
-                    + "var pk=ctx.createBiquadFilter();pk.type='peaking';pk.frequency.value=3200;pk.Q.value=0.9;"
-                    + "hs.connect(pk);pk.connect(ctx.destination);window.__prismHs=hs;window.__prismPk=pk;window.__prismNpuIn=hs;}}"
-                    + "if(window.__prismHs){window.__prismHs.gain.value=" + aDb + ";}"
+                    + "var air=ctx.createBiquadFilter();air.type='highshelf';air.frequency.value=15500;"
+                    + "var cmp=ctx.createDynamicsCompressor();cmp.threshold.value=-18;cmp.knee.value=12;cmp.attack.value=0.004;cmp.release.value=0.08;"
+                    + "sub.connect(pk);pk.connect(hs);hs.connect(air);air.connect(cmp);cmp.connect(ctx.destination);"
+                    + "window.__prismSub=sub;window.__prismPk=pk;window.__prismHs=hs;window.__prismAir=air;window.__prismCmp=cmp;window.__prismNpuIn=sub;}}"
+                    + "if(window.__prismSub){window.__prismSub.gain.value=" + sDb + ";}"
                     + "if(window.__prismPk){window.__prismPk.gain.value=" + vDb + ";}"
+                    + "if(window.__prismHs){window.__prismHs.gain.value=" + (aDb * 0.72f) + ";}"
+                    + "if(window.__prismAir){window.__prismAir.gain.value=" + (aDb * 0.45f) + ";}"
+                    + "if(window.__prismCmp){window.__prismCmp.ratio.value=" + compRatio + ";}"
                     + "if(window.__prismAc && window.__prismNpu){window.__prismAc.resume();}"
                     + "document.querySelectorAll('audio,video').forEach(function(el){"
                     + "if(window.__prismNpu && !el.__prismWired && window.__prismAc && window.__prismNpuIn){"

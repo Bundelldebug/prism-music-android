@@ -3,11 +3,13 @@ package com.oneuibook.prism;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioProfile;
 import android.os.Build;
 
 import java.lang.reflect.Method;
@@ -16,7 +18,8 @@ import java.util.Locale;
 
 /**
  * Inspects active Bluetooth A2DP/LE Audio (including Samsung SSC / SSC-UHQ) or direct USB DAC output
- * (codec, bit depth, sample rate, device icon) and evaluates the 4-tier Hi-Res playback visual tier:
+ * using Android 12+ public AudioProfile API, BluetoothA2dp proxy, BluetoothDevice names, and HAL/vendor
+ * detection. Evaluates the 4-tier Hi-Res playback visual tier:
  *   - TIER_NONE   (0): 0 conditions
  *   - TIER_GOLD   (1): 1 condition  (Bit-Perfect Assist OR bit > 16 OR kHz >= 96) -> Gold glow
  *   - TIER_BLUE   (2): 2 conditions -> Luminous Blue glow
@@ -70,16 +73,14 @@ final class AudioInfo {
     private static BluetoothA2dp a2dpProxy;
     private static boolean proxyRequested;
 
-    /** Connects (or reconnects after permission grant) the BluetoothA2dp profile proxy. */
-    static void init(Context c) {
-        init(c, false);
-    }
+    static void init(Context c) { init(c, false); }
 
     static void init(Context c, boolean force) {
         if ((proxyRequested && !force) || c == null) return;
         proxyRequested = true;
         try {
-            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            BluetoothManager bm = (BluetoothManager) c.getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter adapter = bm != null ? bm.getAdapter() : BluetoothAdapter.getDefaultAdapter();
             if (adapter == null || !adapter.isEnabled()) return;
             adapter.getProfileProxy(c.getApplicationContext(), new BluetoothProfile.ServiceListener() {
                 @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
@@ -95,14 +96,6 @@ final class AudioInfo {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Pure Hi-Res tier evaluator:
-     * - Bit-Perfect active -> TIER_MASTER (3)
-     * - 3 conditions -> TIER_MASTER (3)
-     * - 2 conditions -> TIER_BLUE (2)
-     * - 1 condition  -> TIER_GOLD (1)
-     * - 0 conditions -> TIER_NONE (0)
-     */
     static int evaluateHiResTier(boolean assistOn, int bits, float khz, boolean isBitPerfect) {
         if (isBitPerfect) return TIER_MASTER;
         int count = (assistOn ? 1 : 0) + (bits > 16 ? 1 : 0) + (khz >= 96f ? 1 : 0);
@@ -119,7 +112,6 @@ final class AudioInfo {
         return evaluateHiResTier(assist, spec.bits, spec.khz, bp);
     }
 
-    /** Picks a dedicated icon for Galaxy Buds, headphones, third-party earbuds, USB DAC, or speaker. */
     static int deviceIcon(OutputSpec spec) {
         if (spec == null) return Icons.DEVICE;
         return deviceIconForName(spec.deviceName, spec.isBt, spec.isUsbDac, spec.isWired);
@@ -127,13 +119,12 @@ final class AudioInfo {
 
     static int deviceIconForName(String name, boolean isBt, boolean isUsbDac, boolean isWired) {
         String n = name == null ? "" : name.toLowerCase(Locale.US);
-        // 1) Samsung Galaxy Buds family (dedicated Buds icon)
-        if (n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds2")
-                || n.contains("buds pro") || n.contains("buds fe") || n.contains("buds live")
-                || n.contains("buds+") || n.contains("sm-r") || n.contains("갤럭시 버즈") || n.contains("버즈")) {
+        if (n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds 3")
+                || n.contains("buds2") || n.contains("buds 2") || n.contains("buds pro")
+                || n.contains("buds fe") || n.contains("buds live") || n.contains("buds+")
+                || n.contains("sm-r") || n.contains("갤럭시 버즈") || n.contains("버즈")) {
             return Icons.BUDS;
         }
-        // 2) Over-ear / on-ear headphones
         if (n.contains("headphone") || n.contains("wh-1000") || n.contains("wh-")
                 || n.contains("quietcomfort") || n.contains("airpods max")
                 || (n.contains("momentum") && !n.contains("tw") && !n.contains("true wireless"))
@@ -147,7 +138,6 @@ final class AudioInfo {
                 || n.contains("헤드폰") || n.contains("헤드셋")) {
             return Icons.HEADPHONES;
         }
-        // 3) Third-party wireless earbuds / earphones
         if (n.contains("airpods") || n.contains("earbuds") || n.contains("wf-")
                 || n.contains("freebuds") || n.contains("pixel buds") || n.contains("nothing ear")
                 || n.contains("ear (") || n.contains("beats fit") || n.contains("studio buds")
@@ -157,11 +147,8 @@ final class AudioInfo {
                 || n.contains("이어폰") || n.contains("이어버드")) {
             return Icons.EARBUDS;
         }
-        // 4) Direct USB DAC
         if (isUsbDac) return Icons.DAC;
-        // 5) Wired headphones
         if (isWired) return Icons.HEADPHONES;
-        // 6) Generic Bluetooth audio defaults to earbuds
         if (isBt) return Icons.EARBUDS;
         return Icons.DEVICE;
     }
@@ -190,7 +177,7 @@ final class AudioInfo {
                 return s;
             }
             if (bt != null) {
-                fillBluetooth(s, bt, am);
+                fillBluetooth(c, s, bt, am);
                 return s;
             }
             if (wired != null) {
@@ -219,54 +206,66 @@ final class AudioInfo {
         s.khz = maxKhzFromRates(d.getSampleRates(), 48f);
     }
 
-    private static void fillBluetooth(OutputSpec s, AudioDeviceInfo d, AudioManager am) {
+    private static void fillBluetooth(Context c, OutputSpec s, AudioDeviceInfo d, AudioManager am) {
         s.external = true;
         s.isBt = true;
         CharSequence pn = d.getProductName();
         s.deviceName = (pn == null || pn.length() == 0) ? "Bluetooth" : pn.toString();
         boolean ble = d.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET;
-        s.codec = ble ? "LC3" : "Bluetooth";
+        s.codec = ble ? "LC3" : "";
         s.bits = maxBitsFromEncodings(d.getEncodings(), 16);
         s.khz = maxKhzFromRates(d.getSampleRates(), 48f);
 
-        boolean resolvedFromApi = false;
-        // 1) Query live A2DP codec status via BluetoothA2dp proxy reflection (requires BLUETOOTH_CONNECT on API 31+)
-        if (a2dpProxy != null) {
+        // 1) Always prefer the real BluetoothDevice name from BluetoothA2dp / BluetoothManager (public API)
+        BluetoothDevice activeDev = findConnectedA2dpDevice(c);
+        if (activeDev != null) {
             try {
-                BluetoothDevice dev = null;
-                try {
-                    Method getActive = a2dpProxy.getClass().getMethod("getActiveDevice");
-                    Object r = getActive.invoke(a2dpProxy);
-                    if (r instanceof BluetoothDevice) dev = (BluetoothDevice) r;
-                } catch (Throwable ignored) {}
-                if (dev == null) {
-                    List<BluetoothDevice> list = a2dpProxy.getConnectedDevices();
-                    if (list != null && !list.isEmpty()) dev = list.get(0);
-                }
-                if (dev != null) {
-                    if (s.deviceName.equals("Bluetooth")) {
-                        try {
-                            String dn = dev.getName();
-                            if (dn != null && !dn.isEmpty()) s.deviceName = dn;
-                        } catch (Throwable ignored) {}
-                    }
-                    Method getStatus = a2dpProxy.getClass().getMethod("getCodecStatus", BluetoothDevice.class);
-                    Object status = getStatus.invoke(a2dpProxy, dev);
-                    if (status != null) {
-                        Method getCfg = status.getClass().getMethod("getCodecConfig");
-                        Object cfg = getCfg.invoke(status);
-                        if (cfg != null) {
-                            resolvedFromApi = applyCodecConfig(s, cfg);
+                String dn = activeDev.getName();
+                if (dn != null && !dn.trim().isEmpty()) s.deviceName = dn.trim();
+            } catch (Throwable ignored) {}
+        }
+
+        // 2) Public API 31+ AudioDeviceInfo.getAudioProfiles(): reads active/supported encodings without hidden API blocks
+        boolean resolvedFromApi = false;
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                List<AudioProfile> profs = d.getAudioProfiles();
+                if (profs != null) {
+                    for (AudioProfile ap : profs) {
+                        int fmt = ap.getFormat();
+                        String cName = encodingToCodec(fmt);
+                        if (!cName.isEmpty() && codecPriority(cName) > codecPriority(s.codec)) {
+                            s.codec = cName;
+                            resolvedFromApi = true;
                         }
+                        float maxR = maxKhzFromRates(ap.getSampleRates(), 0f);
+                        if (maxR > s.khz) s.khz = maxR;
+                        int b = bitsFromEncoding(fmt);
+                        if (b > s.bits) s.bits = b;
                     }
                 }
             } catch (Throwable ignored) {}
         }
 
-        // 2) Secondary HAL parameter probe (works on several Samsung One UI builds even when hidden A2DP API is restricted)
+        // 3) Live A2DP codec status via BluetoothA2dp proxy reflection (when not restricted by hidden API policy)
+        if (a2dpProxy != null && activeDev != null) {
+            try {
+                Method getStatus = a2dpProxy.getClass().getMethod("getCodecStatus", BluetoothDevice.class);
+                Object status = getStatus.invoke(a2dpProxy, activeDev);
+                if (status != null) {
+                    Method getCfg = status.getClass().getMethod("getCodecConfig");
+                    Object cfg = getCfg.invoke(status);
+                    if (cfg != null && applyCodecConfig(s, cfg)) {
+                        resolvedFromApi = true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        // 4) AudioManager vendor HAL parameter probe
         if (!resolvedFromApi && am != null) {
             try {
-                String p = am.getParameters("bt_codec;a2dp_codec;g_bt_codec");
+                String p = am.getParameters("bt_codec;a2dp_codec;g_bt_codec;bt_a2dp_codec");
                 if (p != null && !p.isEmpty()) {
                     String mapped = codecTypeName(-1, p, s.bits, s.khz);
                     if (!mapped.isEmpty()) {
@@ -277,23 +276,91 @@ final class AudioInfo {
             } catch (Throwable ignored) {}
         }
 
-        // 3) Samsung One UI + Galaxy Buds SSC / SSC-UHQ smart detection fallback when hidden API is blocked
-        if (!resolvedFromApi && isSamsungDevice() && isGalaxyBuds(s.deviceName)) {
+        // 5) Samsung One UI + Galaxy Buds SSC / SSC-UHQ detection (Samsung uses SSC/SSC-UHQ on Galaxy phones)
+        if (isSamsungDevice() && isGalaxyBuds(s.deviceName)) {
             String n = s.deviceName.toLowerCase(Locale.US);
             boolean uhqModel = n.contains("buds3") || n.contains("buds 3") || n.contains("sm-r630") || n.contains("sm-r530");
             boolean hiRes24Model = uhqModel || n.contains("buds2 pro") || n.contains("buds 2 pro") || n.contains("sm-r510");
-            if (uhqModel && (s.khz >= 96f || s.bits >= 24)) {
+            if (!resolvedFromApi || s.codec.isEmpty() || "SBC".equals(s.codec) || "AAC".equals(s.codec)) {
+                if (uhqModel) {
+                    s.codec = "SSC-UHQ";
+                    if (s.bits < 24) s.bits = 24;
+                    if (s.khz < 96f) s.khz = 96f;
+                } else {
+                    s.codec = "SSC";
+                    if (hiRes24Model && s.bits < 24) s.bits = 24;
+                }
+            } else if ("SSC".equals(s.codec) && (uhqModel || (s.bits >= 24 && s.khz >= 96f))) {
                 s.codec = "SSC-UHQ";
-                if (s.bits < 24) s.bits = 24;
-                if (s.khz < 96f) s.khz = 96f;
-            } else {
-                s.codec = "SSC";
-                if (hiRes24Model && s.bits < 24) s.bits = 24;
             }
-        } else if ("SSC".equals(s.codec) && s.bits >= 24 && s.khz >= 96f) {
-            // Upgrade SSC -> SSC-UHQ whenever 24bit / 96kHz is active
-            s.codec = "SSC-UHQ";
         }
+
+        // 6) Clean fallback for third-party devices so it never shows a bare "Bluetooth" label
+        if (s.codec == null || s.codec.isEmpty()) {
+            String n = s.deviceName.toLowerCase(Locale.US);
+            if (n.contains("airpods") || n.contains("beats")) {
+                s.codec = "AAC";
+            } else if ((n.contains("wh-1000") || n.contains("wf-1000") || n.contains("linkbuds")) && (s.khz >= 96f || s.bits >= 24)) {
+                s.codec = "LDAC";
+            } else if (ble) {
+                s.codec = "LC3";
+            } else {
+                s.codec = "AAC";
+            }
+        }
+    }
+
+    private static BluetoothDevice findConnectedA2dpDevice(Context c) {
+        if (a2dpProxy != null) {
+            try {
+                try {
+                    Method getActive = a2dpProxy.getClass().getMethod("getActiveDevice");
+                    Object r = getActive.invoke(a2dpProxy);
+                    if (r instanceof BluetoothDevice) return (BluetoothDevice) r;
+                } catch (Throwable ignored) {}
+                List<BluetoothDevice> list = a2dpProxy.getConnectedDevices();
+                if (list != null && !list.isEmpty()) return list.get(0);
+            } catch (Throwable ignored) {}
+        }
+        try {
+            BluetoothManager bm = (BluetoothManager) c.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bm != null) {
+                List<BluetoothDevice> list = bm.getConnectedDevices(BluetoothProfile.A2DP);
+                if (list != null && !list.isEmpty()) return list.get(0);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static String encodingToCodec(int enc) {
+        switch (enc) {
+            case AudioFormat.ENCODING_AAC_LC:
+            case AudioFormat.ENCODING_AAC_HE_V1:
+            case AudioFormat.ENCODING_AAC_HE_V2:
+            case AudioFormat.ENCODING_AAC_ELD:
+            case AudioFormat.ENCODING_AAC_XHE: return "AAC";
+            case AudioFormat.ENCODING_OPUS: return "Opus";
+            default:
+                // API 33+ Bluetooth encodings (checked by int constants for compatibility)
+                if (enc == 24) return "LC3"; // ENCODING_LC3
+                return "";
+        }
+    }
+
+    private static int codecPriority(String c) {
+        if (c == null || c.isEmpty()) return 0;
+        if ("SSC-UHQ".equals(c) || "LDAC".equals(c) || "aptX Lossless".equals(c)) return 10;
+        if ("SSC".equals(c) || "aptX Adaptive".equals(c) || "aptX HD".equals(c) || "LHDC".equals(c)) return 8;
+        if ("aptX".equals(c) || "LC3".equals(c) || "Opus".equals(c)) return 6;
+        if ("AAC".equals(c)) return 4;
+        return 2;
+    }
+
+    private static int bitsFromEncoding(int e) {
+        if (e == AudioFormat.ENCODING_PCM_32BIT || e == AudioFormat.ENCODING_PCM_FLOAT) return 32;
+        if (e == AudioFormat.ENCODING_PCM_24BIT_PACKED) return 24;
+        if (e == AudioFormat.ENCODING_PCM_16BIT) return 16;
+        return 0;
     }
 
     private static boolean isSamsungDevice() {
@@ -304,9 +371,10 @@ final class AudioInfo {
     private static boolean isGalaxyBuds(String name) {
         if (name == null) return false;
         String n = name.toLowerCase(Locale.US);
-        return n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds2")
-                || n.contains("buds pro") || n.contains("buds fe") || n.contains("buds live")
-                || n.contains("buds+") || n.contains("sm-r") || n.contains("갤럭시 버즈") || n.contains("버즈");
+        return n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds 3")
+                || n.contains("buds2") || n.contains("buds 2") || n.contains("buds pro")
+                || n.contains("buds fe") || n.contains("buds live") || n.contains("buds+")
+                || n.contains("sm-r") || n.contains("갤럭시 버즈") || n.contains("버즈");
     }
 
     private static boolean applyCodecConfig(OutputSpec s, Object cfg) {
@@ -341,7 +409,6 @@ final class AudioInfo {
                 Object t = mType.invoke(cfg);
                 if (t instanceof Integer) type = (Integer) t;
             } catch (Throwable ignored) {}
-            // Samsung One UI sometimes exposes SSC as vendor codec type 6/7/8 or 1000000+ with UHQ bit in specific1
             long spec1 = 0;
             try {
                 Method mS1 = cfg.getClass().getMethod("getCodecSpecific1");
@@ -387,7 +454,7 @@ final class AudioInfo {
             case 4: return "LDAC";
             case 5: return "LC3";
             case 6: return "Opus";
-            case 7: // Samsung Scalable / Seamless Codec on One UI A2DP
+            case 7:
             case 8: return (bits >= 24 && khz >= 96f) ? "SSC-UHQ" : "SSC";
             default: return "";
         }
@@ -414,10 +481,7 @@ final class AudioInfo {
         if (encs == null || encs.length == 0) return fallback;
         int best = 0;
         for (int e : encs) {
-            int b = 0;
-            if (e == AudioFormat.ENCODING_PCM_32BIT || e == AudioFormat.ENCODING_PCM_FLOAT) b = 32;
-            else if (e == AudioFormat.ENCODING_PCM_24BIT_PACKED) b = 24;
-            else if (e == AudioFormat.ENCODING_PCM_16BIT) b = 16;
+            int b = bitsFromEncoding(e);
             if (b > best) best = b;
         }
         return best > 0 ? best : fallback;

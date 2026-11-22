@@ -707,14 +707,19 @@ public class PrismUiTest {
         assertEquals("Third-party earbuds icon", Icons.EARBUDS, AudioInfo.deviceIconForName("AirPods Pro", true, false, false));
         assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA17", false, true, false));
 
-        // Friendly SoC marketing names
+        // Friendly SoC marketing names & exact 15 supported chipsets check
+        assertEquals("15 supported chipsets", 15, NpuAudio.SUPPORTED_CHIPS.length);
+        for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
+            assertTrue("chip supported: " + cs.id, NpuAudio.isSupportedSoc(cs.id));
+        }
         assertEquals("스냅드래곤 8 엘리트 5세대", NpuAudio.friendlySocName(app, "SM8850"));
         assertEquals("스냅드래곤 8 엘리트", NpuAudio.friendlySocName(app, "SM8750"));
         assertEquals("디멘시티 9400", NpuAudio.friendlySocName(app, "MT6991"));
         assertEquals("엑시노스 2500", NpuAudio.friendlySocName(app, "S5E9955"));
 
-        // Capture Bit-Perfect Assist settings screen + Gold / Blue / Master player effects (including A style cover-below badge)
+        // Capture Bit-Perfect Assist (with chipset art) + Supported Chipsets 15-chip list + Gold / Blue / Master player effects
         NpuAudio.testSupportedOverride = Boolean.TRUE;
+        NpuAudio.testSocOverride = "SM8850";
         NpuAudio.setEnabled(app, true);
         AudioInfo.OutputSpec mockSpec = new AudioInfo.OutputSpec();
         mockSpec.deviceName = "Galaxy Buds3 Pro";
@@ -727,12 +732,15 @@ public class PrismUiTest {
 
         a.push(new Settings.BitPerfectAssistPage(a)); idle(600);
         shot(a, "74_bitperfect_assist");
+        a.push(new Settings.SupportedChipsetsPage(a)); idle(600);
+        shot(a, "79_supported_chipsets");
+        a.pop(); idle(300);
         a.pop(); idle(400);
 
-        // 3 conditions Master exclusive effect (Assist + 24bit + 96kHz)
-        a.np.open(); idle(900);
+        // 3 conditions Master exclusive effect (Assist + 24bit + 96kHz) + animated luxury backdrop
+        a.np.open(); idle(1200);
         for (Runnable r : new java.util.ArrayList<>(Player.listeners)) r.run();
-        idle(400);
+        idle(900);
         shot(a, "76_player_hires_master");
 
         // 2 conditions Luminous Blue glow effect (Assist off, 24bit + 96kHz SSC-UHQ)
@@ -756,8 +764,27 @@ public class PrismUiTest {
         shot(a, "78_player_a_style_badge");
 
         a.np.close(); idle(500);
+
+        // Wide foldable 16:10 cover (w412dp-h659dp) & 4:3 inner (w800dp-h600dp) layout check
+        ActivityController<MainActivity> wc = launch("ko-w412dp-h659dp-xhdpi");
+        MainActivity wa = wc.get();
+        fakeTrack();
+        idle(600);
+        wa.np.open(); idle(900);
+        shot(wa, "80_wide_cover_16_10");
+        wa.np.close(); idle(300);
+
+        ActivityController<MainActivity> innerCtrl = launch("ko-w800dp-h600dp-xhdpi");
+        MainActivity ia = innerCtrl.get();
+        fakeTrack();
+        idle(600);
+        ia.np.open(); idle(900);
+        shot(ia, "81_wide_inner_4_3");
+        ia.np.close(); idle(300);
+
         AudioInfo.testSpec = null;
         NpuAudio.testSupportedOverride = null;
+        NpuAudio.testSocOverride = null;
 
         // restore defaults
         Ui.gStyle = false;

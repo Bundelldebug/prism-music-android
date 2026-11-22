@@ -83,6 +83,11 @@ final class NowPlaying extends FrameLayout {
     private final GlassChip chip;
     private final AudioBadge audioBadge;
     private int hiResTier;
+    private float masterBgP;
+    private ValueAnimator masterBgAnim;
+    private boolean aodFrozen;
+    private long aodFrozenMs;
+    private float aodHideControls;
     private final Icons.IconView chipIcon;
     private final Icons.IconView star, more, aodBtn, prev, play, next, lyricsBtn, shuffleBtn, repeatBtn, queueBtn;
     private final Seek seek;
@@ -128,7 +133,7 @@ final class NowPlaying extends FrameLayout {
         content.addView(artist);
         artist.setOnClickListener(v -> goArtist());
 
-        star = icon(Icons.STAR, 25, 0xFFFFFFFF, v -> Player.toggleLike());
+        star = icon(Icons.HEART, 25, 0xFFFFFFFF, v -> Player.toggleLike());
         more = icon(Icons.MORE, 24, 0xFFFFFFFF, v -> moreMenu(v));
         aodBtn = icon(Icons.AOD, 22, 0xE6FFFFFF, v -> main.openAod());
         aodBtn.setVisibility(GONE);
@@ -206,6 +211,17 @@ final class NowPlaying extends FrameLayout {
     boolean isOpen() { return getVisibility() == VISIBLE && (openAnim == null || !openAnim.isRunning() || openTarget > 0.5f); }
     private float openTarget;
 
+    /** Freezes the moving background in place and fades live controls out while full-screen AOD is active. */
+    void setAodFreeze(boolean freeze, float hideControls) {
+        if (freeze && !aodFrozen) aodFrozenMs = SystemClock.uptimeMillis();
+        aodFrozen = freeze;
+        aodHideControls = Ui.clamp(hideControls, 0f, 1f);
+        content.setAlpha(1f - aodHideControls);
+        invalidate();
+    }
+
+    private long bgClockMs() { return aodFrozen ? aodFrozenMs : SystemClock.uptimeMillis(); }
+
     // ---------------------------------------------------------------- open / close
     void open() {
         if (Player.track == null) { Player.toast(R.string.nothing_playing); return; }
@@ -246,7 +262,7 @@ final class NowPlaying extends FrameLayout {
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> main.openUri(t.albumUri, t.album)));
         if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> main.openUri(t.artistUri, t.artist)));
         if (!Player.local()) {
-            e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.STAR_FILL : Icons.STAR, false, Player::toggleLike));
+            e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
             e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         }
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> openPanel(2)));
@@ -297,59 +313,59 @@ final class NowPlaying extends FrameLayout {
         float top = Ui.statusInset;
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
         if (wide) {
-            bottomY = H - Ui.navInset - Ui.dpf(34);
-            colW = Math.min(W * 0.38f, H * (oneui ? 0.43f : 0.48f));
-            colX = Math.max(Ui.dpf(36), W * 0.055f);
-            float extraH = oneui ? Ui.dpf(268) : Ui.dpf(250);
+            bottomY = H - Ui.navInset - Ui.dpf(26);
+            colW = Math.min(W * 0.44f, H * (oneui ? 0.48f : 0.52f));
+            colX = Math.max(Ui.dpf(32), W * 0.045f);
+            float extraH = oneui ? Ui.dpf(248) : Ui.dpf(236);
             float block = colW + extraH;
-            float y0 = Math.max(top + Ui.dpf(24), (H - block) / 2f);
+            float y0 = Math.max(top + Ui.dpf(20), (H - block) / 2f);
             artBig.set(colX, y0, colX + colW, y0 + colW);
             artSmall.set(artBig);
             if (oneui) {
-                float devY = artBig.bottom + Ui.dpf(22);
-                titleBigY = devY + Ui.dpf(24);
+                float devY = artBig.bottom + Ui.dpf(20);
+                titleBigY = devY + Ui.dpf(22);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(78);
+                seekY = titleBigY + Ui.dpf(74);
                 timesY = seekY + Ui.dpf(20);
-                ctrlY = timesY + Ui.dpf(56);
+                ctrlY = timesY + Ui.dpf(54);
             } else {
                 titleBigY = artBig.bottom + Ui.dpf(34);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(66);
+                seekY = titleBigY + Ui.dpf(64);
                 timesY = seekY + Ui.dpf(22);
-                ctrlY = timesY + Ui.dpf(62);
+                ctrlY = timesY + Ui.dpf(58);
             }
-            float px = colX + colW + Math.max(Ui.dpf(40), W * 0.055f);
-            panelRect.set(px, top + Ui.dpf(36), W - Ui.dpf(36), bottomY - Ui.dpf(36));
+            float px = colX + colW + Math.max(Ui.dpf(28), W * 0.04f);
+            panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(28));
             return;
         }
         float side = Ui.dpf(28);
-        bottomY = H - Ui.navInset - Ui.dpf(38);
+        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 30 : 38);
         if (oneui) {
-            // G style: rounded cover → output-device + action row → centred marquee title/artist → wave bar → controls → volume
+            // G style: rounded cover -> output-device + action row -> centred marquee title/artist -> wave bar -> controls -> volume
             float s1 = Ui.dpf(24);
-            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.34f : 0.40f));
-            artBig.set((W - size) / 2f, top + Ui.dpf(Ui.cover() ? 28 : 40), (W + size) / 2f, top + Ui.dpf(Ui.cover() ? 28 : 40) + size);
+            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.38f : 0.40f));
+            artBig.set((W - size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 40), (W + size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 40) + size);
             float sm = Ui.dpf(64);
             artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
             float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 24);
             titleBigY = devY + Ui.dpf(24);
             titleSmallY = artSmall.centerY() - Ui.dpf(23);
-            seekY = titleBigY + Ui.dpf(Ui.cover() ? 72 : 80);
+            seekY = titleBigY + Ui.dpf(Ui.cover() ? 70 : 80);
             timesY = seekY + Ui.dpf(22);
-            ctrlY = Math.max(timesY + Ui.dpf(56), (timesY + bottomY) / 2f - Ui.dpf(24));
+            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 52 : 56), (timesY + bottomY) / 2f - Ui.dpf(24));
             panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
             return;
         }
-        float size = Math.min(W - side * 2, H * 0.42f);
-        artBig.set((W - size) / 2f, top + Ui.dpf(42), (W + size) / 2f, top + Ui.dpf(42) + size);
+        float size = Math.min(W - side * 2, H * (Ui.cover() ? 0.40f : 0.42f));
+        artBig.set((W - size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 42), (W + size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 42) + size);
         float sm = Ui.dpf(64);
         artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-        titleBigY = artBig.bottom + Ui.dpf(38);
+        titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 32 : 38);
         titleSmallY = artSmall.centerY() - Ui.dpf(23);
-        seekY = titleBigY + Ui.dpf(64);
-        timesY = seekY + Ui.dpf(22);
-        float minCtrl = timesY + Ui.dpf(62);
+        seekY = titleBigY + Ui.dpf(Ui.cover() ? 58 : 64);
+        timesY = seekY + Ui.dpf(20);
+        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 52 : 62);
         ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(16) + bottomY) / 2f - Ui.dpf(6));
         panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(18));
     }
@@ -681,7 +697,7 @@ final class NowPlaying extends FrameLayout {
                 int bsave = brc.save();
                 brc.clipPath(clip);
                 drawBackground(brc, bgMix);
-                drawArt(brc, artRadius);
+                if (aodHideControls < 0.99f) drawArt(brc, artRadius);
                 brc.restoreToCount(bsave);
             } finally {
                 bgNode.endRecording();
@@ -692,14 +708,13 @@ final class NowPlaying extends FrameLayout {
             bgRecorded = false;
             if (bgMix > 0f) drawBackground(c, bgMix);
             // artwork
-            drawArt(c, artRadius);
+            if (aodHideControls < 0.99f) drawArt(c, artRadius);
         }
         c.restoreToCount(save);
         super.dispatchDraw(c);
-        // morphing: every frame; fully open: the slow mesh-gradient drift only needs ~30 fps
+        // morphing: every frame; fully open: freeze when AOD is open, else gentle ~15 fps drift
         if (p > 0 && p < 1 || dragY > 0) postInvalidateOnAnimation();
-        // the cover background drifts slowly: ~15 fps is visually identical and far cooler than 30
-        else if (bgMix > 0) postInvalidateDelayed(66);
+        else if (bgMix > 0 && !aodFrozen) postInvalidateDelayed(66);
     }
 
     private final Paint artBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -735,7 +750,7 @@ final class NowPlaying extends FrameLayout {
         if (src == null) return false;
         float w = rect.width(), h = rect.height();
         if (w <= 0 || h <= 0) return false;
-        double time = SystemClock.uptimeMillis() / 1000.0;
+        double time = bgClockMs() / 1000.0;
         int sc = c.saveLayerAlpha(rect.left, rect.top, rect.right, rect.bottom, (int) (255 * alpha));
         c.clipRect(rect);
         float cover = Math.max(w, h) / src.getWidth() * 1.9f;
@@ -768,7 +783,7 @@ final class NowPlaying extends FrameLayout {
     }
     private void drawBackground(Canvas c, float alpha) {
         if (drawArtBackground(c, alpha)) return;
-        long t = SystemClock.uptimeMillis();
+        long t = bgClockMs();
         int[] p = new int[4];
         for (int i = 0; i < 4; i++) p[i] = Ui.mix(palFrom[i], pal[i], palMix);
         float W = rect.width(), H = rect.height();
@@ -799,7 +814,7 @@ final class NowPlaying extends FrameLayout {
         if (art.width() <= 1) return;
         float bgMix = Ui.clamp((openP - 0.3f) / 0.5f, 0f, 1f);
         if (bgMix > 0.01f && mode < 0.99f) {
-            if (hiResTier > AudioInfo.TIER_NONE) {
+            if (hiResTier > AudioInfo.TIER_NONE && NpuAudio.glowEnabled(getContext())) {
                 drawHiResAura(c, radius, bgMix * (1f - mode));
             }
             shadow.setShadowLayer(Ui.dpf(26), 0, Ui.dpf(12), Ui.alpha(0xFF000000, 0.35f * bgMix * (1f - mode)));
@@ -846,7 +861,7 @@ final class NowPlaying extends FrameLayout {
      */
     private void drawHiResAura(Canvas c, float radius, float alpha) {
         if (alpha <= 0.01f) return;
-        double time = SystemClock.uptimeMillis() / 1000.0;
+        double time = bgClockMs() / 1000.0;
         float pulse = 0.78f + 0.22f * (float) Math.sin(time * 1.9);
         hiResPaint.setStyle(Paint.Style.STROKE);
 
@@ -935,17 +950,34 @@ final class NowPlaying extends FrameLayout {
         prismM.postTranslate(cx, cy);
         prismSweep.setLocalMatrix(prismM);
         prismPaint.setShader(prismSweep);
-        float boost = hiResTier == AudioInfo.TIER_MASTER ? 1.42f : (hiResTier == AudioInfo.TIER_BLUE ? 1.20f : (hiResTier == AudioInfo.TIER_GOLD ? 1.10f : 1f));
+        boolean glowOn = NpuAudio.glowEnabled(getContext());
+        float boost = !glowOn ? 1f : (hiResTier == AudioInfo.TIER_MASTER ? 1.55f : (hiResTier == AudioInfo.TIER_BLUE ? 1.25f : (hiResTier == AudioInfo.TIER_GOLD ? 1.12f : 1f)));
         prismPaint.setAlpha(Math.min(255, (int) ((lightArt ? 40 : 56) * boost)));
         c.drawRect(rect, prismPaint);
-        // 3-condition / Bit-Perfect Master exclusive: rich deep velvet sapphire-amethyst & champagne-gold studio wash
-        if (hiResTier == AudioInfo.TIER_MASTER) {
+        // 3-condition / Bit-Perfect Master exclusive: smooth animated luxury royal velvet + champagne-gold aurora wash
+        if (masterBgP > 0.01f) {
+            float mp = Ui.clamp(masterBgP, 0f, 1f);
+            float driftX = (float) Math.cos(time * 0.22) * w * 0.14f;
+            float driftY = (float) Math.sin(time * 0.18) * h * 0.10f;
+            // 1) Deep luxury sapphire -> royal amethyst -> warm obsidian-gold velvet wash (clearly visible!)
             prismPaint.setBlendMode(null);
-            prismPaint.setShader(new LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
-                    new int[]{0x420B0F26, 0x3820123A, 0x342B1E0E}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+            prismPaint.setShader(new LinearGradient(rect.left + driftX, rect.top, rect.right - driftX, rect.bottom,
+                    new int[]{Ui.alpha(0xFF0A1238, 0.72f * mp), Ui.alpha(0xFF2E1254, 0.68f * mp), Ui.alpha(0xFF3E260C, 0.64f * mp)},
+                    new float[]{0f, 0.52f, 1f}, Shader.TileMode.CLAMP));
             prismPaint.setAlpha(255);
             c.drawRect(rect, prismPaint);
+            // 2) Flowing champagne-gold & sapphire aurora radial blooms (Screen blend)
             prismPaint.setBlendMode(android.graphics.BlendMode.SCREEN);
+            prismPaint.setShader(new RadialGradient(rect.left + w * 0.78f + driftX * 0.6f, rect.top + h * 0.20f + driftY,
+                    Math.max(w, h) * 0.65f,
+                    new int[]{Ui.alpha(0xFFFFD56B, 0.44f * mp), Ui.alpha(0xFFA855F7, 0.24f * mp), 0x00000000},
+                    new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
+            c.drawRect(rect, prismPaint);
+            prismPaint.setShader(new RadialGradient(rect.left + w * 0.18f - driftX * 0.5f, rect.top + h * 0.78f - driftY,
+                    Math.max(w, h) * 0.62f,
+                    new int[]{Ui.alpha(0xFF38BDF8, 0.36f * mp), Ui.alpha(0xFF7B61FF, 0.22f * mp), 0x00000000},
+                    new float[]{0f, 0.50f, 1f}, Shader.TileMode.CLAMP));
+            c.drawRect(rect, prismPaint);
         }
         // 2) three dispersed beams leaving the "prism" at the upper left
         float ox = rect.left - w * 0.1f, oy = rect.top + h * 0.22f;
@@ -1112,7 +1144,7 @@ final class NowPlaying extends FrameLayout {
     private void onPlayer() {
         applyStyle();
         play.set(Player.playing ? Icons.PAUSE : Icons.PLAY, getVisibility() == VISIBLE);
-        star.set(Player.liked ? Icons.STAR_FILL : Icons.STAR, getVisibility() == VISIBLE);
+        star.set(Player.liked ? Icons.HEART_FILL : Icons.HEART, getVisibility() == VISIBLE);
         repeatBtn.set("track".equals(Player.repeat) ? Icons.REPEAT_ONE : Icons.REPEAT, getVisibility() == VISIBLE);
         star.setVisibility(Player.local() ? INVISIBLE : VISIBLE);
         chipText.setText(Player.outputName(getContext()));
@@ -1147,6 +1179,17 @@ final class NowPlaying extends FrameLayout {
         AudioInfo.OutputSpec spec = AudioInfo.current(getContext());
         int tier = AudioInfo.hiResTier(getContext(), spec);
         hiResTier = tier;
+        float wantMasterBg = (tier == AudioInfo.TIER_MASTER && NpuAudio.glowEnabled(getContext())) ? 1f : 0f;
+        if (Math.abs(wantMasterBg - masterBgP) > 0.01f && (masterBgAnim == null || !masterBgAnim.isRunning())) {
+            if (getVisibility() == VISIBLE && openP > 0.5f) {
+                masterBgAnim = Ui.animate(masterBgP, wantMasterBg, 750, Ui.ONEUI_SINE_80, a -> {
+                    masterBgP = (float) a.getAnimatedValue();
+                    invalidate();
+                });
+            } else {
+                masterBgP = wantMasterBg;
+            }
+        }
         chipIcon.set(AudioInfo.deviceIcon(spec), false);
         String fmt = spec.formatLine();
         String shortFmt = fmt.replace(" · ", " ").replace(" / ", "/").replace("USB Bit-Perfect", "USB BP");
@@ -1208,6 +1251,14 @@ final class NowPlaying extends FrameLayout {
         } else {
             e.add(new GlassMenu.Entry(NpuAudio.status(c), Icons.INFO, false, () -> {}));
         }
+        boolean glowOn = NpuAudio.glowEnabled(c);
+        GlassMenu.Entry glowE = new GlassMenu.Entry(c.getString(R.string.bpa_hires_glow), Icons.APPEARANCE, glowOn, () -> {
+            MainActivity.prefs(c).edit().putBoolean(NpuAudio.PREF_HIRES_GLOW, !glowOn).apply();
+            refreshAudioBadge();
+            invalidate();
+        });
+        glowE.checkable = true;
+        e.add(glowE);
         e.add(new GlassMenu.Entry(c.getString(R.string.bpa_open_detail), Icons.SETTINGS, false, () -> {
             close();
             main.push(new Settings.BitPerfectAssistPage(main));
@@ -1400,7 +1451,7 @@ final class NowPlaying extends FrameLayout {
         if (t == null) return;
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> { close(); main.openUri(t.albumUri, t.album); }));
         if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openUri(t.artistUri, t.artist); }));
-        e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.STAR_FILL : Icons.STAR, false, Player::toggleLike));
+        e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
         if (!Player.local() && t.uri != null && t.uri.startsWith("spotify:track:")) {
             e.add(new GlassMenu.Entry(c.getString(R.string.pl_add_track), Icons.QUEUE, false, () -> main.addToPlaylistDialog(t.uri)));
         }
