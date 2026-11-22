@@ -397,8 +397,10 @@ final class Dock extends FrameLayout {
             RectF railCircle = tmp;
             railCircle.set(W - m - cs, bottom - cs, W - m, bottom);
             circle.set(Ui.lerp(railCircle.left, m, search), railCircle.top, railCircle.right, railCircle.bottom);
-            mini.set(m, bottom - Ui.dpf(56), W - m - cs - gap, bottom - Ui.dpf(2));
-            if (search > 0) mini.offset(0, Ui.dpf(30) * search);
+            // In search mode, lift the mini player pill smoothly above the full-width search bar
+            float miniR = Ui.lerp(W - m - cs - gap, W - m, search);
+            float liftY = (cs + gap) * search;
+            mini.set(m, bottom - Ui.dpf(56) - liftY, miniR, bottom - Ui.dpf(2) - liftY);
             return;
         }
         if (unifiedG()) {
@@ -409,9 +411,8 @@ final class Dock extends FrameLayout {
             pill.set(left, top, left + barW, bottom);
             circle.setEmpty();
             float gmh = Ui.dpf(54);
-            float expBottom = bottomY() - Ui.dpf(60) - Ui.dpf(8);
+            float expBottom = top - Ui.dpf(8);
             mini.set(left, expBottom - gmh, left + barW, expBottom);
-            if (search > 0) mini.offset(0, Ui.dpf(34) * search);
             return;
         }
         float h = barH();
@@ -423,13 +424,13 @@ final class Dock extends FrameLayout {
         float searchLeftNormal = W - m - h;
         float searchLeft = Ui.lerp(searchLeftNormal, m + h + gap, search);
         circle.set(searchLeft, top, W - m, bottom);
-        // music bar: slides down-right into the gap between the two circles
-        float expBottom = bottomY() - Ui.dpf(64) - Ui.dpf(7);
+        // music bar: stays cleanly above the search bar during search mode; collapses between circles only when scrolled
+        float expBottom = top - Ui.dpf(8);
         RectF e = tmp;
         e.set(m, expBottom - mh, W - m, expBottom);
         float cl = m + h + gap, cr = W - m - h - gap;
-        mini.set(Ui.lerp(e.left, cl, cm), Ui.lerp(e.top, top, cm), Ui.lerp(e.right, cr, cm), Ui.lerp(e.bottom, bottom, cm));
-        if (search > 0) mini.offset(0, Ui.dpf(30) * search);
+        float effCm = cm * (1f - search);
+        mini.set(Ui.lerp(e.left, cl, effCm), Ui.lerp(e.top, top, effCm), Ui.lerp(e.right, cr, effCm), Ui.lerp(e.bottom, bottom, effCm));
     }
 
     private static final float SLOT_PAD = 14f;
@@ -690,7 +691,7 @@ final class Dock extends FrameLayout {
     private float miniArtX() { return tablet ? tabletBtn(4) + Ui.dpf(34) : mini.left + Ui.dpf(15); }
 
     private void drawMini(Canvas c) {
-        float show = miniShow * (tablet ? 1f : 1f - search);
+        float show = miniShow;
         if (show <= 0.01f || miniHidden) return;
         miniGlass.shapes(mini, mini.height() / 2f, null, 0, null, 0);
         miniGlass.alpha = show;
@@ -877,7 +878,7 @@ final class Dock extends FrameLayout {
 
     private int hit(float x, float y) {
         float slop = Ui.dpf(4);
-        if (miniShow * (tablet ? 1f : 1f - search) > 0.5f && x >= mini.left - slop && x <= mini.right + slop && y >= mini.top - slop && y <= mini.bottom + slop) {
+        if (miniShow > 0.5f && !miniHidden && x >= mini.left - slop && x <= mini.right + slop && y >= mini.top - slop && y <= mini.bottom + slop) {
             if (tablet) {
                 int[] kinds = {T_MINI_SHUF, T_MINI_PREV, T_MINI_PLAY, T_MINI_NEXT, T_MINI_REP};
                 for (int i = 0; i < 5; i++) if (Math.abs(x - tabletBtn(i)) < Ui.dpf(22)) return kinds[i];

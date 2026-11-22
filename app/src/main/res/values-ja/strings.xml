@@ -303,4 +303,27 @@
     <string name="bpa_hires_glow">Hi-Res 3段階グローエフェクト</string>
     <string name="bpa_hires_glow_note">Hi-Res 再生時のジャケット周囲グロー（ゴールド・ブルー・レインボー）とマスター背景を表示します。</string>
     <string name="bpa_engine_attached">DSP エンジン有効 · %1$s</string>
+    <string name="bpa_space">ステレオ音場拡張</string>
+    <string name="bpa_bass">サブベース深度</string>
+    <string name="bpa_harmonics">ハーモニックモード</string>
+    <string name="bpa_harm_studio">スタジオ</string>
+    <string name="bpa_harm_crystal">クリスタル</string>
+    <string name="bpa_harm_tube">真空管ウォーム</string>
+    <string name="bpa_per_device">出力機器ごとに設定を自動記憶</string>
+    <string name="bpa_ab_hold">長押しで原音(Bypass)とリアルタイム比較</string>
+    <string name="bpa_ab_bypassing">原音再生中 (Bypass)</string>
+    <string name="bpa_curve">リアルタイム周波数特性</string>
+    <string name="follow">フォロー</string>
+    <string name="following">フォロー中</string>
+    <string name="follow_relogin">フォロー権限が必要です。設定から Spotify に再ログインしてください。</string>
+    <string name="artist_events">予定されているライブイベント</string>
+    <string name="artist_no_events">予定されているイベントはありません</string>
+    <string name="artist_browse_all">ディスコグラフィー一覧</string>
+    <string name="see_all">すべて見る</string>
+    <string name="exp_for_you">おすすめ</string>
+    <string name="exp_refresh">更新</string>
+    <string name="exp_because">%1$s をよく聴くあなたへ</string>
+    <string name="exp_fresh_tracks">おすすめのトラック</string>
+    <string name="exp_discover_albums">好みのアルバム</string>
+    <string name="lyrics_sync_offset">同期微調整</string>
 </resources>

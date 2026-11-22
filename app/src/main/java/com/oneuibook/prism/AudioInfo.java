@@ -86,6 +86,8 @@ final class AudioInfo {
                 @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
                     if (profile == BluetoothProfile.A2DP && proxy instanceof BluetoothA2dp) {
                         a2dpProxy = (BluetoothA2dp) proxy;
+                        NpuAudio.syncPerDevice(c.getApplicationContext());
+                        NpuAudio.apply(c.getApplicationContext(), true);
                         Player.notifyAll0();
                     }
                 }

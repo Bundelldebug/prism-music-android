@@ -303,4 +303,27 @@
     <string name="bpa_hires_glow">Hi-Res 3-tier glow effects</string>
     <string name="bpa_hires_glow_note">Shows the cover glow aura (Gold / Blue / Rainbow) and luxury Master backdrop during Hi-Res playback.</string>
     <string name="bpa_engine_attached">DSP engine active · %1$s</string>
+    <string name="bpa_space">Stereo soundstage width</string>
+    <string name="bpa_bass">Sub-bass depth</string>
+    <string name="bpa_harmonics">Harmonic exciter mode</string>
+    <string name="bpa_harm_studio">Studio</string>
+    <string name="bpa_harm_crystal">Crystal</string>
+    <string name="bpa_harm_tube">Warm Tube</string>
+    <string name="bpa_per_device">Remember tuning per output device</string>
+    <string name="bpa_ab_hold">Hold to compare with original (Bypass)</string>
+    <string name="bpa_ab_bypassing">Playing original (Bypass)</string>
+    <string name="bpa_curve">Live frequency response</string>
+    <string name="follow">Follow</string>
+    <string name="following">Following</string>
+    <string name="follow_relogin">Follow permission is needed. Please sign in to Spotify again in Settings.</string>
+    <string name="artist_events">Upcoming live events</string>
+    <string name="artist_no_events">No upcoming live events found</string>
+    <string name="artist_browse_all">Browse full discography</string>
+    <string name="see_all">See all</string>
+    <string name="exp_for_you">For you</string>
+    <string name="exp_refresh">Refresh</string>
+    <string name="exp_because">Because you listen to %1$s</string>
+    <string name="exp_fresh_tracks">Recommended tracks</string>
+    <string name="exp_discover_albums">Albums for your taste</string>
+    <string name="lyrics_sync_offset">Sync offset</string>
 </resources>

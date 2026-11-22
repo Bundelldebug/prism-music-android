@@ -231,7 +231,33 @@ public class PrismUiTest {
             if (req.startsWith("GET /me/top/tracks")) return new org.json.JSONObject().put("items", tracks);
             if (req.startsWith("GET /me/top/artists")) return new org.json.JSONObject().put("items", artists);
             if (req.startsWith("GET /browse/new-releases")) return null; // removed for dev-mode apps: section must hide
-            if (req.startsWith("GET /search")) return new org.json.JSONObject().put("playlists", new org.json.JSONObject().put("items", pls));
+            if (req.startsWith("GET /me/following/contains")) return new org.json.JSONObject().put("items", new org.json.JSONArray().put(true));
+            if (req.startsWith("GET /artists/") && req.contains("/albums")) {
+                org.json.JSONArray als = new org.json.JSONArray();
+                for (int i = 0; i < 6; i++) {
+                    als.put(new org.json.JSONObject().put("type", "album").put("id", "aal" + i).put("uri", "spotify:album:aal" + i)
+                            .put("name", "Release " + (i + 1)).put("release_date", "202" + (6 - i % 4) + "-05-01")
+                            .put("total_tracks", 4 + i).put("images", new org.json.JSONArray())
+                            .put("artists", new org.json.JSONArray().put(new org.json.JSONObject().put("name", "aespa"))));
+                }
+                return new org.json.JSONObject().put("items", als);
+            }
+            if (req.startsWith("GET /artists/") && req.contains("/top-tracks")) return new org.json.JSONObject().put("tracks", tracks);
+            if (req.startsWith("EVENTS ")) {
+                org.json.JSONArray evs = new org.json.JSONArray();
+                evs.put(new org.json.JSONObject().put("datetime", "2026-12-18T19:00:00")
+                        .put("title", "SYNK : PARALLEL LINE ENCORE")
+                        .put("url", "https://example.com/event/1")
+                        .put("venue", new org.json.JSONObject().put("name", "KSPO DOME").put("city", "Seoul").put("country", "South Korea")));
+                evs.put(new org.json.JSONObject().put("datetime", "2027-01-10T18:30:00")
+                        .put("title", "TOKYO DOME LIVE")
+                        .put("url", "https://example.com/event/2")
+                        .put("venue", new org.json.JSONObject().put("name", "Tokyo Dome").put("city", "Tokyo").put("country", "Japan")));
+                return new org.json.JSONObject().put("items", evs);
+            }
+            if (req.startsWith("GET /search")) return new org.json.JSONObject()
+                    .put("playlists", new org.json.JSONObject().put("items", pls))
+                    .put("tracks", new org.json.JSONObject().put("items", tracks));
             if (req.startsWith("GET /playlists/")) {
                 org.json.JSONArray it = new org.json.JSONArray();
                 for (int i = 0; i < 12; i++) it.put(new org.json.JSONObject().put("item", track(i)));
@@ -261,6 +287,15 @@ public class PrismUiTest {
             a.openItem(pl);
             for (int i = 0; i < 40; i++) { idle(50); Thread.sleep(20); }
             shot(a, "33_playlist_detail");
+            // 9.5.8 artist detail (follow + discography menu + offline events) & full releases grid page
+            Widgets.Item ar = Widgets.Item.of(new org.json.JSONObject().put("type", "artist").put("id", "a0")
+                    .put("uri", "spotify:artist:a0").put("name", "aespa").put("images", new org.json.JSONArray()));
+            a.openItem(ar);
+            for (int i = 0; i < 40; i++) { idle(50); Thread.sleep(20); }
+            shot(a, "34_artist_detail");
+            a.push(new Pages.ArtistReleasesPage(a, "a0", "aespa", "album", a.getString(R.string.albums)));
+            for (int i = 0; i < 30; i++) { idle(50); Thread.sleep(15); }
+            shot(a, "35_artist_releases");
         } finally {
             Spotify.fixtures = null;
         }
@@ -565,8 +600,10 @@ public class PrismUiTest {
         a.pop();
         captureAnim(a, "g_page_pop", 24, 16);
 
-        // G style unified bottom search bar preview
+        // G style unified bottom search bar preview (with mini media pill floating above search bar!)
         a.onSearch(); idle(600);
+        assertTrue("mini pill visible in search mode", a.dock.mini.height() > 0f);
+        assertTrue("mini pill sits above search bar", a.dock.mini.bottom <= a.dock.pill.top);
         shot(a, "70_g_search_blue");
         a.onExitSearch(); idle(600);
 
@@ -715,7 +752,29 @@ public class PrismUiTest {
         assertEquals("스냅드래곤 8 엘리트 5세대", NpuAudio.friendlySocName(app, "SM8850"));
         assertEquals("스냅드래곤 8 엘리트", NpuAudio.friendlySocName(app, "SM8750"));
         assertEquals("디멘시티 9400", NpuAudio.friendlySocName(app, "MT6991"));
+        assertEquals("디멘시티 9400+", NpuAudio.friendlySocName(app, "MT6991Z"));
+        assertEquals("디멘시티 9500", NpuAudio.friendlySocName(app, "MT6993"));
+        assertEquals("디멘시티 9500s", NpuAudio.friendlySocName(app, "MT6991W"));
+        assertEquals("디멘시티 9600 프로", NpuAudio.friendlySocName(app, "MT6995"));
+        assertEquals("디멘시티 9600M", NpuAudio.friendlySocName(app, "MT6995M"));
         assertEquals("엑시노스 2500", NpuAudio.friendlySocName(app, "S5E9955"));
+
+        // [11] 9.5.8 regression checks: artist follow scope, lyrics [offset:] & version filter & ko translation check, real-time NPU A/B & params
+        assertTrue("user-follow-modify scope", Spotify.SCOPES.contains("user-follow-modify"));
+        Lyrics.Result offLrc = Lyrics.parse("[offset:+500]\n[00:02.00]Hello world", "");
+        assertTrue("LRC offset applied", offLrc != null && offLrc.synced && offLrc.lines.size() == 1 && offLrc.lines.get(0).time == 1500L);
+        assertTrue("live mismatch filtered", Lyrics.isVersionMismatch("Supernova", "Supernova (Live at Tokyo Dome)"));
+        assertTrue("exact match allowed", !Lyrics.isVersionMismatch("Supernova", "Supernova"));
+        NpuAudio.setParam(app, NpuAudio.PREF_SPACE, 68);
+        NpuAudio.setParam(app, NpuAudio.PREF_BASS, 62);
+        NpuAudio.setHarmonics(app, "tube");
+        assertEquals(68, NpuAudio.space(app));
+        assertEquals(62, NpuAudio.bass(app));
+        assertEquals("tube", NpuAudio.harmonics(app));
+        NpuAudio.setBypassHold(app, true);
+        assertTrue("bypass hold active", NpuAudio.bypassHold);
+        NpuAudio.setBypassHold(app, false);
+        assertTrue("bypass hold released", !NpuAudio.bypassHold);
 
         // Capture Bit-Perfect Assist (with chipset art) + Supported Chipsets 15-chip list + Gold / Blue / Master player effects
         NpuAudio.testSupportedOverride = Boolean.TRUE;

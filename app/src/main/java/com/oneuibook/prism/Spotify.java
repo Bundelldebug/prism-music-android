@@ -34,7 +34,8 @@ final class Spotify {
     static final String REDIRECT = "prismmusic://callback";
     static final String SCOPES = "user-read-private user-read-email user-read-playback-state user-modify-playback-state "
             + "user-read-currently-playing user-read-recently-played user-top-read user-library-read user-library-modify "
-            + "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-follow-read streaming";
+            + "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private "
+            + "user-follow-read user-follow-modify streaming";
     static final String API = "https://api.spotify.com/v1";
 
     static final ExecutorService IO = Executors.newFixedThreadPool(8);
@@ -462,6 +463,72 @@ final class Spotify {
         } catch (Exception e) {
             if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
         }
+    }
+
+    /** Checks whether the signed-in user follows the given artist ID. */
+    static void isFollowingArtist(String artistId, java.util.function.Consumer<Boolean> cb) {
+        if (artistId == null || artistId.isEmpty() || !loggedIn()) {
+            if (cb != null) MAIN.post(() -> cb.accept(false));
+            return;
+        }
+        get("/me/following/contains?type=artist&ids=" + enc(artistId), new Cb() {
+            @Override public void ok(JSONObject o) {
+                JSONArray a = o == null ? null : o.optJSONArray("items");
+                boolean following = a != null && a.length() > 0 && a.optBoolean(0, false);
+                if (cb != null) cb.accept(following);
+            }
+            @Override public void err(int code, String message) {
+                if (cb != null) cb.accept(false);
+            }
+        });
+    }
+
+    /** Follows or unfollows an artist on Spotify (requires {@code user-follow-modify}). */
+    static void setFollowArtist(String artistId, boolean follow, Cb cb) {
+        if (artistId == null || artistId.isEmpty()) {
+            if (cb != null) MAIN.post(() -> cb.err(400, "missing artist id"));
+            return;
+        }
+        String body = null;
+        try {
+            body = new JSONObject().put("ids", new JSONArray().put(artistId)).toString();
+        } catch (Exception ignored) {}
+        send(follow ? "PUT" : "DELETE", "/me/following?type=artist&ids=" + enc(artistId), follow ? body : null, cb);
+    }
+
+    /**
+     * Fetches upcoming live/offline concerts for an artist via the public Bandsintown REST API.
+     * Always posts a non-null {@link JSONArray} on the main thread (empty on error or none found).
+     */
+    static void fetchArtistEvents(String artistName, java.util.function.Consumer<JSONArray> cb) {
+        if (artistName == null || artistName.trim().isEmpty()) {
+            if (cb != null) MAIN.post(() -> cb.accept(new JSONArray()));
+            return;
+        }
+        IO.execute(() -> {
+            JSONArray out = new JSONArray();
+            try {
+                if (fixtures != null) {
+                    JSONObject f = fixtures.apply("EVENTS " + artistName);
+                    JSONArray fa = f == null ? null : f.optJSONArray("items");
+                    if (fa != null) out = fa;
+                } else {
+                    String url = "https://rest.bandsintown.com/artists/" + enc(artistName.trim()) + "/events?app_id=prism_music";
+                    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                    c.setRequestMethod("GET");
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(10000);
+                    c.setRequestProperty("Accept", "application/json");
+                    int code = c.getResponseCode();
+                    if (code >= 200 && code < 300) {
+                        String txt = read(c.getInputStream()).trim();
+                        if (txt.startsWith("[")) out = new JSONArray(txt);
+                    }
+                }
+            } catch (Exception ignored) {}
+            final JSONArray res = out;
+            if (cb != null) MAIN.post(() -> cb.accept(res));
+        });
     }
 
     // ---- helpers ----

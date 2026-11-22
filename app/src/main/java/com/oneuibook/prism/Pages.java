@@ -397,6 +397,8 @@ final class Pages {
         static final String[] QUERIES = {"top hits", "k-pop", "pop", "hip hop", "r&b", "j-pop", "rock", "indie", "jazz", "classical", "ballad", "electronic"};
         private LinearLayout body;
         private int req;
+        private int currentIdx = 0;
+        private int seedSalt = 0;
 
         ExplorePage(MainActivity m) { super(m, m.getString(R.string.tab_explore), true); }
 
@@ -404,124 +406,430 @@ final class Pages {
             MainActivity m = main;
             if (m.isLocalSource()) { buildLocal(); return; }
             if (!Spotify.loggedIn()) { connectPrompt(this, content); return; }
-            Widgets.Chips chips = new Widgets.Chips(m, m.getResources().getStringArray(R.array.genres), this::load);
-            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            cl.topMargin = Ui.dp(14);
-            cl.bottomMargin = Ui.dp(16);
-            content.addView(chips, cl);
+
+            // Replace first genre chip with dynamic personalized "For you" feed
+            String[] rawGenres = m.getResources().getStringArray(R.array.genres);
+            String[] labels = new String[rawGenres.length];
+            labels[0] = m.getString(R.string.exp_for_you);
+            for (int i = 1; i < rawGenres.length; i++) labels[i] = rawGenres[i];
+
+            LinearLayout bar = new LinearLayout(m);
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            bl.topMargin = Ui.dp(10);
+            bl.bottomMargin = Ui.dp(10);
+
+            Widgets.Chips chips = new Widgets.Chips(m, labels, idx -> { currentIdx = idx; load(idx); });
+            bar.addView(chips, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            View refreshBtn = makeRefreshChip(m, () -> { seedSalt++; load(currentIdx); });
+            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(34));
+            rl.leftMargin = Ui.dp(6);
+            rl.rightMargin = Ui.dp(16);
+            bar.addView(refreshBtn, rl);
+            content.addView(bar, bl);
+
             body = new LinearLayout(m);
             body.setOrientation(LinearLayout.VERTICAL);
             content.addView(body, Widgets.MW);
-            load(0);
+            load(currentIdx);
+        }
+
+        private static View makeRefreshChip(Context c, Runnable onClick) {
+            LinearLayout b = new LinearLayout(c);
+            b.setOrientation(LinearLayout.HORIZONTAL);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(Ui.dp(12), 0, Ui.dp(12), 0);
+            b.setBackground(Ui.round(Ui.chip(), 100));
+            b.addView(new Icons.IconView(c, Icons.REPEAT, 14, Ui.ACCENT), new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
+            TextView t = Ui.text(c, c.getString(R.string.exp_refresh), 12, Ui.semibold, Ui.ACCENT);
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tl.leftMargin = Ui.dp(5);
+            b.addView(t, tl);
+            b.setOnClickListener(v -> onClick.run());
+            Ui.press(b, 0.94f);
+            return b;
         }
 
         private void load(int idx) {
             final int my = ++req;
+            final int salt = seedSalt;
             MainActivity m = main;
             body.animate().alpha(0f).setDuration(120).withEndAction(() -> {
                 if (my != req) return;
                 body.removeAllViews();
                 body.addView(Widgets.spinner(m, 260));
                 body.setAlpha(1f);
-                fetchAlbums(GENRE_QUERY[idx % GENRE_QUERY.length], new Spotify.Cb() {
-                    @Override public void ok(JSONObject o) {
-                        if (my != req) return;
-                        List<Widgets.Item> l = items(o.optJSONArray("items"));
-                        body.removeAllViews();
-                        if (l.isEmpty()) { body.addView(Widgets.caption(m, m.getString(R.string.empty))); return; }
-                        body.addView(hero(l.get(0)));
-                        addGrid(body, l);
-                        body.setAlpha(0f);
-                        body.setTranslationY(Ui.dp(10));
-                        body.animate().alpha(1f).translationY(0).setDuration(320).setInterpolator(Ui.EMPHASIZED).start();
-                    }
-                    @Override public void err(int c, String e) {
-                        if (my != req) return;
-                        body.removeAllViews();
-                        body.addView(Widgets.caption(m, m.getString(R.string.load_failed)));
-                    }
-                });
+                if (idx == 0) {
+                    loadForYou(my, salt);
+                } else {
+                    loadGenre(idx, my, salt);
+                }
             }).start();
         }
+
+        private void loadForYou(int my, int salt) {
+            MainActivity m = main;
+            Spotify.IO.execute(() -> {
+                java.util.Random rng = new java.util.Random(System.nanoTime() ^ ((long) (salt + 1) * 0x9E3779B97F4A7C15L));
+                java.util.Set<String> recentTrackIds = new java.util.HashSet<>();
+                java.util.LinkedHashMap<String, JSONObject> seedArtists = new java.util.LinkedHashMap<>();
+                java.util.List<String> seedGenres = new java.util.ArrayList<>();
+
+                // 1) Recently played: exclude already-heard tracks, collect artist seeds
+                try {
+                    JSONArray rec = Spotify.call("GET", "/me/player/recently-played?limit=20", null).optJSONArray("items");
+                    if (rec != null) {
+                        for (int i = 0; i < rec.length(); i++) {
+                            JSONObject tr = rec.optJSONObject(i);
+                            if (tr != null && tr.optJSONObject("track") != null) tr = tr.optJSONObject("track");
+                            if (tr == null) continue;
+                            String tid = tr.optString("id");
+                            if (!tid.isEmpty()) recentTrackIds.add(tid);
+                            JSONArray ars = tr.optJSONArray("artists");
+                            if (ars != null && ars.length() > 0) {
+                                JSONObject ar = ars.optJSONObject(0);
+                                if (ar != null && !ar.optString("id").isEmpty()) seedArtists.putIfAbsent(ar.optString("id"), ar);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // 2) Top artists (short_term -> medium_term fallback)
+                for (String range : new String[]{"short_term", "medium_term"}) {
+                    try {
+                        JSONArray ta = Spotify.call("GET", "/me/top/artists?time_range=" + range + "&limit=15", null).optJSONArray("items");
+                        if (ta != null && ta.length() > 0) {
+                            for (int i = 0; i < ta.length(); i++) {
+                                JSONObject ar = ta.optJSONObject(i);
+                                if (ar == null) continue;
+                                String id = ar.optString("id");
+                                if (!id.isEmpty()) seedArtists.put(id, ar);
+                                JSONArray gs = ar.optJSONArray("genres");
+                                if (gs != null) {
+                                    for (int j = 0; j < gs.length(); j++) {
+                                        String g = gs.optString(j, "").trim();
+                                        if (!g.isEmpty()) seedGenres.add(g);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                // 3) Top tracks (short_term -> medium_term fallback) for additional taste signals
+                for (String range : new String[]{"short_term", "medium_term"}) {
+                    try {
+                        JSONArray tt = Spotify.call("GET", "/me/top/tracks?time_range=" + range + "&limit=15", null).optJSONArray("items");
+                        if (tt != null && tt.length() > 0) {
+                            for (int i = 0; i < tt.length(); i++) {
+                                JSONObject tr = tt.optJSONObject(i);
+                                if (tr == null) continue;
+                                JSONArray ars = tr.optJSONArray("artists");
+                                if (ars != null && ars.length() > 0) {
+                                    JSONObject ar = ars.optJSONObject(0);
+                                    if (ar != null && !ar.optString("id").isEmpty()) seedArtists.putIfAbsent(ar.optString("id"), ar);
+                                }
+                            }
+                            break;
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                java.util.List<JSONObject> artistList = new java.util.ArrayList<>(seedArtists.values());
+                java.util.Collections.shuffle(artistList, rng);
+                java.util.Collections.shuffle(seedGenres, rng);
+
+                String becauseArtistName = null;
+                java.util.LinkedHashMap<String, JSONObject> becauseAlbums = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> freshTracksMap = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> discoverAlbums = new java.util.LinkedHashMap<>();
+
+                // 4) Releases from a rotating favorite artist
+                if (!artistList.isEmpty()) {
+                    JSONObject fav = artistList.get(0);
+                    becauseArtistName = fav.optString("name", "");
+                    String fid = fav.optString("id", "");
+                    if (!fid.isEmpty()) {
+                        try {
+                            JSONArray al = Spotify.call("GET", "/artists/" + fid + "/albums?include_groups=album,single&limit=10", null).optJSONArray("items");
+                            java.util.Set<String> seenNames = new java.util.HashSet<>();
+                            if (al != null) {
+                                for (int i = 0; i < al.length(); i++) {
+                                    JSONObject a = al.optJSONObject(i);
+                                    if (a != null && seenNames.add(a.optString("name").toLowerCase(java.util.Locale.ROOT))) {
+                                        becauseAlbums.put(a.optString("id"), a);
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                // 5) Build dynamic discovery queries from user's top genres + rotating seed artists
+                java.util.List<String> queries = new java.util.ArrayList<>();
+                java.util.Set<String> usedGenres = new java.util.HashSet<>();
+                for (String g : seedGenres) {
+                    if (usedGenres.add(g.toLowerCase(java.util.Locale.ROOT))) {
+                        queries.add("genre:\"" + g + "\"");
+                        if (queries.size() >= 2) break;
+                    }
+                }
+                for (int i = 0; i < Math.min(3, artistList.size()) && queries.size() < 4; i++) {
+                    String nm = artistList.get(i).optString("name", "").trim();
+                    if (!nm.isEmpty()) queries.add(nm);
+                }
+                if (queries.isEmpty()) {
+                    int q1 = 1 + rng.nextInt(GENRE_QUERY.length - 1);
+                    int q2 = 1 + (q1 + rng.nextInt(GENRE_QUERY.length - 2)) % (GENRE_QUERY.length - 1);
+                    queries.add(GENRE_QUERY[q1]);
+                    queries.add(GENRE_QUERY[q2]);
+                }
+
+                for (String q : queries) {
+                    int off = rng.nextInt(3) * 10;
+                    try {
+                        JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(q), null).optJSONObject("tracks");
+                        JSONArray a = t == null ? null : t.optJSONArray("items");
+                        if ((a == null || a.length() == 0) && off > 0) {
+                            t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(q), null).optJSONObject("tracks");
+                            a = t == null ? null : t.optJSONArray("items");
+                        }
+                        if (a == null) continue;
+                        for (int i = 0; i < a.length(); i++) {
+                            JSONObject tr = a.optJSONObject(i);
+                            if (tr == null) continue;
+                            String tid = tr.optString("id");
+                            if (!tid.isEmpty() && !recentTrackIds.contains(tid)) {
+                                freshTracksMap.putIfAbsent(tid, tr);
+                            }
+                            JSONObject al = tr.optJSONObject("album");
+                            if (al != null) {
+                                String aid = al.optString("id");
+                                if (!aid.isEmpty() && !becauseAlbums.containsKey(aid)) {
+                                    discoverAlbums.putIfAbsent(aid, al);
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                // Fallback to general fresh releases if discovery came back sparse
+                if (discoverAlbums.isEmpty() && freshTracksMap.isEmpty()) {
+                    try {
+                        String fq = GENRE_QUERY[1 + rng.nextInt(GENRE_QUERY.length - 1)];
+                        JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(fq), null).optJSONObject("tracks");
+                        JSONArray a = t == null ? null : t.optJSONArray("items");
+                        if (a != null) {
+                            for (int i = 0; i < a.length(); i++) {
+                                JSONObject tr = a.optJSONObject(i);
+                                if (tr == null) continue;
+                                freshTracksMap.putIfAbsent(tr.optString("id"), tr);
+                                JSONObject al = tr.optJSONObject("album");
+                                if (al != null) discoverAlbums.putIfAbsent(al.optString("id"), al);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                java.util.List<JSONObject> fTracks = new java.util.ArrayList<>(freshTracksMap.values());
+                java.util.Collections.shuffle(fTracks, rng);
+                java.util.List<JSONObject> dAlbums = new java.util.ArrayList<>(discoverAlbums.values());
+                java.util.Collections.shuffle(dAlbums, rng);
+                java.util.List<JSONObject> bAlbums = new java.util.ArrayList<>(becauseAlbums.values());
+
+                JSONArray trackArr = new JSONArray();
+                for (int i = 0; i < Math.min(8, fTracks.size()); i++) trackArr.put(fTracks.get(i));
+                JSONArray discArr = new JSONArray();
+                for (int i = 0; i < Math.min(18, dAlbums.size()); i++) discArr.put(dAlbums.get(i));
+                JSONArray becArr = new JSONArray();
+                for (JSONObject o : bAlbums) becArr.put(o);
+
+                final String finalBecause = becauseArtistName;
+                Spotify.MAIN.post(() -> {
+                    if (my != req) return;
+                    body.removeAllViews();
+                    List<Widgets.Item> tracks = items(trackArr);
+                    List<Widgets.Item> disc = items(discArr);
+                    List<Widgets.Item> bec = items(becArr);
+                    if (disc.isEmpty() && tracks.isEmpty() && bec.isEmpty()) {
+                        body.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                        return;
+                    }
+                    Widgets.Item heroItem = !disc.isEmpty() ? disc.get(0) : (!bec.isEmpty() ? bec.get(0) : null);
+                    if (heroItem != null) body.addView(hero(heroItem));
+
+                    if (!tracks.isEmpty()) {
+                        body.addView(Widgets.section(m, m.getString(R.string.exp_fresh_tracks)));
+                        addTrackCard(body, tracks, Math.min(6, tracks.size()));
+                    }
+                    if (!bec.isEmpty() && finalBecause != null && !finalBecause.isEmpty()) {
+                        body.addView(Widgets.section(m, m.getString(R.string.exp_because, finalBecause)));
+                        LinearLayout row = Widgets.rail(body, 10);
+                        int sz = Widgets.squareDp();
+                        for (Widgets.Item x : bec) {
+                            Widgets.addToRail(row, Widgets.squareCard(m, x, sz, v -> m.openItem(x)), Ui.dp(sz));
+                        }
+                    }
+                    if (disc.size() > 1) {
+                        body.addView(Widgets.section(m, m.getString(R.string.exp_discover_albums)));
+                        addGrid(body, disc, 1);
+                    }
+                    animateBodyIn();
+                });
+            });
+        }
+
+        private void loadGenre(int idx, int my, int salt) {
+            MainActivity m = main;
+            fetchAlbumsAndTracks(GENRE_QUERY[idx % GENRE_QUERY.length], salt, (albums, tracks, err) -> {
+                if (my != req) return;
+                body.removeAllViews();
+                if (err != null && albums.isEmpty() && tracks.isEmpty()) {
+                    body.addView(Widgets.caption(m, m.getString(R.string.load_failed)));
+                    return;
+                }
+                if (albums.isEmpty() && tracks.isEmpty()) {
+                    body.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                    return;
+                }
+                if (!albums.isEmpty()) body.addView(hero(albums.get(0)));
+                if (!tracks.isEmpty()) {
+                    body.addView(Widgets.section(m, m.getString(R.string.exp_fresh_tracks)));
+                    addTrackCard(body, tracks, Math.min(5, tracks.size()));
+                }
+                if (albums.size() > 1) {
+                    body.addView(Widgets.section(m, m.getString(R.string.exp_discover_albums)));
+                    addGrid(body, albums, 1);
+                }
+                animateBodyIn();
+            });
+        }
+
+        private void animateBodyIn() {
+            body.setAlpha(0f);
+            body.setTranslationY(Ui.dp(10));
+            body.animate().alpha(1f).translationY(0).setDuration(320).setInterpolator(Ui.EMPHASIZED).start();
+        }
+
+        private void addTrackCard(LinearLayout parent, List<Widgets.Item> tracks, int limit) {
+            MainActivity m = main;
+            LinearLayout card = new LinearLayout(m);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 26 : 14));
+            card.setClipToOutline(true);
+            for (int i = 0; i < limit; i++) {
+                final int idx = i;
+                Widgets.Item it = tracks.get(i);
+                card.addView(Widgets.trackRow(m, it, 0, v -> m.playList(tracks, idx, null),
+                        m.isLocalSource() ? null : (v -> m.trackMenu(it, v))), Widgets.MW);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = lp.rightMargin = Ui.dp(16);
+            parent.addView(card, lp);
+        }
+
+        interface GenreResult { void onDone(List<Widgets.Item> albums, List<Widgets.Item> tracks, Exception err); }
 
         /** Search filters per chip: fresh tracks in the genre (albums are always readable, unlike others' playlists). */
         static final String[] GENRE_QUERY = {"year:2025-2026", "genre:\"k-pop\" year:2024-2026", "genre:pop year:2024-2026",
                 "genre:\"hip hop\" year:2024-2026", "genre:r&b year:2024-2026", "genre:\"j-pop\" year:2024-2026", "genre:rock year:2024-2026",
                 "genre:indie year:2024-2026", "genre:jazz", "genre:classical", "genre:\"k-ballad\"", "genre:edm year:2024-2026"};
 
-        /** Up to 30 tracks (3 pages of 10, the dev-mode search cap), folded into their albums, most popular first. */
-        private void fetchAlbums(String q, Spotify.Cb cb) {
+        /** Dynamic genre exploration: rotates offsets and adds discovery jitter so each refresh feels fresh. */
+        private void fetchAlbumsAndTracks(String q, int salt, GenreResult cb) {
             Spotify.IO.execute(() -> {
+                java.util.Random rng = new java.util.Random(System.nanoTime() ^ ((long) (salt + 3) * 0x517CC1B727220A95L));
                 java.util.LinkedHashMap<String, JSONObject> albums = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> trackMap = new java.util.LinkedHashMap<>();
                 java.util.Map<String, Integer> pop = new java.util.HashMap<>();
                 Exception first = null;
-                for (int off = 0; off < 30; off += 10) {
+                int startOff = (salt % 3) * 10;
+                for (int page = 0; page < 3; page++) {
+                    int off = startOff + page * 10;
                     try {
                         JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(q), null).optJSONObject("tracks");
                         JSONArray a = t == null ? null : t.optJSONArray("items");
+                        if ((a == null || a.length() == 0) && off > 0 && page == 0) {
+                            t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(q), null).optJSONObject("tracks");
+                            a = t == null ? null : t.optJSONArray("items");
+                        }
                         if (a == null || a.length() == 0) break;
                         for (int i = 0; i < a.length(); i++) {
                             JSONObject tr = a.optJSONObject(i);
-                            JSONObject al = tr == null ? null : tr.optJSONObject("album");
+                            if (tr == null) continue;
+                            trackMap.putIfAbsent(tr.optString("id"), tr);
+                            JSONObject al = tr.optJSONObject("album");
                             if (al == null) continue;
                             String id = al.optString("id");
                             if (!albums.containsKey(id)) albums.put(id, al);
-                            pop.put(id, Math.max(pop.containsKey(id) ? pop.get(id) : 0, tr.optInt("popularity")));
+                            int jitter = rng.nextInt(18);
+                            pop.put(id, Math.max(pop.containsKey(id) ? pop.get(id) : 0, tr.optInt("popularity") + jitter));
                         }
-                    } catch (Exception e) { if (off == 0) first = e; break; }
+                    } catch (Exception e) { if (page == 0) first = e; break; }
                 }
-                java.util.List<JSONObject> l = new java.util.ArrayList<>(albums.values());
-                l.sort((x, y) -> Integer.compare(pop.get(y.optString("id")), pop.get(x.optString("id"))));
-                JSONArray out = new JSONArray();
-                for (JSONObject o : l) out.put(o);
+                java.util.List<JSONObject> alList = new java.util.ArrayList<>(albums.values());
+                alList.sort((x, y) -> Integer.compare(pop.getOrDefault(y.optString("id"), 0), pop.getOrDefault(x.optString("id"), 0)));
+                java.util.List<JSONObject> trList = new java.util.ArrayList<>(trackMap.values());
+                java.util.Collections.shuffle(trList, rng);
+                JSONArray alOut = new JSONArray();
+                for (JSONObject o : alList) alOut.put(o);
+                JSONArray trOut = new JSONArray();
+                for (JSONObject o : trList) trOut.put(o);
                 final Exception fe = first;
-                Spotify.MAIN.post(() -> {
-                    if (fe != null && out.length() == 0) cb.err(fe instanceof Spotify.ApiError ? ((Spotify.ApiError) fe).code : 0, String.valueOf(fe.getMessage()));
-                    else try { cb.ok(new JSONObject().put("items", out)); } catch (Exception ignored) {}
-                });
+                Spotify.MAIN.post(() -> cb.onDone(items(alOut), items(trOut), fe));
             });
         }
 
-        /** Search is capped at 10 results per request for development-mode apps: fetch two pages. */
-        private void fetchTwo(String base, int my, Spotify.Cb cb) {
-            Spotify.IO.execute(() -> {
-                JSONArray all = new JSONArray();
-                Exception first = null;
-                for (int off = 0; off <= 10; off += 10) {
-                    try {
-                        JSONObject pl = Spotify.call("GET", base + "&offset=" + off, null).optJSONObject("playlists");
-                        JSONArray a = pl == null ? null : Spotify.playable(pl.optJSONArray("items"));
-                        if (a != null) for (int i = 0; i < a.length(); i++) if (!a.isNull(i)) all.put(a.opt(i));
-                    } catch (Exception e) {
-                        if (off == 0) first = e;
-                        break;
-                    }
-                }
-                final Exception fe = first;
-                Spotify.MAIN.post(() -> {
-                    if (fe != null) cb.err(fe instanceof Spotify.ApiError ? ((Spotify.ApiError) fe).code : 0, String.valueOf(fe.getMessage()));
-                    else try { cb.ok(new JSONObject().put("items", all)); } catch (Exception ignored) {}
-                });
-            });
-        }
-
-        /** Local explore: newest album as the hero card, the rest as a two-column grid. */
+        /** Local explore: refreshable spotlight hero + rediscover tracks + album grid. */
         private void buildLocal() {
             if (localBlocked(this, content)) return;
-            List<Widgets.Item> l = localGroups(true);
-            content.addView(new View(main), new LinearLayout.LayoutParams(1, Ui.dp(12)));
-            content.addView(hero(l.get(0)));
-            addGrid(content, l);
+            MainActivity m = main;
+            LinearLayout topBar = new LinearLayout(m);
+            topBar.setOrientation(LinearLayout.HORIZONTAL);
+            topBar.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+            topBar.setPadding(Ui.dp(16), Ui.dp(10), Ui.dp(16), Ui.dp(8));
+            body = new LinearLayout(m);
+            body.setOrientation(LinearLayout.VERTICAL);
+            topBar.addView(makeRefreshChip(m, () -> { seedSalt++; renderLocalBody(); }),
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(34)));
+            content.addView(topBar, Widgets.MW);
+            content.addView(body, Widgets.MW);
+            renderLocalBody();
+        }
+
+        private void renderLocalBody() {
+            MainActivity m = main;
+            body.removeAllViews();
+            List<Widgets.Item> l = new ArrayList<>(localGroups(true));
+            if (l.isEmpty()) { body.addView(Widgets.caption(m, m.getString(R.string.empty))); return; }
+            java.util.Random rng = new java.util.Random(System.nanoTime() ^ ((long) (seedSalt + 1) * 0x9E3779B97F4A7C15L));
+            if (seedSalt > 0) java.util.Collections.shuffle(l, rng);
+            body.addView(hero(l.get(0)));
+            if (!LocalMusic.songs.isEmpty()) {
+                List<Player.Track> pool = new ArrayList<>(LocalMusic.songs);
+                java.util.Collections.shuffle(pool, rng);
+                List<Widgets.Item> picks = new ArrayList<>();
+                for (int i = 0; i < Math.min(5, pool.size()); i++) picks.add(LocalMusic.item(pool.get(i)));
+                body.addView(Widgets.section(m, m.getString(R.string.exp_fresh_tracks)));
+                addTrackCard(body, picks, picks.size());
+            }
+            if (l.size() > 1) {
+                body.addView(Widgets.section(m, m.getString(R.string.exp_discover_albums)));
+                addGrid(body, l, 1);
+            }
         }
 
         /** Cards after the hero: 2 columns on a phone, more on unfolded / tablet screens (never stretched huge). */
-        private void addGrid(LinearLayout parent, List<Widgets.Item> l) {
+        private void addGrid(LinearLayout parent, List<Widgets.Item> l, int startIdx) {
             int avail = Widgets.contentW(main) - Ui.dp(32);
             int cols = Math.max(2, Math.min(5, avail / Ui.dp(210)));
             int gap = Ui.dp(12), colW = (avail - gap * (cols - 1)) / cols;
             LinearLayout grid = null;
-            for (int i = 1; i < l.size(); i++) {
-                int k = (i - 1) % cols;
+            for (int i = startIdx; i < l.size(); i++) {
+                int k = (i - startIdx) % cols;
                 if (k == 0) {
                     grid = new LinearLayout(main);
                     LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1008,9 +1316,174 @@ final class Pages {
 
         // ------------------------------------------------------------ artist
         private LinearLayout topSlot;
+        private boolean following;
+        private boolean followBusy;
+        private LinearLayout followBtn;
+        private Icons.IconView followIcon;
+        private TextView followLabel;
 
         /** Unfolded foldable / tablet: photo + name + buttons in a left column, songs and releases on the right. */
         private boolean wideArtist() { return (Ui.screenW - main.sideInset() - main.contentInsetPx()) / Ui.density >= 600; }
+
+        private View makeFollowButton(MainActivity m) {
+            followBtn = new LinearLayout(m);
+            followBtn.setGravity(Gravity.CENTER);
+            followIcon = new Icons.IconView(m, Icons.HEART, 17, Ui.ACCENT);
+            followBtn.addView(followIcon, new LinearLayout.LayoutParams(Ui.dp(20), Ui.dp(20)));
+            followLabel = Ui.text(m, m.getString(R.string.follow), 15, Ui.semibold, Ui.ACCENT);
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tl.leftMargin = Ui.dp(6);
+            followBtn.addView(followLabel, tl);
+            syncFollowUi();
+            followBtn.setOnClickListener(v -> toggleFollow());
+            Ui.press(followBtn, 0.96f);
+            Spotify.isFollowingArtist(item.id, f -> {
+                following = f != null && f;
+                syncFollowUi();
+            });
+            return followBtn;
+        }
+
+        private void syncFollowUi() {
+            if (followBtn == null) return;
+            int fg = following ? 0xFFFFFFFF : Ui.ACCENT;
+            followBtn.setBackground(Ui.round(following ? Ui.ACCENT : Ui.chip(), 100));
+            followIcon.icon = following ? Icons.HEART_FILL : Icons.HEART;
+            followIcon.color = fg;
+            followIcon.invalidate();
+            followLabel.setText(main.getString(following ? R.string.following : R.string.follow));
+            followLabel.setTextColor(fg);
+        }
+
+        private void toggleFollow() {
+            if (followBusy || !Spotify.loggedIn()) {
+                if (!Spotify.loggedIn()) Player.toast(R.string.login_needed);
+                return;
+            }
+            followBusy = true;
+            final boolean target = !following;
+            Spotify.setFollowArtist(item.id, target, new Spotify.Cb() {
+                @Override public void ok(JSONObject o) {
+                    followBusy = false;
+                    following = target;
+                    syncFollowUi();
+                }
+                @Override public void err(int c, String e) {
+                    followBusy = false;
+                    Player.toast(c == 403 ? R.string.follow_relogin : R.string.action_failed);
+                }
+            });
+        }
+
+        private void openReleasesPage(String group, String label) {
+            main.push(new ArtistReleasesPage(main, item.id, item.title, group, label));
+        }
+
+        private void addArtistDiscographyMenu(LinearLayout host) {
+            MainActivity m = main;
+            host.addView(Widgets.section(m, m.getString(R.string.artist_browse_all)));
+            Widgets.Group g = new Widgets.Group(m, null);
+            g.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.albums), null, true,
+                    v -> openReleasesPage("album", m.getString(R.string.albums)));
+            g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.singles_eps), null, true,
+                    v -> openReleasesPage("single", m.getString(R.string.singles_eps)));
+            g.row(Icons.ARTIST, Ui.ACCENT, m.getString(R.string.appears_on), null, true,
+                    v -> openReleasesPage("appears_on", m.getString(R.string.appears_on)));
+            host.addView(g, Widgets.MW);
+        }
+
+        private void loadArtistEvents(LinearLayout slot) {
+            MainActivity m = main;
+            Spotify.fetchArtistEvents(item.title, arr -> {
+                slot.removeAllViews();
+                slot.addView(Widgets.section(m, m.getString(R.string.artist_events)));
+                if (arr == null || arr.length() == 0) {
+                    LinearLayout emptyCard = new LinearLayout(m);
+                    emptyCard.setOrientation(LinearLayout.HORIZONTAL);
+                    emptyCard.setGravity(Gravity.CENTER_VERTICAL);
+                    emptyCard.setPadding(Ui.dp(18), Ui.dp(16), Ui.dp(18), Ui.dp(16));
+                    emptyCard.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 24 : 14));
+                    emptyCard.addView(new Icons.IconView(m, Icons.CLOCK, 18, Ui.text3()), new LinearLayout.LayoutParams(Ui.dp(20), Ui.dp(20)));
+                    TextView msg = Ui.text(m, m.getString(R.string.artist_no_events), 14, Ui.regular, Ui.text2());
+                    msg.setSingleLine(false);
+                    LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                    ml.leftMargin = Ui.dp(12);
+                    emptyCard.addView(msg, ml);
+                    LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    cl.leftMargin = cl.rightMargin = Ui.dp(16);
+                    slot.addView(emptyCard, cl);
+                    return;
+                }
+                LinearLayout card = new LinearLayout(m);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 26 : 14));
+                card.setClipToOutline(true);
+                int count = Math.min(6, arr.length());
+                for (int i = 0; i < count; i++) {
+                    JSONObject ev = arr.optJSONObject(i);
+                    if (ev == null) continue;
+                    if (i > 0) {
+                        View div = new View(m);
+                        div.setBackgroundColor(Ui.separator());
+                        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
+                        dl.leftMargin = Ui.dp(16);
+                        card.addView(div, dl);
+                    }
+                    String dt = ev.optString("datetime", "");
+                    String dateStr = dt.length() >= 10 ? dt.substring(0, 10).replace('-', '.') : "";
+                    JSONObject vObj = ev.optJSONObject("venue");
+                    String venueName = vObj == null ? "" : vObj.optString("name", "");
+                    String city = vObj == null ? "" : vObj.optString("city", "");
+                    String country = vObj == null ? "" : vObj.optString("country", "");
+                    String loc = city.isEmpty() ? country : (country.isEmpty() ? city : city + ", " + country);
+                    String title = ev.optString("title", "").trim();
+                    if (title.isEmpty()) title = venueName.isEmpty() ? item.title : venueName;
+                    String sub = venueName.isEmpty() || venueName.equals(title) ? loc : (loc.isEmpty() ? venueName : venueName + " · " + loc);
+                    final String evUrl = ev.optString("url", "");
+
+                    LinearLayout row = new LinearLayout(m);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    row.setPadding(Ui.dp(16), Ui.dp(13), Ui.dp(14), Ui.dp(13));
+                    row.setBackground(Widgets.ripple());
+
+                    if (!dateStr.isEmpty()) {
+                        TextView badge = Ui.text(m, dateStr, 11, Ui.semibold, Ui.ACCENT);
+                        badge.setGravity(Gravity.CENTER);
+                        badge.setPadding(Ui.dp(10), Ui.dp(6), Ui.dp(10), Ui.dp(6));
+                        badge.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 100));
+                        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        bl.rightMargin = Ui.dp(12);
+                        row.addView(badge, bl);
+                    }
+                    LinearLayout col = new LinearLayout(m);
+                    col.setOrientation(LinearLayout.VERTICAL);
+                    TextView tv = Ui.text(m, title, 15, Ui.semibold, Ui.text());
+                    col.addView(tv, Widgets.MW);
+                    if (!sub.isEmpty()) {
+                        TextView sv = Ui.text(m, sub, 13, Ui.regular, Ui.text2());
+                        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        sl.topMargin = Ui.dp(2);
+                        col.addView(sv, sl);
+                    }
+                    row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    if (!evUrl.isEmpty()) {
+                        row.addView(new Icons.IconView(m, Icons.CHEVRON, 15, Ui.text3()), new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18)));
+                        row.setOnClickListener(x -> {
+                            try {
+                                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(evUrl));
+                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                                m.startActivity(intent);
+                            } catch (Exception ignored) {}
+                        });
+                    }
+                    card.addView(row, Widgets.MW);
+                }
+                LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cl.leftMargin = cl.rightMargin = Ui.dp(16);
+                slot.addView(card, cl);
+            });
+        }
 
         private void buildArtistWide() {
             MainActivity m = main;
@@ -1041,6 +1514,9 @@ final class Pages {
             btns.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
             btns.addView(pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAt(0, true)), new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
             left.addView(btns, new LinearLayout.LayoutParams(colW, Ui.dp(46)));
+            LinearLayout.LayoutParams fl = new LinearLayout.LayoutParams(colW, Ui.dp(44));
+            fl.topMargin = Ui.dp(10);
+            left.addView(makeFollowButton(m), fl);
             split.addView(left, new LinearLayout.LayoutParams(colW + Ui.dp(28), ViewGroup.LayoutParams.WRAP_CONTENT));
             LinearLayout right = new LinearLayout(m);
             right.setOrientation(LinearLayout.VERTICAL);
@@ -1052,9 +1528,11 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
+            addArtistDiscographyMenu(slot());
             String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
                     {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
             for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
+            loadArtistEvents(slot());
             loadArtistTracks();
         }
 
@@ -1089,15 +1567,19 @@ final class Pages {
             LinearLayout row = new LinearLayout(m);
             row.setPadding(Ui.dp(16), Ui.dp(16), Ui.dp(16), 0);
             row.addView(pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAt(0, true)), new LinearLayout.LayoutParams(0, Ui.dp(44), 1f));
+            row.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
+            row.addView(makeFollowButton(m), new LinearLayout.LayoutParams(0, Ui.dp(44), 1f));
             content.addView(row, Widgets.MW);
 
             topSlot = slot();
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
+            addArtistDiscographyMenu(slot());
             String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
                     {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
             for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
+            loadArtistEvents(slot());
             loadArtistTracks();
         }
 
@@ -1175,7 +1657,22 @@ final class Pages {
                 Spotify.MAIN.post(() -> {
                     List<Widgets.Item> l = items(all);
                     if (l.isEmpty()) return;
-                    slot.addView(Widgets.section(main, title + "  " + l.size()));
+                    LinearLayout hdr = new LinearLayout(main);
+                    hdr.setOrientation(LinearLayout.HORIZONTAL);
+                    hdr.setGravity(Gravity.CENTER_VERTICAL);
+                    hdr.setPadding(Ui.dp(16), Ui.dp(26), Ui.dp(16), Ui.dp(12));
+                    TextView st = Ui.text(main, title + "  " + l.size(), 22, Ui.bold, Ui.text());
+                    hdr.addView(st, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    LinearLayout moreBtn = new LinearLayout(main);
+                    moreBtn.setOrientation(LinearLayout.HORIZONTAL);
+                    moreBtn.setGravity(Gravity.CENTER_VERTICAL);
+                    moreBtn.setPadding(Ui.dp(8), Ui.dp(4), Ui.dp(2), Ui.dp(4));
+                    moreBtn.addView(Ui.text(main, main.getString(R.string.see_all), 14, Ui.semibold, Ui.ACCENT));
+                    moreBtn.addView(new Icons.IconView(main, Icons.CHEVRON, 14, Ui.ACCENT), new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
+                    moreBtn.setOnClickListener(v -> openReleasesPage(group, title));
+                    Ui.press(moreBtn, 0.94f);
+                    hdr.addView(moreBtn);
+                    slot.addView(hdr, Widgets.MW);
                     LinearLayout row = Widgets.rail(slot, 10);
                     int size = Widgets.squareDp();
                     for (Widgets.Item x : l) {
@@ -1206,7 +1703,16 @@ final class Pages {
 
         void openMenu(android.graphics.RectF anchor) {
             List<GlassMenu.Entry> e = new ArrayList<>();
-            if ("playlist".equals(item.type)) {
+            if ("artist".equals(item.type)) {
+                e.add(new GlassMenu.Entry(main.getString(following ? R.string.following : R.string.follow),
+                        following ? Icons.HEART_FILL : Icons.HEART, following, this::toggleFollow));
+                e.add(new GlassMenu.Entry(main.getString(R.string.albums), Icons.ALBUM, false,
+                        () -> openReleasesPage("album", main.getString(R.string.albums))));
+                e.add(new GlassMenu.Entry(main.getString(R.string.singles_eps), Icons.NOTE, false,
+                        () -> openReleasesPage("single", main.getString(R.string.singles_eps))));
+                e.add(new GlassMenu.Entry(main.getString(R.string.appears_on), Icons.ARTIST, false,
+                        () -> openReleasesPage("appears_on", main.getString(R.string.appears_on))));
+            } else if ("playlist".equals(item.type)) {
                 e.add(new GlassMenu.Entry(main.getString(R.string.pl_edit), Icons.APPEARANCE, false, () -> {
                     String curDesc = item.raw == null ? "" : item.raw.optString("description", "");
                     main.editPlaylistDialog(item.id, item.title, curDesc, (newName, newDesc) -> {
@@ -1223,6 +1729,72 @@ final class Pages {
             e.add(new GlassMenu.Entry(main.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(item.uri)));
             e.add(new GlassMenu.Entry(main.getString(R.string.shuffle), Icons.SHUFFLE, false, () -> playAt(0, true)));
             GlassMenu.show(main, anchor, e);
+        }
+    }
+
+    // ------------------------------------------------------------------ Artist releases grid page (albums / singles & EPs / appears_on)
+    static final class ArtistReleasesPage extends Page {
+        final String artistId;
+        final String artistName;
+        final String group;
+
+        ArtistReleasesPage(MainActivity m, String artistId, String artistName, String group, String groupLabel) {
+            super(m, artistName + " · " + groupLabel, true);
+            this.artistId = artistId;
+            this.artistName = artistName;
+            this.group = group;
+            back = true;
+            headerIcons = new int[0];
+        }
+
+        @Override void build() {
+            MainActivity m = main;
+            LinearLayout host = slot();
+            host.addView(Widgets.spinner(m, 180));
+            Spotify.IO.execute(() -> {
+                JSONArray all = new JSONArray();
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                for (int off = 0; off < 200; off += 10) {
+                    try {
+                        JSONObject o = Spotify.call("GET", "/artists/" + artistId + "/albums?include_groups=" + group + "&limit=10&offset=" + off, null);
+                        JSONArray a = o.optJSONArray("items");
+                        if (a == null || a.length() == 0) break;
+                        for (int i = 0; i < a.length(); i++) {
+                            JSONObject al = a.optJSONObject(i);
+                            if (al != null && seen.add(al.optString("name").toLowerCase(java.util.Locale.ROOT))) all.put(al);
+                        }
+                        String next = o.optString("next", null);
+                        if (next == null || "null".equals(next)) break;
+                    } catch (Exception e) { break; }
+                }
+                Spotify.MAIN.post(() -> {
+                    host.removeAllViews();
+                    List<Widgets.Item> l = items(all);
+                    if (l.isEmpty()) {
+                        host.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                        return;
+                    }
+                    int avail = Widgets.contentW(m) - Ui.dp(32);
+                    int cols = Math.max(2, Math.min(5, avail / Ui.dp(170)));
+                    int gap = Ui.dp(12), colW = (avail - gap * (cols - 1)) / cols;
+                    LinearLayout row = null;
+                    for (int i = 0; i < l.size(); i++) {
+                        int k = i % cols;
+                        if (k == 0) {
+                            row = new LinearLayout(m);
+                            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                            rl.setMargins(Ui.dp(16), Ui.dp(12), Ui.dp(16), 0);
+                            host.addView(row, rl);
+                        }
+                        Widgets.Item x = l.get(i);
+                        String date = x.raw == null ? "" : x.raw.optString("release_date", "");
+                        x.subtitle = date.length() >= 4 ? date.substring(0, 4) : "";
+                        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        if (k < cols - 1) lp.rightMargin = gap;
+                        row.addView(Widgets.squareCard(m, x, Math.round(colW / Ui.density), v -> m.openItem(x)), lp);
+                    }
+                });
+            });
         }
     }
 

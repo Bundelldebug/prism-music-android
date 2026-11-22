@@ -487,7 +487,42 @@ final class Settings {
             content.addView(og, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.bpa_hires_glow_note)));
 
-            // 3) Curated profiles
+            // 3) Live frequency response curve + Instant A/B Bypass comparison button
+            NpuAudio.CurveView curveView = new NpuAudio.CurveView(m);
+            Widgets.Group cg = new Widgets.Group(m, m.getString(R.string.bpa_curve));
+            cg.card.addView(curveView, Widgets.MW);
+            if (supported && active) {
+                TextView abBtn = Ui.text(m, m.getString(R.string.bpa_ab_hold), 13.5f, Ui.semibold, Ui.ACCENT);
+                abBtn.setGravity(android.view.Gravity.CENTER);
+                abBtn.setPadding(Ui.dp(14), Ui.dp(12), Ui.dp(14), Ui.dp(12));
+                abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.12f), 14));
+                LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                abLp.setMargins(Ui.dp(14), Ui.dp(4), Ui.dp(14), Ui.dp(14));
+                abBtn.setOnTouchListener((v, ev) -> {
+                    int act = ev.getActionMasked();
+                    if (act == android.view.MotionEvent.ACTION_DOWN) {
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                        NpuAudio.setBypassHold(m, true);
+                        abBtn.setText(R.string.bpa_ab_bypassing);
+                        abBtn.setBackground(Ui.round(Ui.alpha(0xFFFF9F0A, 0.24f), 14));
+                        abBtn.setTextColor(0xFFFF9F0A);
+                        curveView.invalidate();
+                        return true;
+                    } else if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
+                        NpuAudio.setBypassHold(m, false);
+                        abBtn.setText(R.string.bpa_ab_hold);
+                        abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.12f), 14));
+                        abBtn.setTextColor(Ui.ACCENT);
+                        curveView.invalidate();
+                        return true;
+                    }
+                    return false;
+                });
+                cg.card.addView(abBtn, abLp);
+            }
+            content.addView(cg, Widgets.MW);
+
+            // 4) Curated profiles
             Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.bpa_profile));
             String curProf = NpuAudio.profile(m);
             for (int i = 0; i < NpuAudio.PROFILES.length; i++) {
@@ -502,14 +537,43 @@ final class Settings {
             if ("custom".equals(curProf)) pg.option(m.getString(R.string.bpa_prof_custom), true, null);
             content.addView(pg, Widgets.MW);
 
-            // 4) Detailed tuning sliders
+            // 5) Harmonic exciter voicing selector (Studio / Crystal / Warm Tube)
+            Widgets.Group hg = new Widgets.Group(m, m.getString(R.string.bpa_harmonics));
+            LinearLayout hRow = new LinearLayout(m);
+            hRow.setOrientation(LinearLayout.HORIZONTAL);
+            hRow.setPadding(Ui.dp(12), Ui.dp(12), Ui.dp(12), Ui.dp(12));
+            String curH = NpuAudio.harmonics(m);
+            for (int i = 0; i < NpuAudio.HARMONICS.length; i++) {
+                final String mode = NpuAudio.HARMONICS[i];
+                boolean sel = mode.equals(curH);
+                TextView pill = Ui.text(m, m.getString(NpuAudio.HARMONIC_NAMES[i]), 13.5f, sel ? Ui.bold : Ui.medium, sel ? 0xFFFFFFFF : Ui.text());
+                pill.setGravity(android.view.Gravity.CENTER);
+                pill.setPadding(Ui.dp(8), Ui.dp(10), Ui.dp(8), Ui.dp(10));
+                pill.setBackground(Ui.round(sel ? Ui.ACCENT : Ui.chip(), 100));
+                LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                if (i > 0) plp.leftMargin = Ui.dp(8);
+                if (supported && active) {
+                    pill.setOnClickListener(v -> { NpuAudio.setHarmonics(m, mode); rebuild(); });
+                    Ui.press(pill, 0.94f);
+                } else {
+                    pill.setAlpha(0.5f);
+                }
+                hRow.addView(pill, plp);
+            }
+            hg.card.addView(hRow, Widgets.MW);
+            content.addView(hg, Widgets.MW);
+
+            // 6) Detailed real-time tuning sliders (6 bands + limiter + per-device memory)
             Widgets.Group tg = new Widgets.Group(m, m.getString(R.string.bpa_tuning));
-            addTuningSlider(tg, m, R.string.bpa_strength, NpuAudio.PREF_STRENGTH, NpuAudio.strength(m), supported && active);
-            addTuningSlider(tg, m, R.string.bpa_air, NpuAudio.PREF_AIR, NpuAudio.air(m), supported && active);
-            addTuningSlider(tg, m, R.string.bpa_dyn, NpuAudio.PREF_DYN, NpuAudio.dyn(m), supported && active);
-            addTuningSlider(tg, m, R.string.bpa_vocal, NpuAudio.PREF_VOCAL, NpuAudio.vocal(m), supported && active);
+            addTuningSlider(tg, m, R.string.bpa_strength, NpuAudio.PREF_STRENGTH, NpuAudio.strength(m), supported && active, curveView);
+            addTuningSlider(tg, m, R.string.bpa_air, NpuAudio.PREF_AIR, NpuAudio.air(m), supported && active, curveView);
+            addTuningSlider(tg, m, R.string.bpa_dyn, NpuAudio.PREF_DYN, NpuAudio.dyn(m), supported && active, curveView);
+            addTuningSlider(tg, m, R.string.bpa_vocal, NpuAudio.PREF_VOCAL, NpuAudio.vocal(m), supported && active, curveView);
+            addTuningSlider(tg, m, R.string.bpa_bass, NpuAudio.PREF_BASS, NpuAudio.bass(m), supported && active, curveView);
+            addTuningSlider(tg, m, R.string.bpa_space, NpuAudio.PREF_SPACE, NpuAudio.space(m), supported && active, curveView);
             if (supported) {
-                toggleRow(tg, Icons.WAVE, m.getString(R.string.bpa_limiter), NpuAudio.PREF_LIMITER, true, () -> NpuAudio.apply(m));
+                toggleRow(tg, Icons.WAVE, m.getString(R.string.bpa_limiter), NpuAudio.PREF_LIMITER, true, () -> NpuAudio.apply(m, true));
+                toggleRow(tg, Icons.DEVICE, m.getString(R.string.bpa_per_device), NpuAudio.PREF_PER_DEVICE, true, null);
             } else {
                 View lr = tg.row(Icons.WAVE, Ui.text3(), m.getString(R.string.bpa_limiter), m.getString(R.string.eq_state_on), false, null);
                 lr.setAlpha(0.5f);
@@ -518,7 +582,7 @@ final class Settings {
             content.addView(Widgets.caption(m, m.getString(R.string.npu_note)));
         }
 
-        private void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive) {
+        private void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive, NpuAudio.CurveView curve) {
             View row = g.row(0, 0, m.getString(titleRes), curPct + "%", false, null);
             Widgets.GlassSlider sl = new Widgets.GlassSlider(m, curPct / 100f, 10);
             if (!interactive) {
@@ -531,9 +595,15 @@ final class Settings {
                     NpuAudio.setParam(m, key, pct);
                     Object tv = row.getTag();
                     if (tv instanceof TextView) ((TextView) tv).setText(pct + "%");
+                    if (curve != null) curve.invalidate();
                 };
             }
             g.card.addView(sl, Widgets.MW);
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            NpuAudio.setBypassHold(main, false);
         }
     }
 

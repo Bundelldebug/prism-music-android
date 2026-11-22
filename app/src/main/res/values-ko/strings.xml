@@ -303,4 +303,27 @@
     <string name="bpa_hires_glow">Hi-Res 3단계 글로우 효과</string>
     <string name="bpa_hires_glow_note">Hi-Res 재생 시 커버 외곽 글로우(골드·블루·무지개)와 마스터 모드 고급 배경 효과를 표시해요.</string>
     <string name="bpa_engine_attached">DSP 엔진 활성 · %1$s</string>
+    <string name="bpa_space">스테레오 공간감 확장</string>
+    <string name="bpa_bass">서브베이스 깊이</string>
+    <string name="bpa_harmonics">하모닉 익사이터 모드</string>
+    <string name="bpa_harm_studio">스튜디오</string>
+    <string name="bpa_harm_crystal">크리스탈</string>
+    <string name="bpa_harm_tube">진공관 웜</string>
+    <string name="bpa_per_device">출력 기기별 설정 자동 기억</string>
+    <string name="bpa_ab_hold">길게 눌러 원음(Bypass)과 실시간 비교</string>
+    <string name="bpa_ab_bypassing">원음 재생 중 (Bypass)</string>
+    <string name="bpa_curve">실시간 주파수 응답</string>
+    <string name="follow">팔로우</string>
+    <string name="following">팔로잉</string>
+    <string name="follow_relogin">팔로우 권한이 필요해요. 설정에서 Spotify를 다시 로그인해 주세요.</string>
+    <string name="artist_events">예정된 오프라인 이벤트</string>
+    <string name="artist_no_events">예정된 오프라인 이벤트가 없어요</string>
+    <string name="artist_browse_all">발매 목록 전체 보기</string>
+    <string name="see_all">모두 보기</string>
+    <string name="exp_for_you">맞춤 추천</string>
+    <string name="exp_refresh">새로 추천</string>
+    <string name="exp_because">%1$s 기반 추천</string>
+    <string name="exp_fresh_tracks">지금 추천하는 트랙</string>
+    <string name="exp_discover_albums">취향 저격 앨범</string>
+    <string name="lyrics_sync_offset">싱크 미세 조정</string>
 </resources>

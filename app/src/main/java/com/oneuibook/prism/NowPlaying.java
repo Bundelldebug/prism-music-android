@@ -1458,6 +1458,17 @@ final class NowPlaying extends FrameLayout {
         if (!Player.local()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> setPanel(2)));
         e.add(new GlassMenu.Entry(c.getString(R.string.set_lyrics), Icons.LYRICS, false, () -> setPanel(1)));
+        if (panel == 1 && t.id != null) {
+            long curOff = Lyrics.syncOffsetMs(c, t.id);
+            e.add(new GlassMenu.Entry(c.getString(R.string.lyrics_sync_offset) + " -0.25s (" + String.format(java.util.Locale.US, "%+.2fs", curOff / 1000f) + ")", Icons.CLOCK, false, () -> {
+                Lyrics.setSyncOffsetMs(c, t.id, curOff - 250L);
+                lyrics.invalidate();
+            }));
+            e.add(new GlassMenu.Entry(c.getString(R.string.lyrics_sync_offset) + " +0.25s", Icons.CLOCK, false, () -> {
+                Lyrics.setSyncOffsetMs(c, t.id, curOff + 250L);
+                lyrics.invalidate();
+            }));
+        }
         e.add(new GlassMenu.Entry(c.getString(R.string.aod_title), Icons.AOD, false, main::openAod));
         e.add(new GlassMenu.Entry(c.getString(R.string.eq_title), Icons.WAVE, false, () -> { close(); main.push(new Settings.EqPage(main)); }));
         GlassMenu.sheet(main, anchorOf(v), c.getString(R.string.more_actions), e, v);
@@ -1970,7 +1981,9 @@ final class NowPlaying extends FrameLayout {
         private Lyrics.Result res;
         private String message = "";
         private final TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private final TextPaint transTp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final List<StaticLayout> layouts = new ArrayList<>();
+        private final List<StaticLayout> transLayouts = new ArrayList<>();
         private int laidW = -1;
         private int current = -1;
         private final Ui.Spring offset = new Ui.Spring(160f, 0.9f, 0.5f);
@@ -1979,12 +1992,16 @@ final class NowPlaying extends FrameLayout {
         private float lastY, startY;
         private final Paint fade = new Paint();
         private final float gap = Ui.dpf(22);
+        private final float transGap = Ui.dpf(4);
 
         LyricsView(Context c) {
             super(c);
             tp.setTypeface(Ui.heavy);
             tp.setTextSize(Ui.sp(26));
             tp.setColor(0xFFFFFFFF);
+            transTp.setTypeface(Ui.medium);
+            transTp.setTextSize(Ui.sp(14.5f));
+            transTp.setColor(0xB3FFFFFF);
             fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
             offset.onUpdate = this::invalidate;
         }
@@ -1999,10 +2016,17 @@ final class NowPlaying extends FrameLayout {
             invalidate();
         }
 
-        void setPosition(long pos) {
+        private long effectivePos(long rawPos) {
+            Player.Track t = Player.track;
+            long off = t == null ? 0L : Lyrics.syncOffsetMs(getContext(), t.id);
+            return Math.max(0L, rawPos + off);
+        }
+
+        void setPosition(long rawPos) {
             if (res == null || !res.synced) return;
+            long pos = effectivePos(rawPos);
             int idx = -1;
-            for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 120) idx = i;
+            for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 80) idx = i;
             if (idx != current) {
                 current = idx;
                 ensureLayouts();
@@ -2088,15 +2112,29 @@ final class NowPlaying extends FrameLayout {
             if (w <= 0 || w == laidW || res == null) return;
             laidW = w;
             layouts.clear();
+            transLayouts.clear();
+            boolean showKoTrans = Lyrics.isKoreanApp(getContext());
             for (Lyrics.Line l : res.lines) {
                 String s = l.text.isEmpty() ? "♪" : l.text;
                 layouts.add(StaticLayout.Builder.obtain(s, 0, s.length(), tp, w).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0, 1.05f).build());
+                if (showKoTrans && l.trans != null && !l.trans.isEmpty()) {
+                    transLayouts.add(StaticLayout.Builder.obtain(l.trans, 0, l.trans.length(), transTp, w).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0, 1.05f).build());
+                } else {
+                    transLayouts.add(null);
+                }
             }
+        }
+
+        private float blockHeight(int i) {
+            float h = layouts.get(i).getHeight();
+            StaticLayout tl = i < transLayouts.size() ? transLayouts.get(i) : null;
+            if (tl != null) h += transGap + tl.getHeight();
+            return h;
         }
 
         private float targetOffset() {
             float y = 0;
-            for (int i = 0; i < Math.max(0, current) && i < layouts.size(); i++) y += layouts.get(i).getHeight() + gap;
+            for (int i = 0; i < Math.max(0, current) && i < layouts.size(); i++) y += blockHeight(i) + gap;
             return y - getHeight() * 0.22f;
         }
 
@@ -2110,10 +2148,10 @@ final class NowPlaying extends FrameLayout {
                 return;
             }
             ensureLayouts();
-            long pos = Player.position();
+            long pos = effectivePos(Player.position());
             if (res.synced) {
                 int idx = -1;
-                for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 120) idx = i;
+                for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 80) idx = i;
                 if (idx != current) {
                     current = idx;
                     if (SystemClock.uptimeMillis() > manualUntil) { manual = 0; offset.to(targetOffset()); }
@@ -2123,7 +2161,9 @@ final class NowPlaying extends FrameLayout {
             float y = -offset.value - manual + Ui.dpf(16);
             for (int i = 0; i < layouts.size(); i++) {
                 StaticLayout l = layouts.get(i);
-                if (y + l.getHeight() > 0 && y < getHeight()) {
+                StaticLayout tl = i < transLayouts.size() ? transLayouts.get(i) : null;
+                float bh = blockHeight(i);
+                if (y + bh > 0 && y < getHeight()) {
                     c.save();
                     c.translate(Ui.dpf(28), y);
                     if (!res.synced) {
@@ -2138,15 +2178,19 @@ final class NowPlaying extends FrameLayout {
                         tp.setColor(i < current ? 0x45FFFFFF : 0x5CFFFFFF);
                         l.draw(c);
                     }
+                    if (tl != null) {
+                        c.translate(0, l.getHeight() + transGap);
+                        transTp.setColor(!res.synced ? 0x99FFFFFF : (i == current ? 0xCCFFFFFF : (i < current ? 0x36FFFFFF : 0x4AFFFFFF)));
+                        tl.draw(c);
+                    }
                     c.restore();
                 }
-                y += l.getHeight() + gap;
+                y += bh + gap;
             }
             fade.setShader(new LinearGradient(0, 0, 0, getHeight(), new int[]{0, 0xFF000000, 0xFF000000, 0},
                     new float[]{0f, 0.08f, 0.85f, 1f}, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, getWidth(), getHeight(), fade);
             c.restoreToCount(sc);
-            // Smooth 60fps real-time fill while playing synced lyrics on screen
             if (res.synced && Player.playing && isShown()) postInvalidateOnAnimation();
         }
 
@@ -2166,7 +2210,7 @@ final class NowPlaying extends FrameLayout {
                     if (Math.abs(e.getY() - startY) < Ui.dpf(8) && res != null && res.synced) {
                         float y = -offset.value - manual + Ui.dpf(16);
                         for (int i = 0; i < layouts.size(); i++) {
-                            float h = layouts.get(i).getHeight();
+                            float h = blockHeight(i);
                             if (e.getY() >= y && e.getY() <= y + h) {
                                 manualUntil = 0;
                                 Player.seek(res.lines.get(i).time);
