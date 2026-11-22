@@ -10,7 +10,11 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.media.audiofx.AudioEffect;
+import android.media.audiofx.BassBoost;
 import android.media.audiofx.DynamicsProcessing;
+import android.media.audiofx.Equalizer;
+import android.media.audiofx.LoudnessEnhancer;
 import android.media.audiofx.Virtualizer;
 import android.os.Build;
 import android.text.TextPaint;
@@ -117,9 +121,13 @@ final class NpuAudio {
     private static final Pattern EXYNOS_NAME = Pattern.compile("EXYNOS\\s+(2[5-9]\\d\\d)");
 
     private static DynamicsProcessing dp;
+    private static Equalizer eqFx;
+    private static BassBoost bassFx;
+    private static LoudnessEnhancer loudFx;
     private static Virtualizer virt;
     private static int dpSession = -1;
     private static int localSession = -1;
+    private static boolean usingFallbackFx;
     private static String cachedSoc;
     private static String cachedNpuLabel;
     private static Boolean cachedSupported;
@@ -353,23 +361,25 @@ final class NpuAudio {
         String hm = harmonics(c);
         boolean crystal = "crystal".equals(hm);
         boolean tube = "tube".equals(hm);
-        float airMul = crystal ? 1.25f : (tube ? 0.72f : 1.0f);
-        float warmAdd = tube ? (1.25f * str) : (crystal ? -0.35f * str : 0f);
+        float airMul = crystal ? 1.32f : (tube ? 0.65f : 1.0f);
+        float warmAdd = tube ? (2.6f * str) : (crystal ? -1.1f * str : 0f);
         return new float[]{
-                3.4f * basK,
-                2.4f * basK,
-                0.7f * basK + warmAdd,
-                -0.4f * str + warmAdd * 0.6f,
-                0.15f * warmAdd,
-                0.9f * vocK,
-                2.8f * vocK,
-                3.2f * vocK,
-                3.2f * airK * airMul,
-                4.2f * airK * airMul,
-                4.8f * airK * airMul,
-                3.8f * airK * airMul
+                clampDb(6.8f * basK + (tube ? 1.0f * str : 0f)),     // 45 Hz sub-bass
+                clampDb(5.2f * basK + warmAdd * 0.4f),                // 90 Hz punch bass
+                clampDb(1.8f * basK + warmAdd),                       // 180 Hz warmth
+                clampDb(-1.4f * str + warmAdd * 0.7f),                // 360 Hz mud cut / tube body
+                clampDb(-0.6f * str + warmAdd * 0.35f),               // 700 Hz clean low-mid
+                clampDb(1.8f * vocK),                                 // 1.4 kHz vocal body
+                clampDb(4.8f * vocK),                                 // 2.8 kHz vocal presence
+                clampDb(5.4f * vocK + (crystal ? 0.8f * str : 0f)),   // 4.8 kHz clarity
+                clampDb(5.2f * airK * airMul),                        // 8 kHz brilliance
+                clampDb(6.8f * airK * airMul),                        // 12 kHz air
+                clampDb(7.8f * airK * airMul),                        // 16 kHz ultra-air
+                clampDb(6.2f * airK * airMul)                         // 20 kHz harmonic sheen
         };
     }
+
+    private static float clampDb(float db) { return Math.max(-6f, Math.min(9.5f, db)); }
 
     static void attachLocalSession(Context c, int audioSessionId) {
         localSession = audioSessionId;
@@ -379,10 +389,15 @@ final class NpuAudio {
     static void apply(Context c) { apply(c, true); }
 
     /**
-     * Real-time zero-latency DSP update: updates Pre-EQ / MBC / Limiter / Virtualizer in-place without
-     * tearing down the audio effect session, so dragging sliders produces instant audible changes.
+     * Real-time zero-latency DSP update:
+     * 1) Commits full Eq / Mbc / Limiter objects to DynamicsProcessing (required on Samsung One UI HALs)
+     *    and verifies {@code setEnabled(true) == AudioEffect.SUCCESS}.
+     * 2) If DynamicsProcessing is unavailable or rejected on the target session, automatically attaches a
+     *    5-band Equalizer + BassBoost + LoudnessEnhancer native DSP fallback chain so audible changes are real.
+     * 3) During A/B bypassHold, immediately toggles all native effects off (0ms) without tearing down sessions.
      */
     static void apply(Context c, boolean immediateWeb) {
+        if (c == null) return;
         syncPerDevice(c);
         boolean want = enabled(c) && !bypassHold && BitPerfect.activeRate <= 0;
         float str = strength(c) / 100f;
@@ -396,76 +411,184 @@ final class NpuAudio {
         long now = android.os.SystemClock.uptimeMillis();
         if (immediateWeb || now - lastWebApplyMs >= 45) {
             lastWebApplyMs = now;
-            SpotifyWeb.setNpuEnhancer(want && !Player.local(), 4.8f * airK, 3.2f * vocK, 3.2f * basK, dynK);
+            SpotifyWeb.setNpuEnhancer(want && !Player.local(), 6.8f * airK, 4.8f * vocK, 5.8f * basK, dynK);
         }
 
         if (!want) {
-            if (dp != null) { try { dp.setEnabled(false); } catch (Throwable ignored) {} }
-            if (virt != null) { try { virt.setEnabled(false); } catch (Throwable ignored) {} }
+            setAllFxEnabled(false);
             if (!bypassHold) release();
             return;
         }
         int targetSession = (Player.local() && localSession > 0) ? localSession : 0;
-        if (dp != null && dpSession != targetSession) release();
+        if (dpSession != -1 && dpSession != targetSession) release();
 
-        try {
-            float[] gains = computeBandGains(c);
-            final float[] mbcCut = {180f, 1600f, 7500f, 20000f};
-            if (dp == null) {
-                DynamicsProcessing.Config cfg = new DynamicsProcessing.Config.Builder(
-                        DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2,
-                        true, EQ_CUTOFFS.length,
-                        true, mbcCut.length,
-                        false, 0,
-                        true).build();
-                dp = new DynamicsProcessing(0, targetSession, cfg);
-                dpSession = targetSession;
-            }
-            for (int i = 0; i < EQ_CUTOFFS.length; i++) {
-                dp.setPreEqBandAllChannelsTo(i, new DynamicsProcessing.EqBand(true, EQ_CUTOFFS[i], gains[i]));
-            }
-            for (int i = 0; i < mbcCut.length; i++) {
-                float ratio = 1f + (i >= 2 ? 0.36f : 0.18f) * dynK;
-                float postGain = (i >= 2 ? 1.6f : 0.6f) * dynK;
-                DynamicsProcessing.MbcBand b = new DynamicsProcessing.MbcBand(
-                        dynK > 0.01f, mbcCut[i], 2.5f, 55f, ratio, -20f, 6f, -65f, 1f + 0.25f * dynK, 0f, postGain);
-                dp.setMbcBandAllChannelsTo(i, b);
-            }
-            DynamicsProcessing.Limiter lim = new DynamicsProcessing.Limiter(limOn, true, 0, 1f, 45f, 10f, -0.4f, 0f);
-            dp.setLimiterAllChannelsTo(lim);
-            dp.setEnabled(true);
+        float[] gains = computeBandGains(c);
+        boolean ok = false;
+        StringBuilder eng = new StringBuilder();
 
-            // Real-time stereo soundstage width via Android Virtualizer
+        // Path A: 12-band DynamicsProcessing (full object commit for Samsung HAL live updates)
+        if (!usingFallbackFx) {
             try {
-                if (spcK > 0.02f) {
-                    if (virt == null) virt = new Virtualizer(0, targetSession);
-                    if (virt.getStrengthSupported()) {
-                        virt.setStrength((short) Math.round(Ui.clamp(spcK, 0f, 1f) * 900f));
+                final float[] mbcCut = {180f, 1600f, 7500f, 20000f};
+                if (dp == null) {
+                    DynamicsProcessing.Config cfg = new DynamicsProcessing.Config.Builder(
+                            DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2,
+                            true, EQ_CUTOFFS.length,
+                            true, mbcCut.length,
+                            false, 0,
+                            true).build();
+                    try {
+                        dp = new DynamicsProcessing(100, targetSession, cfg);
+                    } catch (Throwable prioErr) {
+                        dp = new DynamicsProcessing(0, targetSession, cfg);
                     }
-                    virt.setEnabled(true);
-                } else if (virt != null) {
-                    virt.setEnabled(false);
+                    dpSession = targetSession;
                 }
-            } catch (Throwable ignored) {}
+                DynamicsProcessing.Eq preEq = new DynamicsProcessing.Eq(true, true, EQ_CUTOFFS.length);
+                for (int i = 0; i < EQ_CUTOFFS.length; i++) {
+                    preEq.setBand(i, new DynamicsProcessing.EqBand(true, EQ_CUTOFFS[i], gains[i]));
+                }
+                dp.setPreEqAllChannelsTo(preEq);
 
-            activeEngine = (targetSession > 0 ? "Direct Audio DSP · " : "Output Mix DSP · ") + npuLabel();
-        } catch (Throwable t) {
-            release();
-            activeEngine = Player.local() ? npuLabel() : ("WebAudio DSP · " + npuLabel());
+                DynamicsProcessing.Mbc mbc = new DynamicsProcessing.Mbc(true, dynK > 0.01f, mbcCut.length);
+                for (int i = 0; i < mbcCut.length; i++) {
+                    float ratio = 1f + (i >= 2 ? 0.65f : 0.35f) * dynK;
+                    float postGain = (i >= 2 ? 2.6f : 1.1f) * dynK;
+                    mbc.setBand(i, new DynamicsProcessing.MbcBand(
+                            dynK > 0.01f, mbcCut[i], 2.5f, 55f, ratio, -22f, 6f, -65f, 1f + 0.35f * dynK, 0f, postGain));
+                }
+                dp.setMbcAllChannelsTo(mbc);
+
+                DynamicsProcessing.Limiter lim = new DynamicsProcessing.Limiter(limOn, true, 0, 1f, 45f, 10f, -0.4f, 0f);
+                dp.setLimiterAllChannelsTo(lim);
+                int rc = dp.setEnabled(true);
+                if (rc == AudioEffect.SUCCESS && dp.getEnabled()) {
+                    ok = true;
+                    eng.append("DynamicsProcessing 12-Band");
+                } else {
+                    try { dp.setEnabled(false); dp.release(); } catch (Throwable ignored) {}
+                    dp = null;
+                    usingFallbackFx = true;
+                }
+            } catch (Throwable t) {
+                try { if (dp != null) { dp.setEnabled(false); dp.release(); } } catch (Throwable ignored) {}
+                dp = null;
+                usingFallbackFx = true;
+            }
         }
+
+        // Path B: Universal native fallback (Equalizer + BassBoost + LoudnessEnhancer)
+        if (!ok) {
+            ok = applyFallbackFx(targetSession, gains, basK, dynK, eng);
+        }
+
+        // Virtualizer stereo soundstage width (works alongside both Path A and Path B)
+        try {
+            if (spcK > 0.02f) {
+                if (virt == null) virt = new Virtualizer(100, targetSession);
+                if (virt.getStrengthSupported()) {
+                    virt.setStrength((short) Math.round(Ui.clamp(spcK, 0f, 1f) * 1000f));
+                }
+                if (virt.setEnabled(true) == AudioEffect.SUCCESS) {
+                    if (eng.length() > 0) eng.append(" + ");
+                    eng.append("Spatial");
+                    ok = true;
+                }
+            } else if (virt != null) {
+                virt.setEnabled(false);
+            }
+        } catch (Throwable ignored) {}
+
+        if (ok) {
+            dpSession = targetSession;
+            activeEngine = eng + " · " + npuLabel();
+        } else {
+            activeEngine = npuLabel();
+        }
+    }
+
+    private static boolean applyFallbackFx(int session, float[] gains12, float basK, float dynK, StringBuilder eng) {
+        boolean any = false;
+        // 1) Multi-band Equalizer mapped from our 12-band curve
+        try {
+            if (eqFx == null) eqFx = new Equalizer(100, session);
+            short bands = eqFx.getNumberOfBands();
+            short[] range = eqFx.getBandLevelRange();
+            short minMb = range[0], maxMb = range[1];
+            for (short b = 0; b < bands; b++) {
+                float centerHz = eqFx.getCenterFreq(b) / 1000f;
+                float gDb = sampleCurveDb(gains12, centerHz);
+                short mb = (short) Math.max(minMb, Math.min(maxMb, Math.round(gDb * 100f)));
+                eqFx.setBandLevel(b, mb);
+            }
+            if (eqFx.setEnabled(true) == AudioEffect.SUCCESS) {
+                eng.append("EQ");
+                any = true;
+            }
+        } catch (Throwable ignored) {}
+
+        // 2) Sub-bass enhancer
+        try {
+            if (basK > 0.02f) {
+                if (bassFx == null) bassFx = new BassBoost(100, session);
+                if (bassFx.getStrengthSupported()) {
+                    bassFx.setStrength((short) Math.round(Ui.clamp(basK, 0f, 1f) * 850f));
+                }
+                if (bassFx.setEnabled(true) == AudioEffect.SUCCESS) {
+                    if (eng.length() > 0) eng.append("+");
+                    eng.append("Bass");
+                    any = true;
+                }
+            } else if (bassFx != null) {
+                bassFx.setEnabled(false);
+            }
+        } catch (Throwable ignored) {}
+
+        // 3) Dynamic range / loudness lift
+        try {
+            if (dynK > 0.02f) {
+                if (loudFx == null) loudFx = new LoudnessEnhancer(session);
+                loudFx.setTargetGain(Math.round(dynK * 380f)); // up to +3.8 dB crisp dynamic lift
+                if (loudFx.setEnabled(true) == AudioEffect.SUCCESS) {
+                    if (eng.length() > 0) eng.append("+");
+                    eng.append("Dyn");
+                    any = true;
+                }
+            } else if (loudFx != null) {
+                loudFx.setEnabled(false);
+            }
+        } catch (Throwable ignored) {}
+        return any;
+    }
+
+    private static float sampleCurveDb(float[] gains12, float hz) {
+        if (hz <= EQ_CUTOFFS[0]) return gains12[0];
+        for (int i = 1; i < EQ_CUTOFFS.length; i++) {
+            if (hz <= EQ_CUTOFFS[i]) {
+                float k = (hz - EQ_CUTOFFS[i - 1]) / Math.max(1f, EQ_CUTOFFS[i] - EQ_CUTOFFS[i - 1]);
+                return Ui.lerp(gains12[i - 1], gains12[i], k);
+            }
+        }
+        return gains12[gains12.length - 1];
+    }
+
+    private static void setAllFxEnabled(boolean on) {
+        if (dp != null) { try { dp.setEnabled(on); } catch (Throwable ignored) {} }
+        if (eqFx != null) { try { eqFx.setEnabled(on); } catch (Throwable ignored) {} }
+        if (bassFx != null) { try { bassFx.setEnabled(on); } catch (Throwable ignored) {} }
+        if (loudFx != null) { try { loudFx.setEnabled(on); } catch (Throwable ignored) {} }
+        if (virt != null) { try { virt.setEnabled(on); } catch (Throwable ignored) {} }
     }
 
     static void release() {
         activeEngine = "";
         dpSession = -1;
-        if (dp != null) {
-            try { dp.setEnabled(false); dp.release(); } catch (Throwable ignored) {}
-            dp = null;
-        }
-        if (virt != null) {
-            try { virt.setEnabled(false); virt.release(); } catch (Throwable ignored) {}
-            virt = null;
-        }
+        usingFallbackFx = false;
+        if (dp != null) { try { dp.setEnabled(false); dp.release(); } catch (Throwable ignored) {} dp = null; }
+        if (eqFx != null) { try { eqFx.setEnabled(false); eqFx.release(); } catch (Throwable ignored) {} eqFx = null; }
+        if (bassFx != null) { try { bassFx.setEnabled(false); bassFx.release(); } catch (Throwable ignored) {} bassFx = null; }
+        if (loudFx != null) { try { loudFx.setEnabled(false); loudFx.release(); } catch (Throwable ignored) {} loudFx = null; }
+        if (virt != null) { try { virt.setEnabled(false); virt.release(); } catch (Throwable ignored) {} virt = null; }
     }
 
     private static String readCpuInfoHardware() {
@@ -485,57 +608,78 @@ final class NpuAudio {
     /** Real-time interactive 12-band frequency response graph inside Bit-Perfect Assist. */
     static final class CurveView extends View {
         private final Paint gridP = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint zeroP = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint lineP = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dotP = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint fillP = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final TextPaint lblP = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private final TextPaint badgeP = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final Path curve = new Path(), area = new Path();
 
         CurveView(Context c) {
             super(c);
             gridP.setStyle(Paint.Style.STROKE);
             gridP.setStrokeWidth(Math.max(1f, Ui.dpf(0.7f)));
+            zeroP.setStyle(Paint.Style.STROKE);
+            zeroP.setStrokeWidth(Math.max(1f, Ui.dpf(1.0f)));
+            zeroP.setPathEffect(new android.graphics.DashPathEffect(new float[]{Ui.dpf(4), Ui.dpf(4)}, 0));
             lineP.setStyle(Paint.Style.STROKE);
-            lineP.setStrokeWidth(Ui.dpf(2.4f));
+            lineP.setStrokeWidth(Ui.dpf(2.6f));
             lineP.setStrokeCap(Paint.Cap.ROUND);
             lineP.setStrokeJoin(Paint.Join.ROUND);
+            dotP.setStyle(Paint.Style.FILL);
             fillP.setStyle(Paint.Style.FILL);
             lblP.setTextSize(Ui.sp(9.5f));
             lblP.setTypeface(Ui.medium);
             lblP.setTextAlign(Paint.Align.CENTER);
+            badgeP.setTextSize(Ui.sp(10.5f));
+            badgeP.setTypeface(Ui.semibold);
+            badgeP.setTextAlign(Paint.Align.RIGHT);
         }
 
         @Override protected void onMeasure(int ws, int hs) {
-            setMeasuredDimension(MeasureSpec.getSize(ws), Ui.dp(118));
+            setMeasuredDimension(MeasureSpec.getSize(ws), Ui.dp(146));
         }
 
         @Override protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
-            float padL = Ui.dpf(18), padR = Ui.dpf(18), padT = Ui.dpf(14), padB = Ui.dpf(24);
+            float padL = Ui.dpf(26), padR = Ui.dpf(16), padT = Ui.dpf(24), padB = Ui.dpf(24);
             float gw = w - padL - padR, gh = h - padT - padB;
-            float zeroY = padT + gh * 0.68f;
+            // dB range: -4 dB (bottom) to +10 dB (top) -> 0 dB sits at 10/14 = 71.4% down
+            float minDb = -4f, maxDb = 10f;
+            float zeroY = padT + gh * (maxDb / (maxDb - minDb));
 
-            // Subtle reference grid
-            gridP.setColor(Ui.dark ? 0x22FFFFFF : 0x16000000);
-            c.drawLine(padL, zeroY, w - padR, zeroY, gridP);
-            c.drawLine(padL, padT + gh * 0.20f, w - padR, padT + gh * 0.20f, gridP);
+            // Horizontal reference lines (+9, +4, 0, -4 dB)
+            gridP.setColor(Ui.dark ? 0x1EFFFFFF : 0x14000000);
+            zeroP.setColor(Ui.dark ? 0x44FFFFFF : 0x33000000);
+            lblP.setColor(Ui.text3());
+            lblP.setTextAlign(Paint.Align.RIGHT);
+            for (int db : new int[]{9, 4, 0, -4}) {
+                float y = padT + gh * ((maxDb - db) / (maxDb - minDb));
+                c.drawLine(padL, y, w - padR, y, db == 0 ? zeroP : gridP);
+                c.drawText((db > 0 ? "+" : "") + db, padL - Ui.dpf(5), y + Ui.dpf(3), lblP);
+            }
+            lblP.setTextAlign(Paint.Align.CENTER);
             String[] labels = {"45Hz", "200Hz", "1kHz", "4kHz", "16kHz"};
             float[] fracs = {0f, 0.25f, 0.50f, 0.75f, 1f};
-            lblP.setColor(Ui.text3());
             for (int i = 0; i < labels.length; i++) {
                 float x = padL + gw * fracs[i];
                 c.drawLine(x, padT, x, padT + gh, gridP);
                 c.drawText(labels[i], x, h - Ui.dpf(6), lblP);
             }
 
-            boolean on = enabled(getContext()) && !bypassHold;
+            boolean bypassing = bypassHold;
+            boolean on = enabled(getContext()) && !bypassing;
             float[] gains = on ? computeBandGains(getContext()) : new float[EQ_CUTOFFS.length];
             int n = gains.length;
             float[] xs = new float[n], ys = new float[n];
+            float peakDb = 0f;
             for (int i = 0; i < n; i++) {
+                if (gains[i] > peakDb) peakDb = gains[i];
                 xs[i] = padL + gw * (i / (float) (n - 1));
-                float norm = Ui.clamp(gains[i] / 6.5f, -0.45f, 1f);
-                ys[i] = zeroY - norm * (gh * 0.62f);
+                float db = Ui.clamp(gains[i], minDb, maxDb);
+                ys[i] = padT + gh * ((maxDb - db) / (maxDb - minDb));
             }
 
             curve.reset();
@@ -551,13 +695,28 @@ final class NpuAudio {
             area.lineTo(xs[n - 1], zeroY);
             area.close();
 
-            int col = on ? Ui.ACCENT : Ui.text3();
+            int col = bypassing ? 0xFFFF9F0A : (on ? Ui.ACCENT : Ui.text3());
             fillP.setShader(new LinearGradient(0, padT, 0, padT + gh,
-                    Ui.alpha(col, on ? 0.30f : 0.10f), 0x00000000, Shader.TileMode.CLAMP));
+                    Ui.alpha(col, on ? 0.34f : 0.12f), 0x00000000, Shader.TileMode.CLAMP));
             c.drawPath(area, fillP);
             fillP.setShader(null);
-            lineP.setColor(on ? col : Ui.alpha(col, 0.5f));
+            lineP.setColor(on || bypassing ? col : Ui.alpha(col, 0.55f));
+            lineP.setPathEffect(bypassing ? new android.graphics.DashPathEffect(new float[]{Ui.dpf(6), Ui.dpf(4)}, 0) : null);
             c.drawPath(curve, lineP);
+            lineP.setPathEffect(null);
+
+            // Band anchor dots so every slider drag gives crisp visual feedback
+            if (on) {
+                dotP.setColor(col);
+                for (int i = 0; i < n; i++) c.drawCircle(xs[i], ys[i], Ui.dpf(2.4f), dotP);
+            }
+
+            // Live readout badge at top-right
+            badgeP.setColor(col);
+            String readout = bypassing ? "BYPASS · 0.0 dB"
+                    : (on ? String.format(Locale.US, "PEAK +%.1f dB · %s", peakDb, harmonics(getContext()).toUpperCase(Locale.US))
+                    : "OFF · 0.0 dB");
+            c.drawText(readout, w - padR, Ui.dpf(15), badgeP);
         }
     }
 

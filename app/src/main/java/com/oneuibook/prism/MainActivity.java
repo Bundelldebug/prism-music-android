@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.8";
+    static final String VERSION = "9.5.9";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -275,6 +275,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     @Override protected void onPause() {
         super.onPause();
         if (aod != null && aod.isOpen()) aod.closeImmediate();
+        if (Player.playing && Player.track != null && Player.onThisPhone()) {
+            LocalMusic.PlaybackService.claimControl(getApplicationContext());
+        }
         Player.stop();
     }
 

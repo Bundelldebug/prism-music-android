@@ -121,9 +121,17 @@ final class Player {
         JSONObject item = o.optJSONObject("item");
         Track t = Track.from(item);
         boolean changed = t != null && (track == null || !t.id.equals(track.id));
+        boolean wasPlaying = playing;
+        long prevPos = position();
         if (t != null) track = t;
         playing = o.optBoolean("is_playing");
-        progress = o.optLong("progress_ms", 0);
+        long serverProg = o.optLong("progress_ms", 0);
+        // Smooth out poll RTT jitter: if same track is continuously playing and within 1.2s of our local clock, keep local clock smooth
+        if (!changed && wasPlaying && playing && Math.abs(serverProg - prevPos) <= 1200L) {
+            progress = prevPos;
+        } else {
+            progress = serverProg;
+        }
         stamp = SystemClock.elapsedRealtime();
         shuffle = o.optBoolean("shuffle_state");
         String serverRepeat = o.optString("repeat_state", "off");
@@ -492,7 +500,7 @@ final class Player {
                     notifyAll0();
                 }
             }
-        }, "/me/tracks/contains?ids=" + id, "/me/library/contains?uris=" + Spotify.enc("spotify:track:" + id));
+        }, "/me/library/contains?uris=" + Spotify.enc("spotify:track:" + id), "/me/tracks/contains?ids=" + id);
     }
 
     static void toggleLike() {
@@ -504,9 +512,9 @@ final class Player {
         Spotify.IO.execute(() -> {
             String m = now ? "PUT" : "DELETE";
             try {
-                Spotify.call(m, "/me/tracks?ids=" + id, null);
+                Spotify.call(m, "/me/library?uris=" + Spotify.enc("spotify:track:" + id), null);
             } catch (Exception e) {
-                try { Spotify.call(m, "/me/library?uris=" + Spotify.enc("spotify:track:" + id), null); }
+                try { Spotify.call(m, "/me/tracks?ids=" + id, null); }
                 catch (Exception e2) { Spotify.MAIN.post(() -> { liked = !now; notifyAll0(); toast(R.string.action_failed); }); }
             }
         });

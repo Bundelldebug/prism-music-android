@@ -6,6 +6,7 @@ import android.util.Base64;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -19,13 +20,57 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Multi-provider synced lyrics fetcher (LRCLIB -> NetEase YRC/LRC -> Kugou LRC -> lyrics.ovh).
- * Enforces strict duration & version matching (rejecting mismatched live/remix/cover hits),
- * supports LRC [offset:] tags, per-track manual sync offset, word-synced YRC / Enhanced LRC,
- * and automatic Korean subtitle translation under non-Korean lyrics when the app language is Korean.
+ * Multi-provider synced lyrics fetcher with per-provider toggles in Settings:
+ *   1) LRCLIB        (lrclib.net — synced LRC & dual-language LRC)
+ *   2) NetEase       (music.163.com — word-synced YRC, LRC & native tlyric Korean subtitle track)
+ *   3) QQ Music      (c.y.qq.com — LRC & native trans Korean subtitle track)
+ *   4) Kugou         (krcs.kugou.com — synced LRC)
+ *   5) SimpMusic     (api-lyrics.simpmusic.org — community synced LRC)
+ *   6) lyrics.ovh    (api.lyrics.ovh — plain text fallback)
+ *
+ * Never runs awkward machine translation: Korean subtitle lines are displayed under non-Korean lyrics
+ * ONLY when the lyric source itself includes a native Korean translation track or dual-language LRC
+ * (and only when the app language is Korean and the setting is enabled).
  */
 final class Lyrics {
     private Lyrics() {}
+
+    static final String PREF_KO_TRANS = "lyrics_ko_trans";
+
+    static final String SRC_LRCLIB = "lrclib";
+    static final String SRC_NETEASE = "netease";
+    static final String SRC_QQ = "qq";
+    static final String SRC_KUGOU = "kugou";
+    static final String SRC_SIMPMUSIC = "simpmusic";
+    static final String SRC_LYRICSOVH = "lyricsovh";
+
+    static final String[] PROVIDER_IDS = {SRC_LRCLIB, SRC_NETEASE, SRC_QQ, SRC_KUGOU, SRC_SIMPMUSIC, SRC_LYRICSOVH};
+    static final String[] PROVIDER_NAMES = {"LRCLIB", "NetEase Cloud Music", "QQ Music", "Kugou Lyrics", "SimpMusic Lyrics", "lyrics.ovh"};
+
+    static String providerPrefKey(String id) { return "lyr_src_" + id; }
+
+    static boolean isProviderEnabled(Context c, String id) {
+        if (c == null) c = Img.appContext;
+        if (c == null) return true;
+        return MainActivity.prefs(c).getBoolean(providerPrefKey(id), true);
+    }
+
+    static boolean showKoreanSubtitles(Context c) {
+        if (c == null) c = Img.appContext;
+        if (c == null) return false;
+        return isKoreanApp(c) && MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true);
+    }
+
+    static void clearCache(Context c) {
+        synchronized (CACHE) { CACHE.clear(); }
+        synchronized (MISSING) { MISSING.clear(); }
+        Context ctx = c != null ? c : Img.appContext;
+        if (ctx != null) {
+            File d = new File(ctx.getCacheDir(), "lyrics_v4");
+            File[] fs = d.listFiles();
+            if (fs != null) for (File f : fs) f.delete();
+        }
+    }
 
     static final class Word {
         final long start;
@@ -38,7 +83,7 @@ final class Lyrics {
         final long time;
         long endTime;
         final String text;
-        String trans; // optional Korean translation shown below original when app language is Korean
+        String trans; // native Korean translation line from lyric source (never machine-translated)
         final List<Word> words;
 
         Line(long t, String s) { this(t, 0, s, null, null); }
@@ -86,71 +131,128 @@ final class Lyrics {
     }
 
     static void prefetch(Player.Track t) {
-        if (t == null || t.id == null || CACHE.containsKey(t.id) || MISSING.contains(t.id)) return;
+        if (t == null || t.id == null) return;
+        synchronized (CACHE) { if (CACHE.containsKey(t.id) || MISSING.contains(t.id)) return; }
         fetch(t, null);
     }
 
     static void fetch(Player.Track t, Consumer<Result> cb) {
         if (t == null || t.id == null) { if (cb != null) cb.accept(null); return; }
-        Result c = CACHE.get(t.id);
-        if (c != null || MISSING.contains(t.id)) { if (cb != null) cb.accept(c); return; }
+        Result cached;
+        boolean miss;
+        synchronized (CACHE) {
+            cached = CACHE.get(t.id);
+            miss = MISSING.contains(t.id);
+        }
+        if (cached != null || miss) { if (cb != null) cb.accept(cached); return; }
         List<Consumer<Result>> waiting = PENDING.get(t.id);
         if (waiting != null) { if (cb != null) waiting.add(cb); return; }
         waiting = new ArrayList<>();
         if (cb != null) waiting.add(cb);
         PENDING.put(t.id, waiting);
+        final Context ctx = Img.appContext;
         POOL.execute(() -> {
             Result r = readDisk(t.id);
-            boolean koApp = isKoreanApp(Img.appContext);
+            boolean wantKoSub = showKoreanSubtitles(ctx);
             if (r == null) {
-                r = lookup(t, koApp);
+                r = lookup(ctx, t, wantKoSub);
                 if (r != null) writeDisk(t.id, r);
-            } else if (koApp && needsKoreanTranslation(r) && !hasTranslations(r)) {
-                attachKoreanTranslation(r);
-                writeDisk(t.id, r);
+            }
+            if (r != null && !wantKoSub) {
+                for (Line l : r.lines) l.trans = null;
             }
             final Result res = r;
             Spotify.MAIN.post(() -> {
-                if (res != null) CACHE.put(t.id, res); else MISSING.add(t.id);
+                synchronized (CACHE) {
+                    if (res != null) CACHE.put(t.id, res); else MISSING.add(t.id);
+                }
                 List<Consumer<Result>> cbs = PENDING.remove(t.id);
                 if (cbs != null) for (Consumer<Result> k : cbs) k.accept(res);
             });
         });
     }
 
-    private static Result lookup(Player.Track t, boolean koApp) {
+    private static Result lookup(Context c, Player.Track t, boolean wantKoSub) {
         String artist = primaryArtist(t.artist);
         String name = t.name == null ? "" : t.name.trim();
         String clean = cleanTitle(name);
         long durSec = t.duration / 1000L;
+        Result bestSynced = null;
         Result plainFallback = null;
 
-        // 1) LRCLIB (strict duration + version match)
-        Result r = lookupLrclib(artist, name, clean, t.album, durSec);
-        if (r != null && r.synced) return finish(r, t.duration, koApp);
-        if (r != null) plainFallback = r;
+        // 1) LRCLIB
+        if (isProviderEnabled(c, SRC_LRCLIB)) {
+            Result r = lookupLrclib(artist, name, clean, t.album, durSec);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) {
+                    if (hasTranslations(r) || !wantKoSub || !needsKoreanTranslation(r)) return finish(r, t.duration, wantKoSub);
+                    bestSynced = r;
+                } else if (plainFallback == null) plainFallback = r;
+            }
+        }
 
-        // 2) NetEase Cloud Music (YRC word-sync + LRC + strict duration & version filter)
-        r = lookupNetEase(artist, name, clean, t.duration, koApp);
-        if (r != null && r.synced) return finish(r, t.duration, koApp);
-        if (r != null && plainFallback == null) plainFallback = r;
+        // 2) NetEase Cloud Music (YRC word-sync + LRC + native Korean tlyric)
+        if (isProviderEnabled(c, SRC_NETEASE)) {
+            Result r = lookupNetEase(artist, name, clean, t.duration, wantKoSub);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) {
+                    if (hasTranslations(r) || bestSynced == null) {
+                        if (hasTranslations(r) || !wantKoSub || !needsKoreanTranslation(r)) return finish(r, t.duration, wantKoSub);
+                        bestSynced = r;
+                    }
+                } else if (plainFallback == null) plainFallback = r;
+            }
+        }
 
-        // 3) Kugou Lyrics (strict duration check)
-        r = lookupKugou(artist, clean, t.duration);
-        if (r != null && r.synced) return finish(r, t.duration, koApp);
-        if (r != null && plainFallback == null) plainFallback = r;
+        // 3) QQ Music (LRC + native Korean trans track)
+        if (isProviderEnabled(c, SRC_QQ)) {
+            Result r = lookupQqMusic(artist, name, clean, t.duration, wantKoSub);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) {
+                    if (hasTranslations(r)) return finish(r, t.duration, wantKoSub);
+                    if (bestSynced == null) bestSynced = r;
+                } else if (plainFallback == null) plainFallback = r;
+            }
+        }
 
-        if (plainFallback != null) return finish(plainFallback, t.duration, koApp);
-        r = lookupLyricsOvh(artist, clean);
-        return r == null ? null : finish(r, t.duration, koApp);
+        if (bestSynced != null) return finish(bestSynced, t.duration, wantKoSub);
+
+        // 4) Kugou Lyrics
+        if (isProviderEnabled(c, SRC_KUGOU)) {
+            Result r = lookupKugou(artist, clean, t.duration);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) return finish(r, t.duration, wantKoSub);
+                if (plainFallback == null) plainFallback = r;
+            }
+        }
+
+        // 5) SimpMusic Lyrics
+        if (isProviderEnabled(c, SRC_SIMPMUSIC)) {
+            Result r = lookupSimpMusic(artist, name, clean, t.duration);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) return finish(r, t.duration, wantKoSub);
+                if (plainFallback == null) plainFallback = r;
+            }
+        }
+
+        if (plainFallback != null) return finish(plainFallback, t.duration, wantKoSub);
+
+        // 6) lyrics.ovh (plain text fallback)
+        if (isProviderEnabled(c, SRC_LYRICSOVH)) {
+            Result r = lookupLyricsOvh(artist, clean);
+            if (r != null) return finish(r, t.duration, wantKoSub);
+        }
+        return null;
     }
 
-    private static Result finish(Result r, long trackDurationMs, boolean koApp) {
-        finalizeEndTimes(r, trackDurationMs);
-        if (koApp && needsKoreanTranslation(r) && !hasTranslations(r)) {
-            attachKoreanTranslation(r);
-        }
-        return r;
+    private static Result finish(Result r, long trackDurationMs, boolean wantKoSub) {
+        if (!wantKoSub) for (Line l : r.lines) l.trans = null;
+        return finalizeEndTimes(r, trackDurationMs);
     }
 
     private static String primaryArtist(String a) {
@@ -198,7 +300,7 @@ final class Lyrics {
         r = searchLrclib("q=" + Spotify.enc((artist + " " + clean).trim()), artist, clean, dur);
         if (r != null) { r.source = "LRCLIB"; if (r.synced) return r; if (plain == null) plain = r; }
         try {
-            JSONObject o = getObj(LRCLIB + "get?" + q + "&duration=" + dur, 7500);
+            JSONObject o = getObj(LRCLIB + "get?" + q + "&duration=" + dur, 7000);
             if (o != null && (dur <= 0 || Math.abs((long) o.optDouble("duration", dur) - dur) <= 4)) {
                 r = parse(o.optString("syncedLyrics", ""), o.optString("plainLyrics", ""));
                 if (r != null) { r.source = "LRCLIB"; if (r.synced) return r; if (plain == null) plain = r; }
@@ -222,7 +324,7 @@ final class Lyrics {
                 String cArtist = o.optString("artistName", "");
                 if (isVersionMismatch(wantTitle, cTitle)) continue;
                 long d = Math.abs((long) o.optDouble("duration", 0) - dur);
-                if (dur > 0 && d > 4) continue; // strict <= 4s duration gate prevents off-sync edits
+                if (dur > 0 && d > 4) continue;
                 boolean synced = !o.isNull("syncedLyrics") && !o.optString("syncedLyrics", "").isEmpty();
                 boolean plain = !o.isNull("plainLyrics") && !o.optString("plainLyrics", "").isEmpty();
                 if (!synced && !plain) continue;
@@ -235,8 +337,8 @@ final class Lyrics {
         } catch (Exception e) { return null; }
     }
 
-    // ---- Provider 2: NetEase Cloud Music (strict duration & title match + optional Korean tlyric) ----
-    private static Result lookupNetEase(String artist, String origTitle, String clean, long durMs, boolean koApp) {
+    // ---- Provider 2: NetEase Cloud Music (YRC + LRC + native Korean tlyric) ----
+    private static Result lookupNetEase(String artist, String origTitle, String clean, long durMs, boolean wantKoSub) {
         try {
             String kw = (artist + " " + clean).trim();
             if (kw.isEmpty()) return null;
@@ -254,7 +356,7 @@ final class Lyrics {
                 if (isVersionMismatch(origTitle, cname)) continue;
                 long d = item.optLong("duration", 0);
                 long diff = (durMs > 0 && d > 0) ? Math.abs(d - durMs) : 0;
-                if (durMs > 0 && d > 0 && diff > 4500) continue; // never pick a wrong-length version!
+                if (durMs > 0 && d > 0 && diff > 4500) continue;
                 long score = diff + i * 150L;
                 if (!nTitle.isEmpty() && !norm(cleanTitle(cname)).contains(nTitle) && !nTitle.contains(norm(cleanTitle(cname)))) score += 3000;
                 if (score < bestScore) { bestScore = score; bestId = item.optLong("id", -1); }
@@ -275,8 +377,7 @@ final class Lyrics {
                     if (r != null) { r.source = "NetEase"; out = r; }
                 }
             }
-            // If NetEase also has a Korean translation track, merge it by timestamp
-            if (out != null && koApp) {
+            if (out != null && wantKoSub) {
                 JSONObject tlyr = lyr.optJSONObject("tlyric");
                 String tStr = tlyr == null ? "" : tlyr.optString("lyric", "");
                 if (hasHangul(tStr)) {
@@ -289,7 +390,57 @@ final class Lyrics {
         return null;
     }
 
-    // ---- Provider 3: Kugou Lyrics (strict duration check) ----
+    // ---- Provider 3: QQ Music (LRC + native Korean trans track) ----
+    private static Result lookupQqMusic(String artist, String origTitle, String clean, long durMs, boolean wantKoSub) {
+        try {
+            String kw = (artist + " " + clean).trim();
+            if (kw.isEmpty()) return null;
+            JSONObject s = getObj("https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=" + Spotify.enc(kw) + "&p=1&n=8&format=json", 5500);
+            JSONObject data = s == null ? null : s.optJSONObject("data");
+            JSONObject songObj = data == null ? null : data.optJSONObject("song");
+            JSONArray list = songObj == null ? null : songObj.optJSONArray("list");
+            if (list == null || list.length() == 0) return null;
+            String bestMid = null;
+            long bestScore = Long.MAX_VALUE;
+            String nTitle = norm(clean);
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject item = list.optJSONObject(i);
+                if (item == null) continue;
+                String cname = item.optString("songname", "");
+                if (isVersionMismatch(origTitle, cname)) continue;
+                long dMs = item.optLong("interval", 0) * 1000L;
+                long diff = (durMs > 0 && dMs > 0) ? Math.abs(dMs - durMs) : 0;
+                if (durMs > 0 && dMs > 0 && diff > 4500) continue;
+                long score = diff + i * 150L;
+                if (!nTitle.isEmpty() && !norm(cleanTitle(cname)).contains(nTitle) && !nTitle.contains(norm(cleanTitle(cname)))) score += 3000;
+                if (score < bestScore) { bestScore = score; bestMid = item.optString("songmid", null); }
+            }
+            if (bestMid == null || bestMid.isEmpty()) return null;
+            String lyrUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + Spotify.enc(bestMid) + "&format=json&nobase64=0";
+            JSONObject lyr = getObjWithHeader(lyrUrl, "Referer", "https://y.qq.com/", 5500);
+            if (lyr == null) return null;
+            String b64 = lyr.optString("lyric", "");
+            if (b64.isEmpty()) return null;
+            String lrcStr = new String(Base64.decode(b64, Base64.DEFAULT), StandardCharsets.UTF_8);
+            Result out = parse(lrcStr, "");
+            if (out == null) return null;
+            out.source = "QQ Music";
+            if (wantKoSub) {
+                String tb64 = lyr.optString("trans", "");
+                if (!tb64.isEmpty()) {
+                    String tStr = new String(Base64.decode(tb64, Base64.DEFAULT), StandardCharsets.UTF_8);
+                    if (hasHangul(tStr)) {
+                        Result tr = parse(tStr, "");
+                        if (tr != null && tr.synced) mergeTranslationByTime(out, tr);
+                    }
+                }
+            }
+            return out;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // ---- Provider 4: Kugou Lyrics (strict duration check) ----
     private static Result lookupKugou(String artist, String title, long durMs) {
         try {
             String kw = (artist.isEmpty() ? title : artist + "-" + title).trim();
@@ -325,7 +476,44 @@ final class Lyrics {
         return null;
     }
 
-    // ---- Provider 4: lyrics.ovh (plain text fallback) ----
+    // ---- Provider 5: SimpMusic Lyrics API (community synced LRC) ----
+    private static Result lookupSimpMusic(String artist, String origTitle, String clean, long durMs) {
+        try {
+            String kw = (artist + " " + clean).trim();
+            if (kw.isEmpty()) return null;
+            String body = getText("https://api-lyrics.simpmusic.org/v1/search?q=" + Spotify.enc(kw), 5500);
+            if (body == null) return null;
+            JSONArray arr = body.trim().startsWith("[") ? new JSONArray(body) : new JSONObject(body).optJSONArray("data");
+            if (arr == null || arr.length() == 0) return null;
+            JSONObject best = null;
+            long bestScore = Long.MAX_VALUE;
+            long durSec = durMs / 1000L;
+            String nTitle = norm(clean);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String ct = o.optString("songTitle", o.optString("title", ""));
+                if (isVersionMismatch(origTitle, ct)) continue;
+                long d = o.optLong("durationSeconds", o.optLong("duration", 0));
+                if (d > 10000) d /= 1000L;
+                long diff = (durSec > 0 && d > 0) ? Math.abs(d - durSec) : 0;
+                if (durSec > 0 && d > 0 && diff > 4) continue;
+                String sync = o.optString("syncedLyrics", "");
+                String plain = o.optString("plainLyrics", "");
+                if (sync.isEmpty() && plain.isEmpty()) continue;
+                long score = diff * 25 + (sync.isEmpty() ? 200 : 0);
+                if (!nTitle.isEmpty() && !norm(cleanTitle(ct)).contains(nTitle) && !nTitle.contains(norm(cleanTitle(ct)))) score += 150;
+                if (score < bestScore) { bestScore = score; best = o; }
+            }
+            if (best == null) return null;
+            Result r = parse(best.optString("syncedLyrics", ""), best.optString("plainLyrics", ""));
+            if (r != null) r.source = "SimpMusic";
+            return r;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // ---- Provider 6: lyrics.ovh (plain text fallback) ----
     private static Result lookupLyricsOvh(String artist, String title) {
         try {
             if (artist.isEmpty() || title.isEmpty()) return null;
@@ -340,7 +528,7 @@ final class Lyrics {
         return null;
     }
 
-    // ---- Automatic Korean subtitle translation for non-Korean songs (only when app language is Korean) ----
+    // ---- Native Korean translation subtitle helpers (NO machine translation!) ----
     static boolean hasHangul(String s) {
         if (s == null) return false;
         for (int i = 0; i < s.length(); i++) {
@@ -371,6 +559,41 @@ final class Lyrics {
         return false;
     }
 
+    /**
+     * Detects dual-language LRC where a non-Korean lyric line and its human-authored Korean translation
+     * share the same timestamp (<= 150ms apart), merging the Korean line into {@code line.trans}.
+     */
+    static void extractDualKoreanLines(Result r) {
+        if (r == null || !r.synced || r.lines.size() < 2) return;
+        List<Line> merged = new ArrayList<>(r.lines.size());
+        int i = 0;
+        while (i < r.lines.size()) {
+            Line a = r.lines.get(i);
+            if (i + 1 < r.lines.size()) {
+                Line b = r.lines.get(i + 1);
+                if (Math.abs(b.time - a.time) <= 150L) {
+                    boolean aKo = hasHangul(a.text);
+                    boolean bKo = hasHangul(b.text);
+                    if (!aKo && bKo) {
+                        a.trans = b.text;
+                        merged.add(a);
+                        i += 2;
+                        continue;
+                    } else if (aKo && !bKo) {
+                        b.trans = a.text;
+                        merged.add(b);
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            merged.add(a);
+            i++;
+        }
+        r.lines.clear();
+        r.lines.addAll(merged);
+    }
+
     private static void mergeTranslationByTime(Result target, Result trans) {
         for (Line l : target.lines) {
             Line best = null;
@@ -385,45 +608,6 @@ final class Lyrics {
         }
     }
 
-    /** Translates non-Korean lyrics lines in batches into Korean via public translate endpoint (best-effort). */
-    private static void attachKoreanTranslation(Result r) {
-        try {
-            List<Integer> idxs = new ArrayList<>();
-            for (int i = 0; i < r.lines.size(); i++) {
-                String t = r.lines.get(i).text;
-                if (t != null && !t.isEmpty() && !"♪".equals(t) && !hasHangul(t)) idxs.add(i);
-            }
-            if (idxs.isEmpty()) return;
-            // Batch ~20 lines per request to keep URL length safe
-            int batch = 20;
-            for (int start = 0; start < idxs.size(); start += batch) {
-                int end = Math.min(idxs.size(), start + batch);
-                StringBuilder sb = new StringBuilder();
-                for (int j = start; j < end; j++) {
-                    if (j > start) sb.append('\n');
-                    sb.append(r.lines.get(idxs.get(j)).text.replace('\n', ' '));
-                }
-                String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q=" + Spotify.enc(sb.toString());
-                String body = getText(url, 5500);
-                if (body == null) return;
-                JSONArray root = new JSONArray(body);
-                JSONArray segs = root.optJSONArray(0);
-                if (segs == null) continue;
-                StringBuilder joined = new StringBuilder();
-                for (int k = 0; k < segs.length(); k++) {
-                    JSONArray seg = segs.optJSONArray(k);
-                    if (seg != null) joined.append(seg.optString(0, ""));
-                }
-                String[] translated = joined.toString().split("\n");
-                for (int j = 0; j < Math.min(end - start, translated.length); j++) {
-                    String tr = translated[j].trim();
-                    Line ln = r.lines.get(idxs.get(start + j));
-                    if (!tr.isEmpty() && !tr.equalsIgnoreCase(ln.text)) ln.trans = tr;
-                }
-            }
-        } catch (Throwable ignored) {}
-    }
-
     static String cleanTitle(String s) {
         if (s == null) return "";
         String r = s.replaceAll("(?i)\\s*[(\\[](feat\\.?|ft\\.?|with|prod\\.?|ver\\.?|version|remaster|live|ost|from\\s)[^)\\]]*[)\\]]", "");
@@ -432,10 +616,15 @@ final class Lyrics {
     }
 
     private static String getText(String url, int timeout) throws Exception {
+        return getTextWithHeader(url, null, null, timeout);
+    }
+
+    private static String getTextWithHeader(String url, String hKey, String hVal, int timeout) throws Exception {
         HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
         h.setConnectTimeout(4500);
         h.setReadTimeout(timeout);
         h.setRequestProperty("User-Agent", "Prism/9.5 (Android)");
+        if (hKey != null && hVal != null) h.setRequestProperty(hKey, hVal);
         try {
             if (h.getResponseCode() != 200) return null;
             return Spotify.read(h.getInputStream());
@@ -447,17 +636,22 @@ final class Lyrics {
         return s == null ? null : new JSONObject(s);
     }
 
-    // ---- disk cache (v3 includes Korean translation + corrected strict-matched lyrics) ----
-    private static java.io.File file(String id) {
+    private static JSONObject getObjWithHeader(String url, String hKey, String hVal, int timeout) throws Exception {
+        String s = getTextWithHeader(url, hKey, hVal, timeout);
+        return s == null ? null : new JSONObject(s);
+    }
+
+    // ---- disk cache (v4: native translation tracks only, drops old v3 machine-translated cache) ----
+    private static File file(String id) {
         if (Img.appContext == null) return null;
-        java.io.File d = new java.io.File(Img.appContext.getCacheDir(), "lyrics_v3");
+        File d = new File(Img.appContext.getCacheDir(), "lyrics_v4");
         d.mkdirs();
-        return new java.io.File(d, Integer.toHexString(id.hashCode()) + "_" + id.length() + ".json");
+        return new File(d, Integer.toHexString(id.hashCode()) + "_" + id.length() + ".json");
     }
 
     private static Result readDisk(String id) {
         try {
-            java.io.File f = file(id);
+            File f = file(id);
             if (f == null || !f.exists()) return null;
             JSONObject o = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
             if (!id.equals(o.optString("id"))) return null;
@@ -486,7 +680,7 @@ final class Lyrics {
 
     private static void writeDisk(String id, Result r) {
         try {
-            java.io.File f = file(id);
+            File f = file(id);
             if (f == null) return;
             JSONArray la = new JSONArray();
             for (Line l : r.lines) {

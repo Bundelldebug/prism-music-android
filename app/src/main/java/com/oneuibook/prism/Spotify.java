@@ -38,9 +38,11 @@ final class Spotify {
             + "user-follow-read user-follow-modify streaming";
     static final String API = "https://api.spotify.com/v1";
 
-    static final ExecutorService IO = Executors.newFixedThreadPool(8);
+    static final ExecutorService IO = Executors.newFixedThreadPool(10);
     /** Dedicated lane for playback commands so home/explore/probe traffic never delays first play. */
     static final ExecutorService PLAY_IO = Executors.newSingleThreadExecutor();
+    /** Separate lane for external third-party calls (Bandsintown) so they never block Spotify API IO. */
+    private static final ExecutorService EVENT_IO = Executors.newFixedThreadPool(2);
     private static final ExecutorService PROBE = Executors.newFixedThreadPool(8);
     static final Handler MAIN = new Handler(Looper.getMainLooper());
     static SharedPreferences prefs;
@@ -177,14 +179,15 @@ final class Spotify {
             // piling on (which only extends the penalty and made whole home sections fail after a fold / refresh)
             long cool = cooldownUntil - System.currentTimeMillis();
             if (cool > 0) {
-                if (cool > 30000) throw new ApiError(429, "rate limited", "rate");
+                // Never stall the whole IO thread pool for 10-30s on a long Retry-After
+                if (cool > 2500) throw new ApiError(429, "rate limited", "rate");
                 Thread.sleep(cool);
             }
             String url = path.startsWith("http") ? path : API + path;
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
             c.setRequestMethod(method);
-            c.setConnectTimeout(15000);
-            c.setReadTimeout(20000);
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(12000);
             c.setRequestProperty("Authorization", "Bearer " + token());
             c.setRequestProperty("Accept", "application/json");
             if (jsonBody != null || "PUT".equals(method) || "POST".equals(method)) {
@@ -202,8 +205,10 @@ final class Spotify {
             if (code == 429) {
                 long wait = 2;
                 try { wait = Math.max(1, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Exception ignored) {}
-                cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + wait * 1000L);
-                if (wait <= 30 && attempt < 2) continue;   // the loop top sleeps out the cooldown
+                long capWait = Math.min(wait, 15);
+                cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + capWait * 1000L);
+                if (wait <= 5 && attempt == 0) continue;
+                throw new ApiError(429, "rate limited (" + wait + "s)", "rate");
             }
             String text = read(code >= 400 ? c.getErrorStream() : c.getInputStream());
             if (code >= 400) {
@@ -310,11 +315,35 @@ final class Spotify {
 
     // ---- GET cache: re-created screens (fold / unfold / rotation / theme) reuse what was just loaded instead of
     //      firing every home/library request again at once; a failed request falls back to the last good answer ----
-    private static final long FRESH_MS = 3 * 60 * 1000L;
-    private static final Map<String, Object[]> GET_CACHE = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, Object[]>(64, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Object[]> e) { return size() > 160; }
+    private static final long FRESH_MS = 5 * 60 * 1000L;
+    private static final Map<String, Object[]> GET_CACHE = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, Object[]>(96, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Object[]> e) { return size() > 240; }
     });
-    private static boolean cacheable(String method, String path) { return "GET".equals(method) && !path.startsWith("/me/player") && fixtures == null; }
+    private static final Map<String, Boolean> FOLLOW_CACHE = java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+
+    private static boolean cacheable(String method, String path) {
+        return "GET".equals(method) && !path.startsWith("/me/player")
+                && !path.startsWith("/me/following/contains")
+                && !path.startsWith("/me/library/contains")
+                && fixtures == null;
+    }
+
+    /** Synchronous GET backed by GET_CACHE (falls back to stale cache on 429/network error). */
+    static JSONObject callCached(String path) throws Exception {
+        final boolean cache = cacheable("GET", path);
+        final Object[] hit = cache ? GET_CACHE.get(path) : null;
+        if (hit != null && System.currentTimeMillis() - (long) hit[0] < FRESH_MS) {
+            return (JSONObject) hit[1];
+        }
+        try {
+            JSONObject o = call("GET", path, null);
+            if (cache) GET_CACHE.put(path, new Object[]{System.currentTimeMillis(), o});
+            return o;
+        } catch (Exception e) {
+            if (hit != null) return (JSONObject) hit[1];
+            throw e;
+        }
+    }
 
     static void sendPlay(String method, String path, String body, Cb cb) {
         PLAY_IO.execute(() -> {
@@ -465,47 +494,90 @@ final class Spotify {
         }
     }
 
-    /** Checks whether the signed-in user follows the given artist ID. */
+    /** Checks whether the signed-in user follows the given artist ID (2026 /me/library first, legacy fallback). */
     static void isFollowingArtist(String artistId, java.util.function.Consumer<Boolean> cb) {
         if (artistId == null || artistId.isEmpty() || !loggedIn()) {
             if (cb != null) MAIN.post(() -> cb.accept(false));
             return;
         }
-        get("/me/following/contains?type=artist&ids=" + enc(artistId), new Cb() {
-            @Override public void ok(JSONObject o) {
+        IO.execute(() -> {
+            Boolean res = null;
+            // 1) 2026 Spotify Web API unified endpoint (/me/library/contains?uris=spotify:artist:<id>)
+            try {
+                JSONObject o = call("GET", "/me/library/contains?uris=" + enc("spotify:artist:" + artistId), null);
                 JSONArray a = o == null ? null : o.optJSONArray("items");
-                boolean following = a != null && a.length() > 0 && a.optBoolean(0, false);
-                if (cb != null) cb.accept(following);
+                if (a != null && a.length() > 0) res = a.optBoolean(0, false);
+            } catch (Exception ignored) {}
+            // 2) Legacy fallback (/me/following/contains)
+            if (res == null) {
+                try {
+                    JSONObject o = call("GET", "/me/following/contains?type=artist&ids=" + enc(artistId), null);
+                    JSONArray a = o == null ? null : o.optJSONArray("items");
+                    if (a != null && a.length() > 0) res = a.optBoolean(0, false);
+                } catch (Exception ignored) {}
             }
-            @Override public void err(int code, String message) {
-                if (cb != null) cb.accept(false);
-            }
+            if (res != null) FOLLOW_CACHE.put(artistId, res);
+            else res = FOLLOW_CACHE.getOrDefault(artistId, false);
+            final boolean f = res;
+            if (cb != null) MAIN.post(() -> cb.accept(f));
         });
     }
 
-    /** Follows or unfollows an artist on Spotify (requires {@code user-follow-modify}). */
+    /** Follows or unfollows an artist (2026 /me/library first using user-library-modify, legacy /me/following fallback). */
     static void setFollowArtist(String artistId, boolean follow, Cb cb) {
         if (artistId == null || artistId.isEmpty()) {
             if (cb != null) MAIN.post(() -> cb.err(400, "missing artist id"));
             return;
         }
-        String body = null;
-        try {
-            body = new JSONObject().put("ids", new JSONArray().put(artistId)).toString();
-        } catch (Exception ignored) {}
-        send(follow ? "PUT" : "DELETE", "/me/following?type=artist&ids=" + enc(artistId), follow ? body : null, cb);
+        IO.execute(() -> {
+            String method = follow ? "PUT" : "DELETE";
+            Exception lastErr = null;
+            // 1) 2026 unified library endpoint: PUT/DELETE /me/library?uris=spotify:artist:<id>
+            String artistUri = "spotify:artist:" + artistId;
+            try {
+                JSONObject o = call(method, "/me/library?uris=" + enc(artistUri), null);
+                FOLLOW_CACHE.put(artistId, follow);
+                GET_CACHE.clear();
+                if (cb != null) MAIN.post(() -> cb.ok(o));
+                return;
+            } catch (Exception e) {
+                lastErr = e;
+            }
+            // 1b) Retry /me/library with JSON body {"uris":[...]} in case endpoint rejects query-only DELETE/PUT
+            try {
+                String body = new JSONObject().put("uris", new JSONArray().put(artistUri)).toString();
+                JSONObject o1b = call(method, "/me/library", body);
+                FOLLOW_CACHE.put(artistId, follow);
+                GET_CACHE.clear();
+                if (cb != null) MAIN.post(() -> cb.ok(o1b));
+                return;
+            } catch (Exception ignored) {}
+            // 2) Legacy fallback: PUT/DELETE /me/following?type=artist&ids=<id>
+            try {
+                JSONObject o2 = call(method, "/me/following?type=artist&ids=" + enc(artistId), null);
+                FOLLOW_CACHE.put(artistId, follow);
+                GET_CACHE.clear();
+                if (cb != null) MAIN.post(() -> cb.ok(o2));
+                return;
+            } catch (Exception e2) {
+                if (lastErr == null) lastErr = e2;
+            }
+            int code = lastErr instanceof ApiError ? ((ApiError) lastErr).code : 0;
+            String msg = lastErr == null ? "" : String.valueOf(lastErr.getMessage());
+            if (cb != null) MAIN.post(() -> cb.err(code, msg));
+        });
     }
 
     /**
-     * Fetches upcoming live/offline concerts for an artist via the public Bandsintown REST API.
-     * Always posts a non-null {@link JSONArray} on the main thread (empty on error or none found).
+     * Fetches upcoming live/offline concerts for an artist via the public Bandsintown REST API
+     * on a dedicated background pool so it never slows down Spotify API requests.
      */
     static void fetchArtistEvents(String artistName, java.util.function.Consumer<JSONArray> cb) {
         if (artistName == null || artistName.trim().isEmpty()) {
             if (cb != null) MAIN.post(() -> cb.accept(new JSONArray()));
             return;
         }
-        IO.execute(() -> {
+        EVENT_IO.execute(() -> {
             JSONArray out = new JSONArray();
             try {
                 if (fixtures != null) {
@@ -516,8 +588,8 @@ final class Spotify {
                     String url = "https://rest.bandsintown.com/artists/" + enc(artistName.trim()) + "/events?app_id=prism_music";
                     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                     c.setRequestMethod("GET");
-                    c.setConnectTimeout(8000);
-                    c.setReadTimeout(10000);
+                    c.setConnectTimeout(4000);
+                    c.setReadTimeout(5000);
                     c.setRequestProperty("Accept", "application/json");
                     int code = c.getResponseCode();
                     if (code >= 200 && code < 300) {

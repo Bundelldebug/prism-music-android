@@ -475,11 +475,19 @@ final class Pages {
                 java.util.Random rng = new java.util.Random(System.nanoTime() ^ ((long) (salt + 1) * 0x9E3779B97F4A7C15L));
                 java.util.Set<String> recentTrackIds = new java.util.HashSet<>();
                 java.util.LinkedHashMap<String, JSONObject> seedArtists = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> fallbackAlbums = new java.util.LinkedHashMap<>();
                 java.util.List<String> seedGenres = new java.util.ArrayList<>();
 
-                // 1) Recently played: exclude already-heard tracks, collect artist seeds
+                // 1) Fetch recently-played & top-artists IN PARALLEL (usually instant cache hits from Home!)
+                java.util.concurrent.Future<JSONObject> fRec = Spotify.IO.submit(() -> {
+                    try { return Spotify.callCached("/me/player/recently-played?limit=20"); } catch (Exception e) { return null; }
+                });
+                java.util.concurrent.Future<JSONObject> fTop = Spotify.IO.submit(() -> {
+                    try { return Spotify.callCached("/me/top/artists?limit=15&time_range=medium_term"); } catch (Exception e) { return null; }
+                });
                 try {
-                    JSONArray rec = Spotify.call("GET", "/me/player/recently-played?limit=20", null).optJSONArray("items");
+                    JSONObject recObj = fRec.get(6, java.util.concurrent.TimeUnit.SECONDS);
+                    JSONArray rec = recObj == null ? null : recObj.optJSONArray("items");
                     if (rec != null) {
                         for (int i = 0; i < rec.length(); i++) {
                             JSONObject tr = rec.optJSONObject(i);
@@ -487,6 +495,8 @@ final class Pages {
                             if (tr == null) continue;
                             String tid = tr.optString("id");
                             if (!tid.isEmpty()) recentTrackIds.add(tid);
+                            JSONObject al = tr.optJSONObject("album");
+                            if (al != null && !al.optString("id").isEmpty()) fallbackAlbums.putIfAbsent(al.optString("id"), al);
                             JSONArray ars = tr.optJSONArray("artists");
                             if (ars != null && ars.length() > 0) {
                                 JSONObject ar = ars.optJSONObject(0);
@@ -495,144 +505,120 @@ final class Pages {
                         }
                     }
                 } catch (Exception ignored) {}
-
-                // 2) Top artists (short_term -> medium_term fallback)
-                for (String range : new String[]{"short_term", "medium_term"}) {
-                    try {
-                        JSONArray ta = Spotify.call("GET", "/me/top/artists?time_range=" + range + "&limit=15", null).optJSONArray("items");
-                        if (ta != null && ta.length() > 0) {
-                            for (int i = 0; i < ta.length(); i++) {
-                                JSONObject ar = ta.optJSONObject(i);
-                                if (ar == null) continue;
-                                String id = ar.optString("id");
-                                if (!id.isEmpty()) seedArtists.put(id, ar);
-                                JSONArray gs = ar.optJSONArray("genres");
-                                if (gs != null) {
-                                    for (int j = 0; j < gs.length(); j++) {
-                                        String g = gs.optString(j, "").trim();
-                                        if (!g.isEmpty()) seedGenres.add(g);
-                                    }
+                try {
+                    JSONObject topObj = fTop.get(6, java.util.concurrent.TimeUnit.SECONDS);
+                    JSONArray ta = topObj == null ? null : topObj.optJSONArray("items");
+                    if (ta != null) {
+                        for (int i = 0; i < ta.length(); i++) {
+                            JSONObject ar = ta.optJSONObject(i);
+                            if (ar == null) continue;
+                            String id = ar.optString("id");
+                            if (!id.isEmpty()) seedArtists.put(id, ar);
+                            JSONArray gs = ar.optJSONArray("genres");
+                            if (gs != null) {
+                                for (int j = 0; j < gs.length(); j++) {
+                                    String g = gs.optString(j, "").trim();
+                                    if (!g.isEmpty()) seedGenres.add(g);
                                 }
                             }
-                            break;
                         }
-                    } catch (Exception ignored) {}
-                }
-
-                // 3) Top tracks (short_term -> medium_term fallback) for additional taste signals
-                for (String range : new String[]{"short_term", "medium_term"}) {
-                    try {
-                        JSONArray tt = Spotify.call("GET", "/me/top/tracks?time_range=" + range + "&limit=15", null).optJSONArray("items");
-                        if (tt != null && tt.length() > 0) {
-                            for (int i = 0; i < tt.length(); i++) {
-                                JSONObject tr = tt.optJSONObject(i);
-                                if (tr == null) continue;
-                                JSONArray ars = tr.optJSONArray("artists");
-                                if (ars != null && ars.length() > 0) {
-                                    JSONObject ar = ars.optJSONObject(0);
-                                    if (ar != null && !ar.optString("id").isEmpty()) seedArtists.putIfAbsent(ar.optString("id"), ar);
-                                }
-                            }
-                            break;
-                        }
-                    } catch (Exception ignored) {}
-                }
+                    }
+                } catch (Exception ignored) {}
 
                 java.util.List<JSONObject> artistList = new java.util.ArrayList<>(seedArtists.values());
                 java.util.Collections.shuffle(artistList, rng);
                 java.util.Collections.shuffle(seedGenres, rng);
 
                 String becauseArtistName = null;
-                java.util.LinkedHashMap<String, JSONObject> becauseAlbums = new java.util.LinkedHashMap<>();
-                java.util.LinkedHashMap<String, JSONObject> freshTracksMap = new java.util.LinkedHashMap<>();
-                java.util.LinkedHashMap<String, JSONObject> discoverAlbums = new java.util.LinkedHashMap<>();
-
-                // 4) Releases from a rotating favorite artist
+                String favId = null;
                 if (!artistList.isEmpty()) {
                     JSONObject fav = artistList.get(0);
                     becauseArtistName = fav.optString("name", "");
-                    String fid = fav.optString("id", "");
-                    if (!fid.isEmpty()) {
-                        try {
-                            JSONArray al = Spotify.call("GET", "/artists/" + fid + "/albums?include_groups=album,single&limit=10", null).optJSONArray("items");
-                            java.util.Set<String> seenNames = new java.util.HashSet<>();
-                            if (al != null) {
-                                for (int i = 0; i < al.length(); i++) {
-                                    JSONObject a = al.optJSONObject(i);
-                                    if (a != null && seenNames.add(a.optString("name").toLowerCase(java.util.Locale.ROOT))) {
-                                        becauseAlbums.put(a.optString("id"), a);
-                                    }
-                                }
-                            }
-                        } catch (Exception ignored) {}
-                    }
+                    favId = fav.optString("id", "");
                 }
 
-                // 5) Build dynamic discovery queries from user's top genres + rotating seed artists
+                // 2) Build at most 2 discovery queries & run them IN PARALLEL with the favorite artist's albums!
                 java.util.List<String> queries = new java.util.ArrayList<>();
                 java.util.Set<String> usedGenres = new java.util.HashSet<>();
                 for (String g : seedGenres) {
                     if (usedGenres.add(g.toLowerCase(java.util.Locale.ROOT))) {
                         queries.add("genre:\"" + g + "\"");
-                        if (queries.size() >= 2) break;
+                        if (queries.size() >= 1) break;
                     }
                 }
-                for (int i = 0; i < Math.min(3, artistList.size()) && queries.size() < 4; i++) {
+                for (int i = 0; i < Math.min(2, artistList.size()) && queries.size() < 2; i++) {
                     String nm = artistList.get(i).optString("name", "").trim();
                     if (!nm.isEmpty()) queries.add(nm);
                 }
                 if (queries.isEmpty()) {
-                    int q1 = 1 + rng.nextInt(GENRE_QUERY.length - 1);
-                    int q2 = 1 + (q1 + rng.nextInt(GENRE_QUERY.length - 2)) % (GENRE_QUERY.length - 1);
-                    queries.add(GENRE_QUERY[q1]);
-                    queries.add(GENRE_QUERY[q2]);
+                    queries.add(GENRE_QUERY[1 + rng.nextInt(GENRE_QUERY.length - 1)]);
                 }
 
+                final String fid = favId;
+                java.util.concurrent.Future<JSONObject> fFavAlbums = (fid != null && !fid.isEmpty())
+                        ? Spotify.IO.submit(() -> {
+                            try { return Spotify.callCached("/artists/" + fid + "/albums?include_groups=album,single&limit=10"); }
+                            catch (Exception e) { return null; }
+                        }) : null;
+
+                final int off = (salt % 2) * 10;
+                java.util.List<java.util.concurrent.Future<JSONObject>> fSearches = new java.util.ArrayList<>();
                 for (String q : queries) {
-                    int off = rng.nextInt(3) * 10;
-                    try {
-                        JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(q), null).optJSONObject("tracks");
-                        JSONArray a = t == null ? null : t.optJSONArray("items");
-                        if ((a == null || a.length() == 0) && off > 0) {
-                            t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(q), null).optJSONObject("tracks");
-                            a = t == null ? null : t.optJSONArray("items");
-                        }
-                        if (a == null) continue;
-                        for (int i = 0; i < a.length(); i++) {
-                            JSONObject tr = a.optJSONObject(i);
-                            if (tr == null) continue;
-                            String tid = tr.optString("id");
-                            if (!tid.isEmpty() && !recentTrackIds.contains(tid)) {
-                                freshTracksMap.putIfAbsent(tid, tr);
+                    final String fq = q;
+                    fSearches.add(Spotify.IO.submit(() -> {
+                        try {
+                            JSONObject r = Spotify.callCached("/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(fq));
+                            JSONObject trs = r == null ? null : r.optJSONObject("tracks");
+                            JSONArray a = trs == null ? null : trs.optJSONArray("items");
+                            if ((a == null || a.length() == 0) && off > 0) {
+                                r = Spotify.callCached("/search?type=track&limit=10&offset=0&q=" + Spotify.enc(fq));
                             }
-                            JSONObject al = tr.optJSONObject("album");
-                            if (al != null) {
-                                String aid = al.optString("id");
-                                if (!aid.isEmpty() && !becauseAlbums.containsKey(aid)) {
-                                    discoverAlbums.putIfAbsent(aid, al);
+                            return r;
+                        } catch (Exception e) { return null; }
+                    }));
+                }
+
+                java.util.LinkedHashMap<String, JSONObject> becauseAlbums = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> freshTracksMap = new java.util.LinkedHashMap<>();
+                java.util.LinkedHashMap<String, JSONObject> discoverAlbums = new java.util.LinkedHashMap<>();
+
+                if (fFavAlbums != null) {
+                    try {
+                        JSONObject favRes = fFavAlbums.get(8, java.util.concurrent.TimeUnit.SECONDS);
+                        JSONArray al = favRes == null ? null : favRes.optJSONArray("items");
+                        java.util.Set<String> seenNames = new java.util.HashSet<>();
+                        if (al != null) {
+                            for (int i = 0; i < al.length(); i++) {
+                                JSONObject a = al.optJSONObject(i);
+                                if (a != null && seenNames.add(a.optString("name").toLowerCase(java.util.Locale.ROOT))) {
+                                    becauseAlbums.put(a.optString("id"), a);
                                 }
                             }
                         }
                     } catch (Exception ignored) {}
                 }
 
-                // Fallback to general fresh releases if discovery came back sparse
-                if (discoverAlbums.isEmpty() && freshTracksMap.isEmpty()) {
+                for (java.util.concurrent.Future<JSONObject> fs : fSearches) {
                     try {
-                        String fq = GENRE_QUERY[1 + rng.nextInt(GENRE_QUERY.length - 1)];
-                        JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(fq), null).optJSONObject("tracks");
+                        JSONObject r = fs.get(8, java.util.concurrent.TimeUnit.SECONDS);
+                        JSONObject t = r == null ? null : r.optJSONObject("tracks");
                         JSONArray a = t == null ? null : t.optJSONArray("items");
-                        if (a != null) {
-                            for (int i = 0; i < a.length(); i++) {
-                                JSONObject tr = a.optJSONObject(i);
-                                if (tr == null) continue;
-                                freshTracksMap.putIfAbsent(tr.optString("id"), tr);
-                                JSONObject al = tr.optJSONObject("album");
-                                if (al != null) discoverAlbums.putIfAbsent(al.optString("id"), al);
+                        if (a == null) continue;
+                        for (int i = 0; i < a.length(); i++) {
+                            JSONObject tr = a.optJSONObject(i);
+                            if (tr == null) continue;
+                            String tid = tr.optString("id");
+                            if (!tid.isEmpty() && !recentTrackIds.contains(tid)) freshTracksMap.putIfAbsent(tid, tr);
+                            JSONObject al = tr.optJSONObject("album");
+                            if (al != null) {
+                                String aid = al.optString("id");
+                                if (!aid.isEmpty() && !becauseAlbums.containsKey(aid)) discoverAlbums.putIfAbsent(aid, al);
                             }
                         }
                     } catch (Exception ignored) {}
                 }
+
+                if (discoverAlbums.isEmpty() && !fallbackAlbums.isEmpty()) discoverAlbums.putAll(fallbackAlbums);
 
                 java.util.List<JSONObject> fTracks = new java.util.ArrayList<>(freshTracksMap.values());
                 java.util.Collections.shuffle(fTracks, rng);
@@ -655,7 +641,7 @@ final class Pages {
                     List<Widgets.Item> disc = items(discArr);
                     List<Widgets.Item> bec = items(becArr);
                     if (disc.isEmpty() && tracks.isEmpty() && bec.isEmpty()) {
-                        body.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                        body.addView(Widgets.caption(m, m.getString(R.string.load_failed)));
                         return;
                     }
                     Widgets.Item heroItem = !disc.isEmpty() ? disc.get(0) : (!bec.isEmpty() ? bec.get(0) : null);
@@ -738,25 +724,40 @@ final class Pages {
                 "genre:\"hip hop\" year:2024-2026", "genre:r&b year:2024-2026", "genre:\"j-pop\" year:2024-2026", "genre:rock year:2024-2026",
                 "genre:indie year:2024-2026", "genre:jazz", "genre:classical", "genre:\"k-ballad\"", "genre:edm year:2024-2026"};
 
-        /** Dynamic genre exploration: rotates offsets and adds discovery jitter so each refresh feels fresh. */
+        /** Dynamic genre exploration: 2 cached pages fetched IN PARALLEL for fast 1-RTT display. */
         private void fetchAlbumsAndTracks(String q, int salt, GenreResult cb) {
             Spotify.IO.execute(() -> {
                 java.util.Random rng = new java.util.Random(System.nanoTime() ^ ((long) (salt + 3) * 0x517CC1B727220A95L));
                 java.util.LinkedHashMap<String, JSONObject> albums = new java.util.LinkedHashMap<>();
                 java.util.LinkedHashMap<String, JSONObject> trackMap = new java.util.LinkedHashMap<>();
                 java.util.Map<String, Integer> pop = new java.util.HashMap<>();
-                Exception first = null;
-                int startOff = (salt % 3) * 10;
-                for (int page = 0; page < 3; page++) {
-                    int off = startOff + page * 10;
-                    try {
-                        JSONObject t = Spotify.call("GET", "/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(q), null).optJSONObject("tracks");
-                        JSONArray a = t == null ? null : t.optJSONArray("items");
-                        if ((a == null || a.length() == 0) && off > 0 && page == 0) {
-                            t = Spotify.call("GET", "/search?type=track&limit=10&offset=0&q=" + Spotify.enc(q), null).optJSONObject("tracks");
-                            a = t == null ? null : t.optJSONArray("items");
+                final Exception[] first = {null};
+                final int startOff = (salt % 2) * 10;
+                java.util.List<java.util.concurrent.Future<JSONObject>> fPages = new java.util.ArrayList<>();
+                for (int page = 0; page < 2; page++) {
+                    final int p = page;
+                    final int off = startOff + p * 10;
+                    fPages.add(Spotify.IO.submit(() -> {
+                        try {
+                            JSONObject r = Spotify.callCached("/search?type=track&limit=10&offset=" + off + "&q=" + Spotify.enc(q));
+                            JSONObject t = r == null ? null : r.optJSONObject("tracks");
+                            JSONArray a = t == null ? null : t.optJSONArray("items");
+                            if ((a == null || a.length() == 0) && off > 0 && p == 0) {
+                                r = Spotify.callCached("/search?type=track&limit=10&offset=0&q=" + Spotify.enc(q));
+                            }
+                            return r;
+                        } catch (Exception e) {
+                            if (p == 0) first[0] = e;
+                            return null;
                         }
-                        if (a == null || a.length() == 0) break;
+                    }));
+                }
+                for (java.util.concurrent.Future<JSONObject> fp : fPages) {
+                    try {
+                        JSONObject r = fp.get(8, java.util.concurrent.TimeUnit.SECONDS);
+                        JSONObject t = r == null ? null : r.optJSONObject("tracks");
+                        JSONArray a = t == null ? null : t.optJSONArray("items");
+                        if (a == null) continue;
                         for (int i = 0; i < a.length(); i++) {
                             JSONObject tr = a.optJSONObject(i);
                             if (tr == null) continue;
@@ -768,7 +769,7 @@ final class Pages {
                             int jitter = rng.nextInt(18);
                             pop.put(id, Math.max(pop.containsKey(id) ? pop.get(id) : 0, tr.optInt("popularity") + jitter));
                         }
-                    } catch (Exception e) { if (page == 0) first = e; break; }
+                    } catch (Exception ignored) {}
                 }
                 java.util.List<JSONObject> alList = new java.util.ArrayList<>(albums.values());
                 alList.sort((x, y) -> Integer.compare(pop.getOrDefault(y.optString("id"), 0), pop.getOrDefault(x.optString("id"), 0)));
@@ -778,7 +779,7 @@ final class Pages {
                 for (JSONObject o : alList) alOut.put(o);
                 JSONArray trOut = new JSONArray();
                 for (JSONObject o : trList) trOut.put(o);
-                final Exception fe = first;
+                final Exception fe = first[0];
                 Spotify.MAIN.post(() -> cb.onDone(items(alOut), items(trOut), fe));
             });
         }
@@ -1360,6 +1361,10 @@ final class Pages {
                 if (!Spotify.loggedIn()) Player.toast(R.string.login_needed);
                 return;
             }
+            if (!Spotify.hasScope("user-library-modify") && !Spotify.hasScope("user-follow-modify") && Spotify.fixtures == null) {
+                Player.toast(R.string.follow_relogin);
+                return;
+            }
             followBusy = true;
             final boolean target = !following;
             Spotify.setFollowArtist(item.id, target, new Spotify.Cb() {
@@ -1370,26 +1375,9 @@ final class Pages {
                 }
                 @Override public void err(int c, String e) {
                     followBusy = false;
-                    Player.toast(c == 403 ? R.string.follow_relogin : R.string.action_failed);
+                    Player.toast(c == 401 || c == 403 ? R.string.follow_relogin : R.string.action_failed);
                 }
             });
-        }
-
-        private void openReleasesPage(String group, String label) {
-            main.push(new ArtistReleasesPage(main, item.id, item.title, group, label));
-        }
-
-        private void addArtistDiscographyMenu(LinearLayout host) {
-            MainActivity m = main;
-            host.addView(Widgets.section(m, m.getString(R.string.artist_browse_all)));
-            Widgets.Group g = new Widgets.Group(m, null);
-            g.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.albums), null, true,
-                    v -> openReleasesPage("album", m.getString(R.string.albums)));
-            g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.singles_eps), null, true,
-                    v -> openReleasesPage("single", m.getString(R.string.singles_eps)));
-            g.row(Icons.ARTIST, Ui.ACCENT, m.getString(R.string.appears_on), null, true,
-                    v -> openReleasesPage("appears_on", m.getString(R.string.appears_on)));
-            host.addView(g, Widgets.MW);
         }
 
         private void loadArtistEvents(LinearLayout slot) {
@@ -1528,7 +1516,6 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            addArtistDiscographyMenu(slot());
             String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
                     {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
             for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
@@ -1575,7 +1562,6 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            addArtistDiscographyMenu(slot());
             String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
                     {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
             for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
@@ -1585,26 +1571,19 @@ final class Pages {
 
         private void loadArtistTracks() {
             Spotify.IO.execute(() -> {
-                JSONArray tracks = null;
-                // "top tracks" is unavailable to development-mode apps; fall back to search (max 10 per page)
+                // /artists/{id}/top-tracks was removed in Spotify's Feb 2026 dev-mode update -> go straight to 1 cached search!
+                JSONArray tracks = new JSONArray();
                 try {
-                    tracks = Spotify.call("GET", "/artists/" + item.id + "/top-tracks?market=from_token", null).optJSONArray("tracks");
-                } catch (Exception ignored) {}
-                if (tracks == null || tracks.length() == 0) {
-                    tracks = new JSONArray();
                     String q = "/search?type=track&limit=10&q=" + Spotify.enc("artist:\"" + item.title + "\"");
-                    for (int off = 0; off <= 20; off += 10) {
-                        try {
-                            JSONObject t = Spotify.call("GET", q + "&offset=" + off, null).optJSONObject("tracks");
-                            JSONArray a = t == null ? null : t.optJSONArray("items");
-                            if (a == null || a.length() == 0) break;
-                            for (int i = 0; i < a.length(); i++) {
-                                JSONObject tr = a.optJSONObject(i);
-                                if (tr != null && tr.toString().contains(item.id)) tracks.put(tr);
-                            }
-                        } catch (Exception e) { break; }
+                    JSONObject t = Spotify.callCached(q).optJSONObject("tracks");
+                    JSONArray a = t == null ? null : t.optJSONArray("items");
+                    if (a != null) {
+                        for (int i = 0; i < a.length(); i++) {
+                            JSONObject tr = a.optJSONObject(i);
+                            if (tr != null) tracks.put(tr);
+                        }
                     }
-                }
+                } catch (Exception ignored) {}
                 final JSONArray ft = tracks;
                 Spotify.MAIN.post(() -> showTopTracks(items(ft)));
             });
@@ -1635,19 +1614,18 @@ final class Pages {
             }
         }
 
-        /** One release type (album / single / appears_on / compilation), paged to the end (10 per call). */
+        /** 9.5.7 release rail UI: one horizontal rail per release type (album / single / appears_on / compilation). */
         private void loadGroup(LinearLayout slot, String group, String title) {
             Spotify.IO.execute(() -> {
                 JSONArray all = new JSONArray();
                 java.util.Set<String> seen = new java.util.HashSet<>();
                 for (int off = 0; off < 100; off += 10) {
                     try {
-                        JSONObject o = Spotify.call("GET", "/artists/" + item.id + "/albums?include_groups=" + group + "&limit=10&offset=" + off, null);
+                        JSONObject o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + group + "&limit=10&offset=" + off);
                         JSONArray a = o.optJSONArray("items");
                         if (a == null || a.length() == 0) break;
                         for (int i = 0; i < a.length(); i++) {
                             JSONObject al = a.optJSONObject(i);
-                            // the same release is often listed once per market: keep one per name
                             if (al != null && seen.add(al.optString("name").toLowerCase(java.util.Locale.ROOT))) all.put(al);
                         }
                         String next = o.optString("next", null);
@@ -1657,22 +1635,7 @@ final class Pages {
                 Spotify.MAIN.post(() -> {
                     List<Widgets.Item> l = items(all);
                     if (l.isEmpty()) return;
-                    LinearLayout hdr = new LinearLayout(main);
-                    hdr.setOrientation(LinearLayout.HORIZONTAL);
-                    hdr.setGravity(Gravity.CENTER_VERTICAL);
-                    hdr.setPadding(Ui.dp(16), Ui.dp(26), Ui.dp(16), Ui.dp(12));
-                    TextView st = Ui.text(main, title + "  " + l.size(), 22, Ui.bold, Ui.text());
-                    hdr.addView(st, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    LinearLayout moreBtn = new LinearLayout(main);
-                    moreBtn.setOrientation(LinearLayout.HORIZONTAL);
-                    moreBtn.setGravity(Gravity.CENTER_VERTICAL);
-                    moreBtn.setPadding(Ui.dp(8), Ui.dp(4), Ui.dp(2), Ui.dp(4));
-                    moreBtn.addView(Ui.text(main, main.getString(R.string.see_all), 14, Ui.semibold, Ui.ACCENT));
-                    moreBtn.addView(new Icons.IconView(main, Icons.CHEVRON, 14, Ui.ACCENT), new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
-                    moreBtn.setOnClickListener(v -> openReleasesPage(group, title));
-                    Ui.press(moreBtn, 0.94f);
-                    hdr.addView(moreBtn);
-                    slot.addView(hdr, Widgets.MW);
+                    slot.addView(Widgets.section(main, title + "  " + l.size()));
                     LinearLayout row = Widgets.rail(slot, 10);
                     int size = Widgets.squareDp();
                     for (Widgets.Item x : l) {
@@ -1706,12 +1669,6 @@ final class Pages {
             if ("artist".equals(item.type)) {
                 e.add(new GlassMenu.Entry(main.getString(following ? R.string.following : R.string.follow),
                         following ? Icons.HEART_FILL : Icons.HEART, following, this::toggleFollow));
-                e.add(new GlassMenu.Entry(main.getString(R.string.albums), Icons.ALBUM, false,
-                        () -> openReleasesPage("album", main.getString(R.string.albums))));
-                e.add(new GlassMenu.Entry(main.getString(R.string.singles_eps), Icons.NOTE, false,
-                        () -> openReleasesPage("single", main.getString(R.string.singles_eps))));
-                e.add(new GlassMenu.Entry(main.getString(R.string.appears_on), Icons.ARTIST, false,
-                        () -> openReleasesPage("appears_on", main.getString(R.string.appears_on))));
             } else if ("playlist".equals(item.type)) {
                 e.add(new GlassMenu.Entry(main.getString(R.string.pl_edit), Icons.APPEARANCE, false, () -> {
                     String curDesc = item.raw == null ? "" : item.raw.optString("description", "");
@@ -1729,72 +1686,6 @@ final class Pages {
             e.add(new GlassMenu.Entry(main.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(item.uri)));
             e.add(new GlassMenu.Entry(main.getString(R.string.shuffle), Icons.SHUFFLE, false, () -> playAt(0, true)));
             GlassMenu.show(main, anchor, e);
-        }
-    }
-
-    // ------------------------------------------------------------------ Artist releases grid page (albums / singles & EPs / appears_on)
-    static final class ArtistReleasesPage extends Page {
-        final String artistId;
-        final String artistName;
-        final String group;
-
-        ArtistReleasesPage(MainActivity m, String artistId, String artistName, String group, String groupLabel) {
-            super(m, artistName + " · " + groupLabel, true);
-            this.artistId = artistId;
-            this.artistName = artistName;
-            this.group = group;
-            back = true;
-            headerIcons = new int[0];
-        }
-
-        @Override void build() {
-            MainActivity m = main;
-            LinearLayout host = slot();
-            host.addView(Widgets.spinner(m, 180));
-            Spotify.IO.execute(() -> {
-                JSONArray all = new JSONArray();
-                java.util.Set<String> seen = new java.util.HashSet<>();
-                for (int off = 0; off < 200; off += 10) {
-                    try {
-                        JSONObject o = Spotify.call("GET", "/artists/" + artistId + "/albums?include_groups=" + group + "&limit=10&offset=" + off, null);
-                        JSONArray a = o.optJSONArray("items");
-                        if (a == null || a.length() == 0) break;
-                        for (int i = 0; i < a.length(); i++) {
-                            JSONObject al = a.optJSONObject(i);
-                            if (al != null && seen.add(al.optString("name").toLowerCase(java.util.Locale.ROOT))) all.put(al);
-                        }
-                        String next = o.optString("next", null);
-                        if (next == null || "null".equals(next)) break;
-                    } catch (Exception e) { break; }
-                }
-                Spotify.MAIN.post(() -> {
-                    host.removeAllViews();
-                    List<Widgets.Item> l = items(all);
-                    if (l.isEmpty()) {
-                        host.addView(Widgets.caption(m, m.getString(R.string.empty)));
-                        return;
-                    }
-                    int avail = Widgets.contentW(m) - Ui.dp(32);
-                    int cols = Math.max(2, Math.min(5, avail / Ui.dp(170)));
-                    int gap = Ui.dp(12), colW = (avail - gap * (cols - 1)) / cols;
-                    LinearLayout row = null;
-                    for (int i = 0; i < l.size(); i++) {
-                        int k = i % cols;
-                        if (k == 0) {
-                            row = new LinearLayout(m);
-                            LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                            rl.setMargins(Ui.dp(16), Ui.dp(12), Ui.dp(16), 0);
-                            host.addView(row, rl);
-                        }
-                        Widgets.Item x = l.get(i);
-                        String date = x.raw == null ? "" : x.raw.optString("release_date", "");
-                        x.subtitle = date.length() >= 4 ? date.substring(0, 4) : "";
-                        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT);
-                        if (k < cols - 1) lp.rightMargin = gap;
-                        row.addView(Widgets.squareCard(m, x, Math.round(colW / Ui.density), v -> m.openItem(x)), lp);
-                    }
-                });
-            });
         }
     }
 

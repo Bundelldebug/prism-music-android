@@ -326,4 +326,8 @@
     <string name="exp_fresh_tracks">Recommended tracks</string>
     <string name="exp_discover_albums">Albums for your taste</string>
     <string name="lyrics_sync_offset">Sync offset</string>
+    <string name="lyrics_ko_trans">Show Korean subtitle track</string>
+    <string name="lyrics_ko_trans_note">Displays native Korean subtitle tracks embedded in lyric sources under non-Korean lyrics (no machine translation).</string>
+    <string name="lyrics_providers">Lyrics sources</string>
+    <string name="lyrics_clear_cache">Clear lyrics cache</string>
 </resources>

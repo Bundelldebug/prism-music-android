@@ -231,7 +231,7 @@ public class PrismUiTest {
             if (req.startsWith("GET /me/top/tracks")) return new org.json.JSONObject().put("items", tracks);
             if (req.startsWith("GET /me/top/artists")) return new org.json.JSONObject().put("items", artists);
             if (req.startsWith("GET /browse/new-releases")) return null; // removed for dev-mode apps: section must hide
-            if (req.startsWith("GET /me/following/contains")) return new org.json.JSONObject().put("items", new org.json.JSONArray().put(true));
+            if (req.startsWith("GET /me/following/contains") || req.startsWith("GET /me/library/contains")) return new org.json.JSONObject().put("items", new org.json.JSONArray().put(true));
             if (req.startsWith("GET /artists/") && req.contains("/albums")) {
                 org.json.JSONArray als = new org.json.JSONArray();
                 for (int i = 0; i < 6; i++) {
@@ -287,15 +287,12 @@ public class PrismUiTest {
             a.openItem(pl);
             for (int i = 0; i < 40; i++) { idle(50); Thread.sleep(20); }
             shot(a, "33_playlist_detail");
-            // 9.5.8 artist detail (follow + discography menu + offline events) & full releases grid page
+            // 9.5.8 artist detail (follow + 9.5.7 release rails + offline events)
             Widgets.Item ar = Widgets.Item.of(new org.json.JSONObject().put("type", "artist").put("id", "a0")
                     .put("uri", "spotify:artist:a0").put("name", "aespa").put("images", new org.json.JSONArray()));
             a.openItem(ar);
             for (int i = 0; i < 40; i++) { idle(50); Thread.sleep(20); }
             shot(a, "34_artist_detail");
-            a.push(new Pages.ArtistReleasesPage(a, "a0", "aespa", "album", a.getString(R.string.albums)));
-            for (int i = 0; i < 30; i++) { idle(50); Thread.sleep(15); }
-            shot(a, "35_artist_releases");
         } finally {
             Spotify.fixtures = null;
         }
@@ -775,6 +772,36 @@ public class PrismUiTest {
         assertTrue("bypass hold active", NpuAudio.bypassHold);
         NpuAudio.setBypassHold(app, false);
         assertTrue("bypass hold released", !NpuAudio.bypassHold);
+
+        // [12] 9.5.8 hotfix regression checks:
+        // (a) Dual-language LRC native Korean subtitle split (no machine translation) + 6 selectable lyric providers
+        assertEquals("6 lyric providers", 6, Lyrics.PROVIDER_IDS.length);
+        Lyrics.Result dual = Lyrics.parse("[00:10.00]Hello world\n[00:10.05]안녕 세상아", "");
+        Lyrics.extractDualKoreanLines(dual);
+        assertTrue("dual LRC merged", dual != null && dual.lines.size() == 1);
+        assertEquals("dual original", "Hello world", dual.lines.get(0).text);
+        assertEquals("dual Korean sub", "안녕 세상아", dual.lines.get(0).trans);
+        MainActivity.prefs(app).edit().putBoolean(Lyrics.providerPrefKey(Lyrics.SRC_QQ), false).commit();
+        assertTrue("QQ provider disabled", !Lyrics.isProviderEnabled(app, Lyrics.SRC_QQ));
+        MainActivity.prefs(app).edit().putBoolean(Lyrics.providerPrefKey(Lyrics.SRC_QQ), true).commit();
+
+        // (b) Korean Buds3 / Buds4 UHQ detection (never misread as AAC)
+        assertTrue("Korean Buds3 Pro icon", Icons.BUDS == AudioInfo.deviceIconForName("지호의 버즈3 프로", true, false, false));
+
+        // (c) NowPlaying ticker stays alive immediately after open() even before openP > 0
+        a.np.open();
+        idle(200);
+        try {
+            java.lang.reflect.Field tf = NowPlaying.class.getDeclaredField("tickerRunning");
+            tf.setAccessible(true);
+            assertTrue("NowPlaying ticker running after open", tf.getBoolean(a.np));
+        } catch (Exception e) { throw new RuntimeException(e); }
+        a.np.close(); idle(400);
+
+        // Capture new Lyrics Providers settings page
+        a.push(new Settings.LyricsPage(a)); idle(500);
+        shot(a, "82_lyrics_providers");
+        a.pop(); idle(300);
 
         // Capture Bit-Perfect Assist (with chipset art) + Supported Chipsets 15-chip list + Gold / Blue / Master player effects
         NpuAudio.testSupportedOverride = Boolean.TRUE;

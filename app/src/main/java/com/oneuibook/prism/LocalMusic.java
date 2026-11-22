@@ -515,7 +515,7 @@ final class LocalMusic {
         static PlaybackService running;
 
         /** Spotify playing through Prism's own in-app device. */
-        static boolean inApp() { return SpotifyWeb.ready() && SpotifyWeb.deviceId.equals(Player.deviceId); }
+        static boolean inApp() { return SpotifyWeb.ready() && (SpotifyWeb.deviceId.equals(Player.deviceId) || Player.deviceId == null); }
 
         private android.os.PowerManager.WakeLock wake;
 
@@ -527,12 +527,38 @@ final class LocalMusic {
             } catch (Exception ignored) {}
         }
 
+        /**
+         * Re-asserts Prism's foreground MediaSession as the top-priority active session (both now and after
+         * a short settle delay) so Chromium WebView's internal audio session or the official Spotify app
+         * cannot hijack background media / hardware volume controls.
+         */
+        static void claimControl(Context c) {
+            if (c == null || Player.track == null || !(isLocal(Player.track) || inApp())) return;
+            update(c);
+            Spotify.MAIN.postDelayed(() -> {
+                PlaybackService s = running;
+                if (s == null || session == null || Player.track == null) return;
+                if (!(isLocal(Player.track) || inApp())) return;
+                try {
+                    session.setPlaybackToLocal(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
+                    if (Player.playing) {
+                        session.setActive(false);
+                        session.setActive(true);
+                    }
+                    s.post();
+                } catch (Throwable ignored) {}
+            }, 260);
+        }
+
         @Override public void onCreate() {
             super.onCreate();
             running = this;
             NotificationManager nm = getSystemService(NotificationManager.class);
             nm.createNotificationChannel(new NotificationChannel(CH, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW));
             session = new MediaSession(this, "prism");
+            session.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
             // always route hardware volume keys to local STREAM_MUSIC (never a remote Spotify Connect speaker)
             session.setPlaybackToLocal(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -605,7 +631,7 @@ final class LocalMusic {
             session.setPlaybackState(new PlaybackState.Builder()
                     .setActions(PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
                             | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS | PlaybackState.ACTION_SEEK_TO)
-                    .setState(Player.playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, Player.position(), 1f)
+                    .setState(Player.playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, Player.position(), Player.playing ? 1f : 0f)
                     // Android 13+ media controls (and One UI's Now Bar) place up to two custom actions beside
                     // previous / play / next: shuffle on the left, repeat on the right
                     .addCustomAction(new PlaybackState.CustomAction.Builder(A_SHUFFLE, shuffleLabel(), shuffleIcon()).build())

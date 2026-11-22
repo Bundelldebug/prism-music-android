@@ -100,12 +100,30 @@ final class NowPlaying extends FrameLayout {
     private final ScrollView queueScroll;
     private final LinearLayout queueList;
 
+    private long lastElapsedSec = -1L, lastRemainSec = -1L;
+    private String lastBadgeLabel = null;
+    private int lastBadgeTier = -1;
+    private boolean tickerRunning;
+
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
             tick();
-            if (openP > 0) postDelayed(this, 250);
+            if (isOpen() || openP > 0f) {
+                tickerRunning = true;
+                postDelayed(this, 100);
+            } else {
+                tickerRunning = false;
+            }
         }
     };
+
+    private void ensureTicker() {
+        if (!tickerRunning && (isOpen() || openP > 0f)) {
+            tickerRunning = true;
+            removeCallbacks(ticker);
+            post(ticker);
+        }
+    }
 
     NowPlaying(MainActivity m, Dock dock) {
         super(m);
@@ -238,9 +256,10 @@ final class NowPlaying extends FrameLayout {
         // tablet / unfolded: the right pane is part of the layout and opens on the queue
         View host = (View) getParent();   // this view is still GONE (0×0) on the first open
         if (host != null && host.getWidth() / Ui.density >= 600 && host.getHeight() / Ui.density >= 480 && panel == 0) post(() -> setPanel(2));
+        animateOpen(1f, 560, Ui.DECEL);
+        tickerRunning = true;
         removeCallbacks(ticker);
         post(ticker);
-        animateOpen(1f, 560, Ui.DECEL);
     }
 
     /** Tablet bar's lyrics / queue buttons: open the player straight onto that pane (1 = lyrics, 2 = queue). */
@@ -1152,7 +1171,10 @@ final class NowPlaying extends FrameLayout {
         showTotal = Settings.pref(getContext(), "show_total", false);
         boolean shrink = Settings.pref(getContext(), "shrink_paused", true);
         artScale.to(Player.playing || !shrink ? 1f : 0.86f);
+        lastElapsedSec = -1L;
+        lastRemainSec = -1L;
         tick();
+        ensureTicker();
     }
 
     /** Player-screen setting: show the full length on the right instead of the time left. */
@@ -1167,12 +1189,20 @@ final class NowPlaying extends FrameLayout {
         if (!seek.scrubbing) {
             seek.frac = t.duration > 0 ? pos / (float) t.duration : 0f;
             seek.invalidate();
-            elapsed.setText(Ui.time(pos));
-            // either the time left (-2:48) or the song's full length (3:14), per the player-screen setting
-            remain.setText(showTotal ? Ui.time(t.duration) : "-" + Ui.time(Math.max(0, t.duration - pos)));
+            long elSec = pos / 1000L;
+            long remVal = showTotal ? t.duration : Math.max(0L, t.duration - pos);
+            long remSec = remVal / 1000L;
+            if (elSec != lastElapsedSec) {
+                lastElapsedSec = elSec;
+                elapsed.setText(Ui.time(pos));
+            }
+            if (remSec != lastRemainSec) {
+                lastRemainSec = remSec;
+                remain.setText(showTotal ? Ui.time(t.duration) : "-" + Ui.time(remVal));
+            }
         }
         if (panel == 1) lyrics.setPosition(pos);
-        if ((SystemClock.uptimeMillis() / 250) % 8 == 0) refreshAudioBadge();
+        if ((SystemClock.uptimeMillis() / 100) % 20 == 0) refreshAudioBadge();
     }
 
     private void refreshAudioBadge() {
@@ -1204,11 +1234,16 @@ final class NowPlaying extends FrameLayout {
             label = shortFmt;
         }
         boolean show = !label.isEmpty();
-        audioBadge.update(label, tier);
-        if (!GlassMenu.isSourceHidden(audioBadge)) {
-            audioBadge.setVisibility(show ? VISIBLE : GONE);
+        boolean changed = !label.equals(lastBadgeLabel) || tier != lastBadgeTier;
+        lastBadgeLabel = label;
+        lastBadgeTier = tier;
+        if (changed) {
+            audioBadge.update(label, tier);
+            if (!GlassMenu.isSourceHidden(audioBadge)) {
+                audioBadge.setVisibility(show ? VISIBLE : GONE);
+            }
+            if (show) content.requestLayout();
         }
-        if (show) content.requestLayout();
     }
 
     /** Inline glass sheet on tapping the codec/Hi-Res badge: quick info, Bit-Perfect Assist toggle & profiles. */
@@ -2113,7 +2148,7 @@ final class NowPlaying extends FrameLayout {
             laidW = w;
             layouts.clear();
             transLayouts.clear();
-            boolean showKoTrans = Lyrics.isKoreanApp(getContext());
+            boolean showKoTrans = Lyrics.showKoreanSubtitles(getContext());
             for (Lyrics.Line l : res.lines) {
                 String s = l.text.isEmpty() ? "♪" : l.text;
                 layouts.add(StaticLayout.Builder.obtain(s, 0, s.length(), tp, w).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0, 1.05f).build());

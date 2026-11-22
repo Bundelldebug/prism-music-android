@@ -45,6 +45,10 @@ final class SpotifyWeb {
     private static final long SDK_TTL_MS = 24L * 60 * 60 * 1000;
 
     private static final String HTML = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            // Block browser MediaSession BEFORE Spotify SDK loads so WebView never hijacks lockscreen / Now Bar / volume controls
+            + "<script>try{Object.defineProperty(navigator,'mediaSession',{configurable:true,get:function(){return {"
+            + "metadata:null,playbackState:'none',setActionHandler:function(){},setPositionState:function(){}"
+            + "};}});}catch(e){}</script>"
             + "<link rel='preconnect' href='https://apresolve.spotify.com' crossorigin>"
             + "<link rel='preconnect' href='https://api.spotify.com' crossorigin>"
             + "<link rel='preconnect' href='https://dealer.spotify.com' crossorigin>"
@@ -328,11 +332,18 @@ final class SpotifyWeb {
                     // the new song is running (a different track, or the same one restarted): bring the level back
                     if (fadeInPending && !o.optBoolean("paused") && (newSong || o.optLong("position") < 2000))
                         Spotify.MAIN.postDelayed(SpotifyWeb::fadeIn, 40);
-                    if (Player.local() || !ready() || !deviceId.equals(Player.deviceId)) return;
-                    Player.playing = !o.optBoolean("paused");
-                    Player.progress = o.optLong("position");
-                    Player.stamp = android.os.SystemClock.elapsedRealtime();
-                    Player.notifyAll0();
+                    if (Player.local() || !ready()) return;
+                    if (Player.deviceId == null || deviceId.equals(Player.deviceId)) {
+                        Player.deviceId = deviceId;
+                        boolean wasPlaying = Player.playing;
+                        Player.playing = !o.optBoolean("paused");
+                        Player.progress = o.optLong("position");
+                        Player.stamp = android.os.SystemClock.elapsedRealtime();
+                        Player.notifyAll0();
+                        if (ctx != null && (Player.playing || wasPlaying)) {
+                            LocalMusic.PlaybackService.claimControl(ctx.getApplicationContext());
+                        }
+                    }
                 } catch (Exception ignored) {}
                 Player.refresh();
             });

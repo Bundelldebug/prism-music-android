@@ -326,4 +326,8 @@
     <string name="exp_fresh_tracks">지금 추천하는 트랙</string>
     <string name="exp_discover_albums">취향 저격 앨범</string>
     <string name="lyrics_sync_offset">싱크 미세 조정</string>
+    <string name="lyrics_ko_trans">한국어 번역 자막 표시</string>
+    <string name="lyrics_ko_trans_note">기계 번역 대신, 자막 소스에 한국어 번역 자막이 함께 포함된 경우에만 원문 아래에 작게 표시해요.</string>
+    <string name="lyrics_providers">가사 조회 소스</string>
+    <string name="lyrics_clear_cache">가사 캐시 비우기</string>
 </resources>

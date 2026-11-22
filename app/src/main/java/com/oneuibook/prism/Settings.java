@@ -493,30 +493,37 @@ final class Settings {
             cg.card.addView(curveView, Widgets.MW);
             if (supported && active) {
                 TextView abBtn = Ui.text(m, m.getString(R.string.bpa_ab_hold), 13.5f, Ui.semibold, Ui.ACCENT);
+                abBtn.setClickable(true);
                 abBtn.setGravity(android.view.Gravity.CENTER);
-                abBtn.setPadding(Ui.dp(14), Ui.dp(12), Ui.dp(14), Ui.dp(12));
-                abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.12f), 14));
+                abBtn.setPadding(Ui.dp(14), Ui.dp(13), Ui.dp(14), Ui.dp(13));
+                abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
                 LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 abLp.setMargins(Ui.dp(14), Ui.dp(4), Ui.dp(14), Ui.dp(14));
                 abBtn.setOnTouchListener((v, ev) -> {
                     int act = ev.getActionMasked();
                     if (act == android.view.MotionEvent.ACTION_DOWN) {
-                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
                         NpuAudio.setBypassHold(m, true);
                         abBtn.setText(R.string.bpa_ab_bypassing);
-                        abBtn.setBackground(Ui.round(Ui.alpha(0xFFFF9F0A, 0.24f), 14));
+                        abBtn.setBackground(Ui.round(Ui.alpha(0xFFFF9F0A, 0.28f), 14));
                         abBtn.setTextColor(0xFFFF9F0A);
+                        stTv.setText(NpuAudio.status(m));
                         curveView.invalidate();
                         return true;
+                    } else if (act == android.view.MotionEvent.ACTION_MOVE) {
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
                     } else if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(false);
                         NpuAudio.setBypassHold(m, false);
                         abBtn.setText(R.string.bpa_ab_hold);
-                        abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.12f), 14));
+                        abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
                         abBtn.setTextColor(Ui.ACCENT);
+                        stTv.setText(NpuAudio.status(m));
                         curveView.invalidate();
                         return true;
                     }
-                    return false;
+                    return true;
                 });
                 cg.card.addView(abBtn, abLp);
             }
@@ -584,7 +591,7 @@ final class Settings {
 
         private void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive, NpuAudio.CurveView curve) {
             View row = g.row(0, 0, m.getString(titleRes), curPct + "%", false, null);
-            Widgets.GlassSlider sl = new Widgets.GlassSlider(m, curPct / 100f, 10);
+            Widgets.GlassSlider sl = new Widgets.GlassSlider(m, curPct / 100f, 20);
             if (!interactive) {
                 row.setAlpha(0.5f);
                 sl.setAlpha(0.45f);
@@ -704,7 +711,24 @@ final class Settings {
             MainActivity m = main;
             Widgets.Group g = new Widgets.Group(m, null);
             toggleRow(g, Icons.LYRICS, m.getString(R.string.lyrics_online), "lyrics", true, null);
+            toggleRow(g, Icons.GLOBE, m.getString(R.string.lyrics_ko_trans), Lyrics.PREF_KO_TRANS, true, () -> Lyrics.clearCache(m));
             content.addView(g, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.lyrics_ko_trans_note)));
+
+            Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.lyrics_providers));
+            for (int i = 0; i < Lyrics.PROVIDER_IDS.length; i++) {
+                String id = Lyrics.PROVIDER_IDS[i];
+                String label = Lyrics.PROVIDER_NAMES[i];
+                toggleRow(pg, Icons.NOTE, label, Lyrics.providerPrefKey(id), true, () -> Lyrics.clearCache(m));
+            }
+            content.addView(pg, Widgets.MW);
+
+            Widgets.Group cg = new Widgets.Group(m, null);
+            cg.row(Icons.CLOSE, Ui.ACCENT, m.getString(R.string.lyrics_clear_cache), null, false, v -> {
+                Lyrics.clearCache(m);
+                Toast.makeText(m, R.string.cleared, Toast.LENGTH_SHORT).show();
+            });
+            content.addView(cg, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.lyrics_note)));
         }
     }
@@ -744,7 +768,7 @@ final class Settings {
             Widgets.Group g = new Widgets.Group(m, null);
             g.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.version), MainActivity.VERSION, false, null);
             g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.music_service), "Spotify Web API", false, null);
-            g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB · NetEase · Kugou · lyrics.ovh", false, null);
+            g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB · NetEase · QQ · Kugou · SimpMusic · lyrics.ovh", false, null);
             content.addView(g, Widgets.MW);
             // updates from the GitHub releases
             Widgets.Group u = new Widgets.Group(m, m.getString(R.string.upd_group));
