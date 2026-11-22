@@ -70,6 +70,7 @@ final class Settings {
             app.row(Icons.APPEARANCE, Ui.ACCENT, m.getString(R.string.set_appearance), null, true, v -> m.push(new AppearancePage(m)));
             app.row(Icons.CONTENT, Ui.ACCENT, m.getString(R.string.set_content), null, true, v -> m.push(new ContentPage(m)));
             app.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.set_playback), null, true, v -> m.push(new PlaybackPage(m)));
+            app.row(Icons.HEADPHONES, Ui.ACCENT, m.getString(R.string.bpa_title), NpuAudio.summary(m), true, v -> m.push(new BitPerfectAssistPage(m)));
             app.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.set_lyrics), null, true, v -> m.push(new LyricsPage(m)));
             app.row(Icons.STORAGE, Ui.ACCENT, m.getString(R.string.set_storage), null, true, v -> m.push(new StoragePage(m)));
             content.addView(app, Widgets.MW);
@@ -420,6 +421,99 @@ final class Settings {
             bp.row(0, 0, BitPerfect.status(m), null, false, null);
             content.addView(bp, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.bp_note)));
+            Widgets.Group npu = new Widgets.Group(m, m.getString(R.string.npu_group));
+            npu.row(Icons.HEADPHONES, Ui.ACCENT, m.getString(R.string.bpa_title), NpuAudio.summary(m), true, v -> m.push(new BitPerfectAssistPage(m)));
+            content.addView(npu, Widgets.MW);
+        }
+    }
+
+    // ------------------------------------------------------------------ Bit-Perfect Assist (NPU Audio Tuning)
+    static final class BitPerfectAssistPage extends Sub {
+        BitPerfectAssistPage(MainActivity m) { super(m, R.string.bpa_title); }
+
+        @Override void build() {
+            MainActivity m = main;
+            boolean supported = NpuAudio.isSupported();
+            boolean active = NpuAudio.enabled(m);
+
+            // 1) Master toggle & SoC status
+            Widgets.Group mg = new Widgets.Group(m, m.getString(R.string.npu_group));
+            if (supported) {
+                toggleRow(mg, Icons.HEADPHONES, m.getString(R.string.npu_title), NpuAudio.PREF_ON, false, () -> {
+                    NpuAudio.apply(m);
+                    Player.notifyAll0();
+                    Spotify.MAIN.postDelayed(() -> { if (isAttachedToWindow()) rebuild(); }, 350);
+                });
+            } else {
+                View r = mg.row(Icons.HEADPHONES, Ui.text3(), m.getString(R.string.npu_title), m.getString(R.string.eq_state_off), false, null);
+                r.setAlpha(0.55f);
+            }
+            mg.row(0, 0, NpuAudio.status(m), null, false, null);
+            content.addView(mg, Widgets.MW);
+
+            // 2) Live output audio & Hi-Res tier card
+            AudioInfo.OutputSpec spec = AudioInfo.current(m);
+            int tier = AudioInfo.hiResTier(m, spec);
+            Widgets.Group og = new Widgets.Group(m, m.getString(R.string.bpa_output));
+            String outLabel = spec.deviceName.isEmpty() ? m.getString(R.string.this_device) : spec.deviceName;
+            String outVal = spec.formatLine().isEmpty() ? (spec.bits + "bit / " + spec.khzText()) : spec.formatLine();
+            og.row(AudioInfo.deviceIcon(spec), Ui.ACCENT, outLabel, outVal, false, null);
+            int tierRes = tier == AudioInfo.TIER_MASTER ? R.string.hires_master
+                    : (tier == AudioInfo.TIER_BLUE ? R.string.hires_blue
+                    : (tier == AudioInfo.TIER_GOLD ? R.string.hires_active : R.string.hires_none));
+            int tierColor = tier == AudioInfo.TIER_MASTER ? 0xFFA855F7
+                    : (tier == AudioInfo.TIER_BLUE ? 0xFF38BDF8
+                    : (tier == AudioInfo.TIER_GOLD ? 0xFFD4A017 : Ui.text2()));
+            og.row(Icons.WAVE, tierColor, m.getString(R.string.bpa_hires_state), m.getString(tierRes), false, null);
+            content.addView(og, Widgets.MW);
+
+            // 3) Curated profiles
+            Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.bpa_profile));
+            String curProf = NpuAudio.profile(m);
+            for (int i = 0; i < NpuAudio.PROFILES.length; i++) {
+                final int idx = i;
+                View row = pg.option(m.getString(NpuAudio.PROFILE_NAMES[i]), NpuAudio.PROFILES[i].equals(curProf), supported ? v -> {
+                    NpuAudio.setProfile(m, idx);
+                    if (!NpuAudio.enabled(m)) NpuAudio.setEnabled(m, true);
+                    rebuild();
+                } : null);
+                if (!supported) row.setAlpha(0.5f);
+            }
+            if ("custom".equals(curProf)) pg.option(m.getString(R.string.bpa_prof_custom), true, null);
+            content.addView(pg, Widgets.MW);
+
+            // 4) Detailed tuning sliders
+            Widgets.Group tg = new Widgets.Group(m, m.getString(R.string.bpa_tuning));
+            addTuningSlider(tg, m, R.string.bpa_strength, NpuAudio.PREF_STRENGTH, NpuAudio.strength(m), supported && active);
+            addTuningSlider(tg, m, R.string.bpa_air, NpuAudio.PREF_AIR, NpuAudio.air(m), supported && active);
+            addTuningSlider(tg, m, R.string.bpa_dyn, NpuAudio.PREF_DYN, NpuAudio.dyn(m), supported && active);
+            addTuningSlider(tg, m, R.string.bpa_vocal, NpuAudio.PREF_VOCAL, NpuAudio.vocal(m), supported && active);
+            if (supported) {
+                toggleRow(tg, Icons.WAVE, m.getString(R.string.bpa_limiter), NpuAudio.PREF_LIMITER, true, () -> NpuAudio.apply(m));
+            } else {
+                View lr = tg.row(Icons.WAVE, Ui.text3(), m.getString(R.string.bpa_limiter), m.getString(R.string.eq_state_on), false, null);
+                lr.setAlpha(0.5f);
+            }
+            content.addView(tg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.npu_note)));
+        }
+
+        private void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive) {
+            View row = g.row(0, 0, m.getString(titleRes), curPct + "%", false, null);
+            Widgets.GlassSlider sl = new Widgets.GlassSlider(m, curPct / 100f, 10);
+            if (!interactive) {
+                row.setAlpha(0.5f);
+                sl.setAlpha(0.45f);
+                sl.setEnabled(false);
+            } else {
+                sl.change = v -> {
+                    int pct = Math.round(v * 100f);
+                    NpuAudio.setParam(m, key, pct);
+                    Object tv = row.getTag();
+                    if (tv instanceof TextView) ((TextView) tv).setText(pct + "%");
+                };
+            }
+            g.card.addView(sl, Widgets.MW);
         }
     }
 
@@ -506,7 +600,7 @@ final class Settings {
             Widgets.Group g = new Widgets.Group(m, null);
             g.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.version), MainActivity.VERSION, false, null);
             g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.music_service), "Spotify Web API", false, null);
-            g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB", false, null);
+            g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB · NetEase · Kugou · lyrics.ovh", false, null);
             content.addView(g, Widgets.MW);
             // updates from the GitHub releases
             Widgets.Group u = new Widgets.Group(m, m.getString(R.string.upd_group));

@@ -17,7 +17,8 @@ final class Icons {
             SHUFFLE = 16, LIST = 17, CHEVRON = 18, BACK = 19, CHECK = 20, REPEAT = 21, DEVICE = 22, NOTE = 23,
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
-            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50;
+            REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
+            BUDS = 51, EARBUDS = 52, DAC = 53;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -459,6 +460,42 @@ final class Icons {
             case DRAG: {
                 stroke(1.8f);
                 c.drawLine(5f, 8.5f, 19f, 8.5f, P); c.drawLine(5f, 12f, 19f, 12f, P); c.drawLine(5f, 15.5f, 19f, 15.5f, P);
+                break;
+            }
+            case BUDS: {
+                // Galaxy Buds silhouette: twin angled blade stems with ergonomic rounded heads
+                P.setStyle(Paint.Style.FILL);
+                // Left bud head + blade stem
+                R.set(3.2f, 4.2f, 10.6f, 10.8f);
+                c.drawRoundRect(R, 3.3f, 3.3f, P);
+                R.set(6.6f, 9.6f, 9.4f, 19.8f);
+                c.drawRoundRect(R, 1.4f, 1.4f, P);
+                // Right bud head + blade stem
+                R.set(13.4f, 4.2f, 20.8f, 10.8f);
+                c.drawRoundRect(R, 3.3f, 3.3f, P);
+                R.set(14.6f, 9.6f, 17.4f, 19.8f);
+                c.drawRoundRect(R, 1.4f, 1.4f, P);
+                break;
+            }
+            case EARBUDS: {
+                // Generic wireless earbuds silhouette: twin circular buds with slender stems
+                stroke(1.75f);
+                c.drawCircle(7.2f, 8.0f, 3.4f, P);
+                c.drawLine(8.6f, 11.2f, 8.6f, 19.2f, P);
+                c.drawCircle(16.8f, 8.0f, 3.4f, P);
+                c.drawLine(15.4f, 11.2f, 15.4f, 19.2f, P);
+                break;
+            }
+            case DAC: {
+                // Direct USB DAC dongle silhouette: plug + amp body + headphone jack
+                stroke(1.7f);
+                R.set(5.5f, 7.2f, 18.5f, 17.8f);
+                c.drawRoundRect(R, 2.8f, 2.8f, P);
+                R.set(9.4f, 3.2f, 14.6f, 7.2f);
+                c.drawRoundRect(R, 1.1f, 1.1f, P);
+                c.drawLine(12f, 17.8f, 12f, 21f, P);
+                P.setStyle(Paint.Style.FILL);
+                c.drawCircle(12f, 12.5f, 1.5f, P);
                 break;
             }
             default:

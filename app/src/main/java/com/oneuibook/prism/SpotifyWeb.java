@@ -254,6 +254,31 @@ final class SpotifyWeb {
         web.evaluateJavascript("window.prismFade && window.prismFade(1, 180, 'in')", null);
     }
 
+    /** Optional Web Audio post-processing hook for supported flagship NPU devices (no-op if EME blocks media capture). */
+    static void setNpuEnhancer(boolean on, float airDb, float vocalDb) {
+        if (web == null) return;
+        final float aDb = on ? airDb : 0f;
+        final float vDb = on ? vocalDb : 0f;
+        Spotify.MAIN.post(() -> {
+            if (web == null) return;
+            String js = "try{window.__prismNpu=" + on + ";"
+                    + "if(window.__prismNpu && !window.__prismNpuHooked){window.__prismNpuHooked=true;"
+                    + "var AC=window.AudioContext||window.webkitAudioContext;"
+                    + "if(AC){var ctx=new AC({latencyHint:'playback'});window.__prismAc=ctx;"
+                    + "var hs=ctx.createBiquadFilter();hs.type='highshelf';hs.frequency.value=10500;"
+                    + "var pk=ctx.createBiquadFilter();pk.type='peaking';pk.frequency.value=3200;pk.Q.value=0.9;"
+                    + "hs.connect(pk);pk.connect(ctx.destination);window.__prismHs=hs;window.__prismPk=pk;window.__prismNpuIn=hs;}}"
+                    + "if(window.__prismHs){window.__prismHs.gain.value=" + aDb + ";}"
+                    + "if(window.__prismPk){window.__prismPk.gain.value=" + vDb + ";}"
+                    + "if(window.__prismAc && window.__prismNpu){window.__prismAc.resume();}"
+                    + "document.querySelectorAll('audio,video').forEach(function(el){"
+                    + "if(window.__prismNpu && !el.__prismWired && window.__prismAc && window.__prismNpuIn){"
+                    + "try{var s=window.__prismAc.createMediaElementSource(el);s.connect(window.__prismNpuIn);el.__prismWired=true;}catch(e){}"
+                    + "}});}catch(e){}";
+            web.evaluateJavascript(js, null);
+        });
+    }
+
     static final class Bridge {
         @JavascriptInterface public void faded(String tag) { }
 
@@ -265,6 +290,7 @@ final class SpotifyWeb {
             Spotify.MAIN.post(() -> {
                 deviceId = id;
                 activate();
+                if (web != null) NpuAudio.apply(web.getContext());
                 List<Runnable> l = new ArrayList<>(waiting);
                 waiting.clear();
                 for (Runnable r : l) r.run();

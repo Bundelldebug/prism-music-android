@@ -81,6 +81,8 @@ final class NowPlaying extends FrameLayout {
     private final View handle;
     private final TextView title, artist, elapsed, remain, chipText;
     private final GlassChip chip;
+    private final AudioBadge audioBadge;
+    private int hiResTier;
     private final Icons.IconView chipIcon;
     private final Icons.IconView star, more, aodBtn, prev, play, next, lyricsBtn, shuffleBtn, repeatBtn, queueBtn;
     private final Seek seek;
@@ -149,6 +151,10 @@ final class NowPlaying extends FrameLayout {
         chip.addView(chipText, ctl);
         chip.setOnClickListener(v -> deviceMenu(v));
         content.addView(chip);
+        audioBadge = new AudioBadge(m);
+        audioBadge.setOnClickListener(v -> audioInfoSheet(v));
+        audioBadge.setVisibility(GONE);
+        content.addView(audioBadge);
 
         prev = icon(Icons.PREV, 40, 0xFFFFFFFF, v -> Player.prev());
         play = icon(Icons.PAUSE, 46, 0xFFFFFFFF, v -> Player.toggle());
@@ -307,11 +313,11 @@ final class NowPlaying extends FrameLayout {
                 timesY = seekY + Ui.dpf(20);
                 ctrlY = timesY + Ui.dpf(56);
             } else {
-                titleBigY = artBig.bottom + Ui.dpf(28);
+                titleBigY = artBig.bottom + Ui.dpf(34);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(68);
+                seekY = titleBigY + Ui.dpf(66);
                 timesY = seekY + Ui.dpf(22);
-                ctrlY = timesY + Ui.dpf(64);
+                ctrlY = timesY + Ui.dpf(62);
             }
             float px = colX + colW + Math.max(Ui.dpf(40), W * 0.055f);
             panelRect.set(px, top + Ui.dpf(36), W - Ui.dpf(36), bottomY - Ui.dpf(36));
@@ -335,15 +341,15 @@ final class NowPlaying extends FrameLayout {
             panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
             return;
         }
-        float size = Math.min(W - side * 2, H * 0.44f);
-        artBig.set((W - size) / 2f, top + Ui.dpf(46), (W + size) / 2f, top + Ui.dpf(46) + size);
+        float size = Math.min(W - side * 2, H * 0.42f);
+        artBig.set((W - size) / 2f, top + Ui.dpf(42), (W + size) / 2f, top + Ui.dpf(42) + size);
         float sm = Ui.dpf(64);
         artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-        titleBigY = artBig.bottom + Ui.dpf(34);
+        titleBigY = artBig.bottom + Ui.dpf(38);
         titleSmallY = artSmall.centerY() - Ui.dpf(23);
-        seekY = titleBigY + Ui.dpf(66);
+        seekY = titleBigY + Ui.dpf(64);
         timesY = seekY + Ui.dpf(22);
-        float minCtrl = timesY + Ui.dpf(64);
+        float minCtrl = timesY + Ui.dpf(62);
         ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(16) + bottomY) / 2f - Ui.dpf(6));
         panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(18));
     }
@@ -371,6 +377,7 @@ final class NowPlaying extends FrameLayout {
             exact(elapsed, Ui.dp(70), Ui.dp(16));
             exact(remain, Ui.dp(70), Ui.dp(16));
             chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(200), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
+            audioBadge.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(140), colWi - Ui.dp(80)), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(22), MeasureSpec.EXACTLY));
             if (oneui) {
                 // round translucent buttons; scale down smoothly on narrower unfolded foldable columns so 5 buttons never collide
                 int btnS = wide ? Math.min(Ui.dp(54), Math.max(Ui.dp(40), (int) (colWi * 0.20f))) : Ui.dp(60);
@@ -416,6 +423,8 @@ final class NowPlaying extends FrameLayout {
             place(elapsed, side, (int) timesY);
             place(remain, W - side - Ui.dp(70), (int) timesY);
             place(chip, (W - chip.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(2));
+            // A style: place codec / Hi-Res badge cleanly centred right below the album cover (zero overlap)
+            place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(9)));
             int cy = (int) ctrlY;
             int gap = Math.min(Ui.dp(108), W / 4);
             place(prev, W / 2 - gap - Ui.dp(36), cy - Ui.dp(36));
@@ -466,6 +475,7 @@ final class NowPlaying extends FrameLayout {
             place(seek, side - Ui.dp(8), (int) seekY - seek.getMeasuredHeight() + Ui.dp(10));
             place(elapsed, side, (int) timesY);
             place(remain, W - side - Ui.dp(70), (int) timesY);
+            place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(3));
             int cy = (int) ctrlY, mid = W / 2;
             int step = Math.min(Ui.dp(86), (W - side * 2) / 4);
             place(shuffleBtn, side - Ui.dp(4), cy - shuffleBtn.getMeasuredHeight() / 2);
@@ -512,6 +522,8 @@ final class NowPlaying extends FrameLayout {
             }
             place(elapsed, x, (int) timesY);
             place(remain, x + cw - Ui.dp(70), (int) timesY);
+            if (oneui) place(audioBadge, x + (cw - audioBadge.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(3));
+            else place(audioBadge, x + (cw - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(7)));
             int cy = (int) ctrlY, mid = x + cw / 2;
             int step = Math.min(Ui.dp(88), Math.max(Ui.dp(46), (cw - Ui.dp(16)) / 4));
             place(shuffleBtn, Math.max(x - Ui.dp(4), mid - step * 2 - shuffleBtn.getMeasuredWidth() / 2), cy - shuffleBtn.getMeasuredHeight() / 2);
@@ -563,6 +575,11 @@ final class NowPlaying extends FrameLayout {
         if (!GlassMenu.isSourceHidden(chip)) {
             chip.setAlpha(rowA);
             chip.setVisibility(rowA < 0.02f ? INVISIBLE : VISIBLE);
+        }
+        if (!GlassMenu.isSourceHidden(audioBadge) && audioBadge.hasText()) {
+            float badgeA = oneui ? 1f : (1f - Ui.clamp(k * 1.6f, 0f, 1f));
+            audioBadge.setAlpha(badgeA);
+            audioBadge.setVisibility(badgeA < 0.02f ? INVISIBLE : VISIBLE);
         }
         outBtn.setAlpha(rowA);
         if (!GlassMenu.isSourceHidden(aodBtn)) aodBtn.setAlpha(rowA);
@@ -782,6 +799,9 @@ final class NowPlaying extends FrameLayout {
         if (art.width() <= 1) return;
         float bgMix = Ui.clamp((openP - 0.3f) / 0.5f, 0f, 1f);
         if (bgMix > 0.01f && mode < 0.99f) {
+            if (hiResTier > AudioInfo.TIER_NONE) {
+                drawHiResAura(c, radius, bgMix * (1f - mode));
+            }
             shadow.setShadowLayer(Ui.dpf(26), 0, Ui.dpf(12), Ui.alpha(0xFF000000, 0.35f * bgMix * (1f - mode)));
             c.drawRoundRect(art, radius, radius, shadow);
             shadow.clearShadowLayer();
@@ -812,6 +832,88 @@ final class NowPlaying extends FrameLayout {
         }
     }
 
+    private final Paint hiResPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF auraR = new RectF();
+    private android.graphics.SweepGradient ultraSweep;
+    private final Matrix ultraM = new Matrix();
+    private static final int[] ULTRA_RING = {0xFFFFD56B, 0xFFFF6B9D, 0xFF7B61FF, 0xFF22D3EE, 0xFF34E89E, 0xFFFFD56B};
+
+    /**
+     * Hi-Res visual aura around the album cover:
+     * - TIER_GOLD   (1 condition):  breathing metallic gold halo ring.
+     * - TIER_BLUE   (2 conditions): luminous sapphire / cyan-blue glow halo ring.
+     * - TIER_MASTER (all 3 or USB Bit-Perfect): rotating holographic rainbow halo + prism sparkles.
+     */
+    private void drawHiResAura(Canvas c, float radius, float alpha) {
+        if (alpha <= 0.01f) return;
+        double time = SystemClock.uptimeMillis() / 1000.0;
+        float pulse = 0.78f + 0.22f * (float) Math.sin(time * 1.9);
+        hiResPaint.setStyle(Paint.Style.STROKE);
+
+        if (hiResTier == AudioInfo.TIER_MASTER) {
+            if (ultraSweep == null) ultraSweep = new android.graphics.SweepGradient(0, 0, ULTRA_RING, null);
+            ultraM.setRotate((float) ((time * 36.0) % 360.0));
+            ultraM.postTranslate(art.centerX(), art.centerY());
+            ultraSweep.setLocalMatrix(ultraM);
+            hiResPaint.setShader(ultraSweep);
+            float[] spreads = {Ui.dpf(12), Ui.dpf(7.5f), Ui.dpf(3.8f), Ui.dpf(1.2f)};
+            float[] widths  = {Ui.dpf(12), Ui.dpf(7f),   Ui.dpf(3.5f), Ui.dpf(1.6f)};
+            float[] alphas  = {0.15f,      0.26f,        0.44f,        0.90f};
+            for (int i = 0; i < spreads.length; i++) {
+                float sp = spreads[i];
+                auraR.set(art.left - sp, art.top - sp, art.right + sp, art.bottom + sp);
+                hiResPaint.setStrokeWidth(widths[i]);
+                hiResPaint.setAlpha((int) (255 * alpha * alphas[i] * (i == 3 ? 1f : pulse)));
+                c.drawRoundRect(auraR, radius + sp, radius + sp, hiResPaint);
+            }
+            hiResPaint.setShader(null);
+            hiResPaint.setStyle(Paint.Style.FILL);
+            float hw = art.width() * 0.5f + Ui.dpf(12);
+            float hh = art.height() * 0.5f + Ui.dpf(12);
+            for (int i = 0; i < 12; i++) {
+                double ang = (i * Math.PI * 2.0 / 12.0) + time * 0.16;
+                float twinkle = 0.25f + 0.75f * (0.5f + 0.5f * (float) Math.sin(time * 2.6 + i * 1.7));
+                float px = art.centerX() + (float) Math.cos(ang) * hw * (0.94f + 0.08f * (float) Math.sin(time + i));
+                float py = art.centerY() + (float) Math.sin(ang) * hh * (0.94f + 0.08f * (float) Math.cos(time * 1.1 + i));
+                hiResPaint.setColor(ULTRA_RING[i % (ULTRA_RING.length - 1)]);
+                hiResPaint.setAlpha((int) (215 * alpha * twinkle));
+                c.drawCircle(px, py, Ui.dpf(1.3f + 1.1f * twinkle), hiResPaint);
+            }
+        } else if (hiResTier == AudioInfo.TIER_BLUE) {
+            // 2 conditions: luminous electric sapphire-blue glow
+            hiResPaint.setShader(null);
+            int[] blues = {0xFF2563EB, 0xFF38BDF8, 0xFF7DD3FC, 0xFFBAE6FD};
+            float[] spreads = {Ui.dpf(11), Ui.dpf(6.5f), Ui.dpf(3.2f), Ui.dpf(1.1f)};
+            float[] widths  = {Ui.dpf(11), Ui.dpf(6.5f), Ui.dpf(3.2f), Ui.dpf(1.5f)};
+            float[] alphas  = {0.16f,      0.28f,        0.46f,        0.88f};
+            for (int i = 0; i < spreads.length; i++) {
+                float sp = spreads[i];
+                auraR.set(art.left - sp, art.top - sp, art.right + sp, art.bottom + sp);
+                hiResPaint.setColor(blues[i]);
+                hiResPaint.setStrokeWidth(widths[i]);
+                hiResPaint.setAlpha((int) (255 * alpha * alphas[i] * (i == 3 ? 1f : pulse)));
+                c.drawRoundRect(auraR, radius + sp, radius + sp, hiResPaint);
+            }
+        } else {
+            // 1 condition: refined breathing gold halo
+            hiResPaint.setShader(null);
+            int gold = 0xFFFFD56B;
+            float[] spreads = {Ui.dpf(8), Ui.dpf(4), Ui.dpf(1.2f)};
+            float[] widths  = {Ui.dpf(8), Ui.dpf(4), Ui.dpf(1.4f)};
+            float[] alphas  = {0.14f,     0.26f,     0.72f};
+            for (int i = 0; i < spreads.length; i++) {
+                float sp = spreads[i];
+                auraR.set(art.left - sp, art.top - sp, art.right + sp, art.bottom + sp);
+                hiResPaint.setColor(gold);
+                hiResPaint.setStrokeWidth(widths[i]);
+                hiResPaint.setAlpha((int) (255 * alpha * alphas[i] * (i == 2 ? 1f : pulse)));
+                c.drawRoundRect(auraR, radius + sp, radius + sp, hiResPaint);
+            }
+        }
+        hiResPaint.setShader(null);
+        hiResPaint.setAlpha(255);
+    }
+
     // ---------------------------------------------------------------- prism light
     private final Paint prismPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix prismM = new Matrix();
@@ -833,8 +935,18 @@ final class NowPlaying extends FrameLayout {
         prismM.postTranslate(cx, cy);
         prismSweep.setLocalMatrix(prismM);
         prismPaint.setShader(prismSweep);
-        prismPaint.setAlpha(lightArt ? 40 : 56);
+        float boost = hiResTier == AudioInfo.TIER_MASTER ? 1.42f : (hiResTier == AudioInfo.TIER_BLUE ? 1.20f : (hiResTier == AudioInfo.TIER_GOLD ? 1.10f : 1f));
+        prismPaint.setAlpha(Math.min(255, (int) ((lightArt ? 40 : 56) * boost)));
         c.drawRect(rect, prismPaint);
+        // 3-condition / Bit-Perfect Master exclusive: rich deep velvet sapphire-amethyst & champagne-gold studio wash
+        if (hiResTier == AudioInfo.TIER_MASTER) {
+            prismPaint.setBlendMode(null);
+            prismPaint.setShader(new LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
+                    new int[]{0x420B0F26, 0x3820123A, 0x342B1E0E}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+            prismPaint.setAlpha(255);
+            c.drawRect(rect, prismPaint);
+            prismPaint.setBlendMode(android.graphics.BlendMode.SCREEN);
+        }
         // 2) three dispersed beams leaving the "prism" at the upper left
         float ox = rect.left - w * 0.1f, oy = rect.top + h * 0.22f;
         float len = (float) Math.hypot(w, h) * 1.3f;
@@ -1004,6 +1116,7 @@ final class NowPlaying extends FrameLayout {
         repeatBtn.set("track".equals(Player.repeat) ? Icons.REPEAT_ONE : Icons.REPEAT, getVisibility() == VISIBLE);
         star.setVisibility(Player.local() ? INVISIBLE : VISIBLE);
         chipText.setText(Player.outputName(getContext()));
+        refreshAudioBadge();
         showTotal = Settings.pref(getContext(), "show_total", false);
         boolean shrink = Settings.pref(getContext(), "shrink_paused", true);
         artScale.to(Player.playing || !shrink ? 1f : 0.86f);
@@ -1027,6 +1140,79 @@ final class NowPlaying extends FrameLayout {
             remain.setText(showTotal ? Ui.time(t.duration) : "-" + Ui.time(Math.max(0, t.duration - pos)));
         }
         if (panel == 1) lyrics.setPosition(pos);
+        if ((SystemClock.uptimeMillis() / 250) % 8 == 0) refreshAudioBadge();
+    }
+
+    private void refreshAudioBadge() {
+        AudioInfo.OutputSpec spec = AudioInfo.current(getContext());
+        int tier = AudioInfo.hiResTier(getContext(), spec);
+        hiResTier = tier;
+        chipIcon.set(AudioInfo.deviceIcon(spec), false);
+        String fmt = spec.formatLine();
+        String shortFmt = fmt.replace(" · ", " ").replace(" / ", "/").replace("USB Bit-Perfect", "USB BP");
+        String label = "";
+        if (tier == AudioInfo.TIER_MASTER) {
+            label = shortFmt.isEmpty() ? "HI-RES MASTER" : ("MASTER · " + shortFmt);
+        } else if (tier == AudioInfo.TIER_BLUE) {
+            label = shortFmt.isEmpty() ? "HI-RES+ · NPU" : ("HI-RES+ · " + shortFmt);
+        } else if (tier == AudioInfo.TIER_GOLD) {
+            label = shortFmt.isEmpty() ? "HI-RES · NPU" : ("HI-RES · " + shortFmt);
+        } else if (spec.external && !shortFmt.isEmpty()) {
+            label = shortFmt;
+        }
+        boolean show = !label.isEmpty();
+        audioBadge.update(label, tier);
+        if (!GlassMenu.isSourceHidden(audioBadge)) {
+            audioBadge.setVisibility(show ? VISIBLE : GONE);
+        }
+        if (show) content.requestLayout();
+    }
+
+    /** Inline glass sheet on tapping the codec/Hi-Res badge: quick info, Bit-Perfect Assist toggle & profiles. */
+    private void audioInfoSheet(View v) {
+        Context c = getContext();
+        AudioInfo.OutputSpec spec = AudioInfo.current(c);
+        int tier = AudioInfo.hiResTier(c, spec);
+        String dev = spec.deviceName.isEmpty() ? c.getString(R.string.this_device) : spec.deviceName;
+        String fmt = spec.formatLine().isEmpty() ? (spec.bits + "bit / " + spec.khzText()) : spec.formatLine();
+        String sheetTitle = dev + "  ·  " + fmt;
+
+        List<GlassMenu.Entry> e = new ArrayList<>();
+        int tierRes = tier == AudioInfo.TIER_MASTER ? R.string.hires_master
+                : (tier == AudioInfo.TIER_BLUE ? R.string.hires_blue
+                : (tier == AudioInfo.TIER_GOLD ? R.string.hires_active : R.string.hires_none));
+        e.add(new GlassMenu.Entry(c.getString(tierRes), Icons.WAVE, tier > AudioInfo.TIER_NONE, () -> {}));
+
+        if (NpuAudio.isSupported()) {
+            boolean on = NpuAudio.enabled(c);
+            GlassMenu.Entry toggle = new GlassMenu.Entry(
+                    c.getString(on ? R.string.bpa_disable : R.string.bpa_enable) + " (" + NpuAudio.strength(c) + "%)",
+                    Icons.HEADPHONES, on, () -> {
+                        NpuAudio.setEnabled(c, !on);
+                        refreshAudioBadge();
+                    });
+            toggle.checkable = true;
+            e.add(toggle);
+            String curProf = NpuAudio.profile(c);
+            for (int i = 0; i < NpuAudio.PROFILES.length; i++) {
+                final int idx = i;
+                GlassMenu.Entry pe = new GlassMenu.Entry(c.getString(NpuAudio.PROFILE_NAMES[i]), 0,
+                        on && NpuAudio.PROFILES[i].equals(curProf), () -> {
+                            NpuAudio.setProfile(c, idx);
+                            if (!NpuAudio.enabled(c)) NpuAudio.setEnabled(c, true);
+                            refreshAudioBadge();
+                        });
+                pe.checkable = true;
+                e.add(pe);
+            }
+        } else {
+            e.add(new GlassMenu.Entry(NpuAudio.status(c), Icons.INFO, false, () -> {}));
+        }
+        e.add(new GlassMenu.Entry(c.getString(R.string.bpa_open_detail), Icons.SETTINGS, false, () -> {
+            close();
+            main.push(new Settings.BitPerfectAssistPage(main));
+        }));
+        GlassMenu.sheet(main, anchorOf(v), sheetTitle, e, v);
     }
 
     // ---------------------------------------------------------------- panels
@@ -1215,6 +1401,9 @@ final class NowPlaying extends FrameLayout {
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> { close(); main.openUri(t.albumUri, t.album); }));
         if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openUri(t.artistUri, t.artist); }));
         e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.STAR_FILL : Icons.STAR, false, Player::toggleLike));
+        if (!Player.local() && t.uri != null && t.uri.startsWith("spotify:track:")) {
+            e.add(new GlassMenu.Entry(c.getString(R.string.pl_add_track), Icons.QUEUE, false, () -> main.addToPlaylistDialog(t.uri)));
+        }
         if (!Player.local()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> setPanel(2)));
         e.add(new GlassMenu.Entry(c.getString(R.string.set_lyrics), Icons.LYRICS, false, () -> setPanel(1)));
@@ -1371,6 +1560,93 @@ final class NowPlaying extends FrameLayout {
         }
         Player.listeners.remove(playerL);
         Player.trackListeners.remove(trackL);
+    }
+
+    /** Compact pill showing active BT/USB DAC codec + bit/kHz and Hi-Res / Master shimmer styling. */
+    private static final class AudioBadge extends View {
+        private String text = "";
+        private int tier;
+        private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private final Matrix m = new Matrix();
+
+        AudioBadge(Context c) {
+            super(c);
+            stroke.setStyle(Paint.Style.STROKE);
+            tp.setTypeface(Ui.semibold);
+            tp.setTextSize(Ui.sp(9.8f));
+            tp.setTextAlign(Paint.Align.CENTER);
+        }
+
+        boolean hasText() { return text != null && !text.isEmpty(); }
+
+        void update(String t, int newTier) {
+            if (t == null) t = "";
+            if (t.equals(text) && newTier == tier) return;
+            text = t;
+            tier = newTier;
+            requestLayout();
+            invalidate();
+        }
+
+        @Override protected void onMeasure(int ws, int hs) {
+            int maxW = MeasureSpec.getSize(ws);
+            int h = MeasureSpec.getSize(hs);
+            int tw = text.isEmpty() ? 0 : (int) Math.ceil(tp.measureText(text)) + Ui.dp(18);
+            setMeasuredDimension(Math.min(maxW, Math.max(Ui.dp(40), tw)), h);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            if (text.isEmpty() || getWidth() <= 0) return;
+            float w = getWidth(), h = getHeight(), rad = h / 2f;
+            float pad = Ui.dpf(1);
+            r.set(pad, pad, w - pad, h - pad);
+            double t = SystemClock.uptimeMillis() / 1000.0;
+            if (tier == AudioInfo.TIER_MASTER) {
+                bg.setColor(0x48100E1C);
+                c.drawRoundRect(r, rad, rad, bg);
+                LinearGradient lg = new LinearGradient(0, 0, w, 0,
+                        new int[]{0xFFFFD56B, 0xFFFF6B9D, 0xFF7B61FF, 0xFF22D3EE, 0xFFFFD56B}, null, Shader.TileMode.REPEAT);
+                m.setTranslate((float) ((t * w * 0.45) % w), 0);
+                lg.setLocalMatrix(m);
+                stroke.setShader(lg);
+                stroke.setStrokeWidth(Ui.dpf(1.3f));
+                c.drawRoundRect(r, rad, rad, stroke);
+                stroke.setShader(null);
+                tp.setColor(0xFFFFF3CC);
+            } else if (tier == AudioInfo.TIER_BLUE) {
+                bg.setColor(0x400B1D36);
+                c.drawRoundRect(r, rad, rad, bg);
+                stroke.setShader(null);
+                stroke.setColor(0xE638BDF8);
+                stroke.setStrokeWidth(Ui.dpf(1.2f));
+                c.drawRoundRect(r, rad, rad, stroke);
+                tp.setColor(0xFFBAE6FD);
+            } else if (tier == AudioInfo.TIER_GOLD) {
+                bg.setColor(0x38282008);
+                c.drawRoundRect(r, rad, rad, bg);
+                stroke.setShader(null);
+                stroke.setColor(0xD9FFD56B);
+                stroke.setStrokeWidth(Ui.dpf(1.1f));
+                c.drawRoundRect(r, rad, rad, stroke);
+                tp.setColor(0xFFFFE082);
+            } else {
+                bg.setColor(0x28FFFFFF);
+                c.drawRoundRect(r, rad, rad, bg);
+                stroke.setShader(null);
+                stroke.setColor(0x33FFFFFF);
+                stroke.setStrokeWidth(Ui.dpf(0.75f));
+                c.drawRoundRect(r, rad, rad, stroke);
+                tp.setColor(0xE6FFFFFF);
+            }
+            String drawText = TextUtils.ellipsize(text, tp, Math.max(0, w - Ui.dpf(14)), TextUtils.TruncateAt.END).toString();
+            Paint.FontMetrics fm = tp.getFontMetrics();
+            float ty = h / 2f - (fm.ascent + fm.descent) / 2f;
+            c.drawText(drawText, w / 2f, ty, tp);
+            if (tier > AudioInfo.TIER_NONE && isShown()) postInvalidateDelayed(50);
+        }
     }
 
     // ================================================================ liquid-glass device pill
@@ -1675,12 +1951,84 @@ final class NowPlaying extends FrameLayout {
         void setPosition(long pos) {
             if (res == null || !res.synced) return;
             int idx = -1;
-            for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 250) idx = i;
+            for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 120) idx = i;
             if (idx != current) {
                 current = idx;
                 ensureLayouts();
                 if (SystemClock.uptimeMillis() > manualUntil) { manual = 0; offset.to(targetOffset()); }
-                invalidate();
+            }
+            invalidate();
+        }
+
+        /** Computes 0..1 progress along {@code line} at {@code pos}, using word timestamps when available. */
+        private float lineProgress(Lyrics.Line line, int idx, long pos) {
+            if (line.words != null && !line.words.isEmpty()) {
+                int totalChars = 0;
+                for (Lyrics.Word w : line.words) totalChars += Math.max(1, w.text.length());
+                if (totalChars <= 0) return 1f;
+                float filled = 0f;
+                for (Lyrics.Word w : line.words) {
+                    int len = Math.max(1, w.text.length());
+                    if (pos >= w.start + w.duration) {
+                        filled += len;
+                    } else if (pos > w.start) {
+                        filled += len * Ui.clamp((pos - w.start) / (float) Math.max(1L, w.duration), 0f, 1f);
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+                return Ui.clamp(filled / totalChars, 0f, 1f);
+            }
+            long start = line.time;
+            long end = line.endTime > start ? line.endTime
+                    : (idx + 1 < res.lines.size() ? res.lines.get(idx + 1).time : start + 4000L);
+            return Ui.clamp((pos - start) / (float) Math.max(250L, end - start), 0f, 1f);
+        }
+
+        /** Draws the active lyric line filling smoothly left-to-right across all wrapped rows with a soft gradient edge. */
+        private void drawFillingLine(Canvas c, StaticLayout l, float progress) {
+            // Base unfilled layer
+            tp.setShader(null);
+            tp.setColor(0x54FFFFFF);
+            l.draw(c);
+            if (progress <= 0.001f) return;
+
+            int rows = l.getLineCount();
+            float totalW = 0f;
+            for (int r = 0; r < rows; r++) totalW += Math.max(1f, l.getLineWidth(r));
+            float filledW = totalW * Ui.clamp(progress, 0f, 1f);
+            float acc = 0f;
+            float feather = Ui.dpf(20);
+
+            for (int r = 0; r < rows; r++) {
+                float rw = Math.max(1f, l.getLineWidth(r));
+                float rTop = l.getLineTop(r);
+                float rBot = l.getLineBottom(r);
+                float rLeft = l.getLineLeft(r);
+                if (filledW >= acc + rw) {
+                    c.save();
+                    c.clipRect(rLeft - Ui.dpf(4), rTop, rLeft + rw + Ui.dpf(4), rBot);
+                    tp.setShader(null);
+                    tp.setColor(0xFFFFFFFF);
+                    l.draw(c);
+                    c.restore();
+                } else if (filledW > acc) {
+                    float edge = rLeft + (filledW - acc);
+                    c.save();
+                    c.clipRect(rLeft - Ui.dpf(4), rTop, rLeft + rw + Ui.dpf(4), rBot);
+                    tp.setColor(0xFFFFFFFF);
+                    tp.setShader(new LinearGradient(edge - feather, 0, edge + feather * 0.45f, 0,
+                            new int[]{0xFFFFFFFF, 0xFFFFFFFF, 0x00FFFFFF},
+                            new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                    l.draw(c);
+                    tp.setShader(null);
+                    c.restore();
+                    break;
+                } else {
+                    break;
+                }
+                acc += rw;
             }
         }
 
@@ -1703,6 +2051,7 @@ final class NowPlaying extends FrameLayout {
 
         @Override protected void onDraw(Canvas c) {
             if (res == null) {
+                tp.setShader(null);
                 tp.setTextSize(Ui.sp(18));
                 tp.setColor(0x99FFFFFF);
                 c.drawText(message, Ui.dpf(28), Ui.dpf(40), tp);
@@ -1710,16 +2059,34 @@ final class NowPlaying extends FrameLayout {
                 return;
             }
             ensureLayouts();
+            long pos = Player.position();
+            if (res.synced) {
+                int idx = -1;
+                for (int i = 0; i < res.lines.size(); i++) if (res.lines.get(i).time <= pos + 120) idx = i;
+                if (idx != current) {
+                    current = idx;
+                    if (SystemClock.uptimeMillis() > manualUntil) { manual = 0; offset.to(targetOffset()); }
+                }
+            }
             int sc = c.saveLayer(0, 0, getWidth(), getHeight(), null);
             float y = -offset.value - manual + Ui.dpf(16);
             for (int i = 0; i < layouts.size(); i++) {
                 StaticLayout l = layouts.get(i);
                 if (y + l.getHeight() > 0 && y < getHeight()) {
-                    boolean on = !res.synced || i == current;
-                    tp.setColor(on ? 0xFFFFFFFF : 0x59FFFFFF);
                     c.save();
                     c.translate(Ui.dpf(28), y);
-                    l.draw(c);
+                    if (!res.synced) {
+                        tp.setShader(null);
+                        tp.setColor(0xE6FFFFFF);
+                        l.draw(c);
+                    } else if (i == current) {
+                        c.scale(1.03f, 1.03f, 0f, l.getHeight() * 0.5f);
+                        drawFillingLine(c, l, lineProgress(res.lines.get(i), i, pos));
+                    } else {
+                        tp.setShader(null);
+                        tp.setColor(i < current ? 0x45FFFFFF : 0x5CFFFFFF);
+                        l.draw(c);
+                    }
                     c.restore();
                 }
                 y += l.getHeight() + gap;
@@ -1728,6 +2095,8 @@ final class NowPlaying extends FrameLayout {
                     new float[]{0f, 0.08f, 0.85f, 1f}, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, getWidth(), getHeight(), fade);
             c.restoreToCount(sc);
+            // Smooth 60fps real-time fill while playing synced lyrics on screen
+            if (res.synced && Player.playing && isShown()) postInvalidateOnAnimation();
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {

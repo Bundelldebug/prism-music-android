@@ -24,6 +24,8 @@ final class BitPerfect {
     static final String PREF = "bit_perfect";
     /** Last outcome, for the settings row. */
     static String state = "";
+    /** Active bit-perfect stream format when running on a USB DAC (0 when inactive). */
+    static int activeRate, activeBits;
 
     static boolean supportedOs() { return Build.VERSION.SDK_INT >= 34; }
 
@@ -109,12 +111,16 @@ final class BitPerfect {
         }
         boolean ok = am.setPreferredMixerAttributes(media(), d, pick);
         AudioFormat f = pick.getFormat();
+        activeRate = ok ? f.getSampleRate() : 0;
+        activeBits = ok ? bitsOf(f.getEncoding()) : 0;
         state = ok ? c.getString(R.string.bp_active, khz(f.getSampleRate()), bitsOf(f.getEncoding()) + "bit")
                 : c.getString(R.string.bp_failed);
     }
 
     static void clear(Context c) {
         state = "";
+        activeRate = 0;
+        activeBits = 0;
         if (!supportedOs()) return;
         AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
         AudioDeviceInfo d = usbOut(am);

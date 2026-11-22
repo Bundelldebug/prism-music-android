@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.4";
+    static final String VERSION = "9.5.6";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -62,6 +62,13 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         SharedPreferences p = prefs(this);
         Ui.init(this, p);
         Spotify.init(p);
+        AudioInfo.init(this);
+        if (android.os.Build.VERSION.SDK_INT >= 31
+                && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                && !p.getBoolean("asked_bt_perm", false)) {
+            p.edit().putBoolean("asked_bt_perm", true).apply();
+            requestPermissions(new String[]{android.Manifest.permission.BLUETOOTH_CONNECT}, 42);
+        }
         Img.init(this);
         Player.activity = this;
         setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
@@ -652,6 +659,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     @Override protected void onDestroy() {
         if (Player.activity == this) Player.activity = null;
+        if (isFinishing() && !Player.playing) NpuAudio.release();
         // closing the app (Recents swipe / back) while Spotify plays in-app: the player keeps running in this process
         // under the media service, like any music app. Paused, or a re-creation: just let go of this window.
         if (isFinishing() && !(Player.playing && LocalMusic.PlaybackService.inApp())) {
@@ -714,6 +722,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
         if (code == 41) LocalMusic.load(this, this::reloadAll);
+        if (code == 42) AudioInfo.init(this, true);
     }
 
     void openAod() {
@@ -902,6 +911,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                     @Override public void ok(JSONObject o2) { Player.toast(R.string.added_to_queue); }
                     @Override public void err(int c, String m) { Player.toast(R.string.action_failed); }
                 })));
+        if (it.uri != null && it.uri.startsWith("spotify:track:")) {
+            e.add(new GlassMenu.Entry(getString(R.string.pl_add_track), Icons.QUEUE, false, () -> addToPlaylistDialog(it.uri)));
+        }
         JSONObject al = it.raw == null ? null : it.raw.optJSONObject("album");
         if (al != null && al.optString("uri", null) != null)
             e.add(new GlassMenu.Entry(getString(R.string.go_album), Icons.ALBUM, false, () -> openUri(al.optString("uri"), al.optString("name"))));
@@ -910,5 +922,124 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             e.add(new GlassMenu.Entry(getString(R.string.go_artist), Icons.ARTIST, false, () -> openUri(ar.optJSONObject(0).optString("uri"), ar.optJSONObject(0).optString("name"))));
         e.add(new GlassMenu.Entry(getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(it.uri)));
         GlassMenu.show(this, a, e);
+    }
+
+    /** Creates a new Spotify playlist via an alert dialog, then calls {@code onCreated} on success. */
+    void createPlaylistDialog(Runnable onCreated) {
+        if (!Spotify.loggedIn()) { Player.toast(R.string.login_needed); return; }
+        android.widget.LinearLayout form = new android.widget.LinearLayout(this);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        android.widget.EditText nameIn = new android.widget.EditText(this);
+        nameIn.setHint(R.string.pl_name_hint);
+        nameIn.setSingleLine(true);
+        form.addView(nameIn, Widgets.MW);
+        android.widget.EditText descIn = new android.widget.EditText(this);
+        descIn.setHint(R.string.pl_desc_hint);
+        form.addView(descIn, Widgets.MW);
+        android.widget.CheckBox pub = new android.widget.CheckBox(this);
+        pub.setText(R.string.pl_public);
+        pub.setChecked(false);
+        form.addView(pub, Widgets.MW);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.pl_create)
+                .setView(form)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.create, (d, w) -> {
+                    String name = nameIn.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    String desc = descIn.getText().toString().trim();
+                    Spotify.createPlaylist(name, desc, pub.isChecked(), new Spotify.Cb() {
+                        @Override public void ok(JSONObject o) {
+                            Player.toast(R.string.pl_created);
+                            if (onCreated != null) onCreated.run();
+                        }
+                        @Override public void err(int c, String m) {
+                            Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
+                        }
+                    });
+                }).show();
+    }
+
+    /** Edits an existing Spotify playlist's name and description. */
+    void editPlaylistDialog(String playlistId, String curName, String curDesc, java.util.function.BiConsumer<String, String> onUpdated) {
+        if (!Spotify.loggedIn()) { Player.toast(R.string.login_needed); return; }
+        android.widget.LinearLayout form = new android.widget.LinearLayout(this);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        android.widget.EditText nameIn = new android.widget.EditText(this);
+        nameIn.setHint(R.string.pl_name_hint);
+        nameIn.setSingleLine(true);
+        if (curName != null) nameIn.setText(curName);
+        form.addView(nameIn, Widgets.MW);
+        android.widget.EditText descIn = new android.widget.EditText(this);
+        descIn.setHint(R.string.pl_desc_hint);
+        if (curDesc != null) descIn.setText(curDesc);
+        form.addView(descIn, Widgets.MW);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.pl_edit)
+                .setView(form)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.save, (d, w) -> {
+                    String name = nameIn.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    String desc = descIn.getText().toString().trim();
+                    Spotify.editPlaylist(playlistId, name, desc, new Spotify.Cb() {
+                        @Override public void ok(JSONObject o) {
+                            Player.toast(R.string.pl_updated);
+                            if (onUpdated != null) onUpdated.accept(name, desc);
+                        }
+                        @Override public void err(int c, String m) {
+                            Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
+                        }
+                    });
+                }).show();
+    }
+
+    /** Shows the user's Spotify playlists to add {@code trackUri} (with a shortcut to create a new playlist). */
+    void addToPlaylistDialog(String trackUri) {
+        if (!Spotify.loggedIn() || trackUri == null || trackUri.isEmpty()) { Player.toast(R.string.login_needed); return; }
+        Spotify.get("/me/playlists?limit=50", new Spotify.Cb() {
+            @Override public void ok(JSONObject o) {
+                org.json.JSONArray arr = o.optJSONArray("items");
+                List<String> names = new ArrayList<>();
+                List<String> ids = new ArrayList<>();
+                names.add("+ " + getString(R.string.pl_create));
+                ids.add(null);
+                String myUid = Spotify.userId();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject pl = arr.optJSONObject(i);
+                        if (pl == null) continue;
+                        JSONObject owner = pl.optJSONObject("owner");
+                        String oid = owner == null ? "" : owner.optString("id", "");
+                        boolean collab = pl.optBoolean("collaborative", false);
+                        if (!myUid.isEmpty() && !oid.isEmpty() && !oid.equals(myUid) && !collab) continue;
+                        names.add(pl.optString("name"));
+                        ids.add(pl.optString("id"));
+                    }
+                }
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(R.string.pl_add_track)
+                        .setItems(names.toArray(new String[0]), (d, which) -> {
+                            String pid = ids.get(which);
+                            if (pid == null) {
+                                createPlaylistDialog(() -> addToPlaylistDialog(trackUri));
+                                return;
+                            }
+                            List<String> uris = new ArrayList<>();
+                            uris.add(trackUri);
+                            Spotify.addTracksToPlaylist(pid, uris, new Spotify.Cb() {
+                                @Override public void ok(JSONObject r) { Player.toast(R.string.pl_added); }
+                                @Override public void err(int c, String m) {
+                                    Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
+                                }
+                            });
+                        })
+                        .setNegativeButton(R.string.cancel, null)
+                        .show();
+            }
+            @Override public void err(int c, String m) { Player.toast(R.string.load_failed); }
+        });
     }
 }

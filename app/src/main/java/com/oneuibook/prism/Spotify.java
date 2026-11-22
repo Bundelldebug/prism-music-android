@@ -34,7 +34,7 @@ final class Spotify {
     static final String REDIRECT = "prismmusic://callback";
     static final String SCOPES = "user-read-private user-read-email user-read-playback-state user-modify-playback-state "
             + "user-read-currently-playing user-read-recently-played user-top-read user-library-read user-library-modify "
-            + "playlist-read-private playlist-read-collaborative user-follow-read streaming";
+            + "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-follow-read streaming";
     static final String API = "https://api.spotify.com/v1";
 
     static final ExecutorService IO = Executors.newFixedThreadPool(8);
@@ -391,6 +391,77 @@ final class Spotify {
             try { loadProfileSync(); } catch (Exception ignored) {}
             if (done != null) MAIN.post(done);
         });
+    }
+
+    static String userId() { return prefs == null ? "" : prefs.getString("user_id", ""); }
+
+    /** Creates a Spotify playlist under the current user's account. */
+    static void createPlaylist(String name, String description, boolean isPublic, Cb cb) {
+        IO.execute(() -> {
+            try {
+                String uid = userId();
+                if (uid == null || uid.isEmpty()) {
+                    loadProfileSync();
+                    uid = userId();
+                }
+                if (uid == null || uid.isEmpty()) throw new ApiError(401, "missing user id", "login");
+                JSONObject body = new JSONObject()
+                        .put("name", name)
+                        .put("description", description == null ? "" : description)
+                        .put("public", isPublic);
+                JSONObject o = call("POST", "/users/" + enc(uid) + "/playlists", body.toString());
+                if (cb != null) MAIN.post(() -> cb.ok(o));
+            } catch (Exception e) {
+                int code = e instanceof ApiError ? ((ApiError) e).code : 0;
+                String msg = String.valueOf(e.getMessage());
+                if (cb != null) MAIN.post(() -> cb.err(code, msg));
+            }
+        });
+    }
+
+    /** Edits a Spotify playlist's title and description. */
+    static void editPlaylist(String playlistId, String name, String description, Cb cb) {
+        try {
+            JSONObject body = new JSONObject()
+                    .put("name", name)
+                    .put("description", description == null ? "" : description);
+            send("PUT", "/playlists/" + enc(playlistId), body.toString(), cb);
+        } catch (Exception e) {
+            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
+        }
+    }
+
+    /** Adds one or more track URIs to a Spotify playlist. */
+    static void addTracksToPlaylist(String playlistId, java.util.List<String> uris, Cb cb) {
+        try {
+            JSONArray a = new JSONArray();
+            for (String u : uris) if (u != null && !u.isEmpty()) a.put(u);
+            JSONObject body = new JSONObject().put("uris", a);
+            send("POST", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
+        } catch (Exception e) {
+            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
+        }
+    }
+
+    /** Removes a track URI from a Spotify playlist. */
+    static void removeTrackFromPlaylist(String playlistId, String uri, Cb cb) {
+        try {
+            JSONArray tracks = new JSONArray().put(new JSONObject().put("uri", uri));
+            JSONObject body = new JSONObject().put("tracks", tracks);
+            send("DELETE", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
+        } catch (Exception e) {
+            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
+        }
+    }
+
+    /** Moves a single track inside a Spotify playlist from {@code from} to {@code insertBefore}. */
+    static void reorderPlaylistTrack(String playlistId, int from, int insertBefore, Cb cb) {
+        try {
+            JSONObject body = new JSONObject().put("range_start", from).put("insert_before", insertBefore);
+            send("PUT", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
+        } catch (Exception e) {
+            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
+        }
     }
 
     // ---- helpers ----

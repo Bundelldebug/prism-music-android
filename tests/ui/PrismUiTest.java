@@ -660,6 +660,105 @@ public class PrismUiTest {
         } catch (Exception e) { throw new RuntimeException(e); }
         a.np.close(); idle(600);
 
+        // [9] 9.5.5 regression checks:
+        // (a) NPU audio enhancer SoC gate: SM8750 / MT6991 / S5E9955 and newer only
+        assertTrue("SM8750 supported", NpuAudio.isSupportedSoc("SM8750"));
+        assertTrue("SM8850 supported", NpuAudio.isSupportedSoc("SM8850"));
+        assertTrue("MT6991 supported", NpuAudio.isSupportedSoc("MT6991"));
+        assertTrue("Dimensity 9400 supported", NpuAudio.isSupportedSoc("MediaTek Dimensity 9400"));
+        assertTrue("S5E9955 supported", NpuAudio.isSupportedSoc("S5E9955"));
+        assertTrue("Exynos 2500 supported", NpuAudio.isSupportedSoc("Samsung Exynos 2500"));
+        assertTrue("SM8650 rejected", !NpuAudio.isSupportedSoc("SM8650"));
+        assertTrue("MT6989 rejected", !NpuAudio.isSupportedSoc("MT6989"));
+        assertTrue("S5E9945 rejected", !NpuAudio.isSupportedSoc("S5E9945"));
+        assertTrue("Exynos 2400 rejected", !NpuAudio.isSupportedSoc("Exynos 2400"));
+
+        // (b) Spotify scopes include playlist-modify-public and playlist-modify-private
+        assertTrue("playlist-modify-public scope", Spotify.SCOPES.contains("playlist-modify-public"));
+        assertTrue("playlist-modify-private scope", Spotify.SCOPES.contains("playlist-modify-private"));
+
+        // (c) Multi-provider word-synced lyrics parsers (NetEase YRC + Enhanced LRC)
+        Lyrics.Result yrc = Lyrics.parseYrc("[1000,3000](1000,1500,0)안녕(2500,1500,0)하세요");
+        assertTrue("YRC synced", yrc != null && yrc.synced && yrc.lines.size() == 1);
+        assertEquals("YRC text", "안녕하세요", yrc.lines.get(0).text);
+        assertEquals("YRC words", 2, yrc.lines.get(0).words.size());
+        Lyrics.Result elrc = Lyrics.parse("[00:01.00]<00:01.00>Hello <00:02.00>World", "");
+        assertTrue("Enhanced LRC synced", elrc != null && elrc.synced && elrc.lines.size() == 1);
+        assertEquals("Enhanced LRC words", 2, elrc.lines.get(0).words.size());
+
+        // [10] 9.5.6 regression checks: 4-tier Hi-Res, Bit-Perfect = Master, SSC/SSC-UHQ, device icons, friendly SoC names
+        assertEquals("standard audio", AudioInfo.TIER_NONE, AudioInfo.evaluateHiResTier(false, 16, 48f, false));
+        assertEquals("1 cond (assist) = Gold", AudioInfo.TIER_GOLD, AudioInfo.evaluateHiResTier(true, 16, 48f, false));
+        assertEquals("1 cond (bit>16) = Gold", AudioInfo.TIER_GOLD, AudioInfo.evaluateHiResTier(false, 24, 48f, false));
+        assertEquals("1 cond (khz>=96) = Gold", AudioInfo.TIER_GOLD, AudioInfo.evaluateHiResTier(false, 16, 96f, false));
+        assertEquals("2 conds (bit+khz) = Blue", AudioInfo.TIER_BLUE, AudioInfo.evaluateHiResTier(false, 24, 96f, false));
+        assertEquals("2 conds (assist+bit) = Blue", AudioInfo.TIER_BLUE, AudioInfo.evaluateHiResTier(true, 24, 48f, false));
+        assertEquals("3 conds = Master", AudioInfo.TIER_MASTER, AudioInfo.evaluateHiResTier(true, 24, 96f, false));
+        assertEquals("Bit-Perfect always Master", AudioInfo.TIER_MASTER, AudioInfo.evaluateHiResTier(false, 16, 44.1f, true));
+
+        // SSC / SSC-UHQ codec mapping
+        assertEquals("SSC", AudioInfo.codecTypeName(7, "Samsung Seamless Codec", 24, 48f));
+        assertEquals("SSC-UHQ", AudioInfo.codecTypeName(7, "Samsung Seamless Codec", 24, 96f));
+        assertEquals("SSC-UHQ", AudioInfo.codecTypeName(-1, "SSC-UHQ", 24, 96f));
+
+        // Dedicated device icons
+        assertEquals("Galaxy Buds icon", Icons.BUDS, AudioInfo.deviceIconForName("Galaxy Buds3 Pro", true, false, false));
+        assertEquals("Headphones icon", Icons.HEADPHONES, AudioInfo.deviceIconForName("Sony WH-1000XM5", true, false, false));
+        assertEquals("Third-party earbuds icon", Icons.EARBUDS, AudioInfo.deviceIconForName("AirPods Pro", true, false, false));
+        assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA17", false, true, false));
+
+        // Friendly SoC marketing names
+        assertEquals("스냅드래곤 8 엘리트 5세대", NpuAudio.friendlySocName(app, "SM8850"));
+        assertEquals("스냅드래곤 8 엘리트", NpuAudio.friendlySocName(app, "SM8750"));
+        assertEquals("디멘시티 9400", NpuAudio.friendlySocName(app, "MT6991"));
+        assertEquals("엑시노스 2500", NpuAudio.friendlySocName(app, "S5E9955"));
+
+        // Capture Bit-Perfect Assist settings screen + Gold / Blue / Master player effects (including A style cover-below badge)
+        NpuAudio.testSupportedOverride = Boolean.TRUE;
+        NpuAudio.setEnabled(app, true);
+        AudioInfo.OutputSpec mockSpec = new AudioInfo.OutputSpec();
+        mockSpec.deviceName = "Galaxy Buds3 Pro";
+        mockSpec.codec = "SSC-UHQ";
+        mockSpec.bits = 24;
+        mockSpec.khz = 96f;
+        mockSpec.external = true;
+        mockSpec.isBt = true;
+        AudioInfo.testSpec = mockSpec;
+
+        a.push(new Settings.BitPerfectAssistPage(a)); idle(600);
+        shot(a, "74_bitperfect_assist");
+        a.pop(); idle(400);
+
+        // 3 conditions Master exclusive effect (Assist + 24bit + 96kHz)
+        a.np.open(); idle(900);
+        for (Runnable r : new java.util.ArrayList<>(Player.listeners)) r.run();
+        idle(400);
+        shot(a, "76_player_hires_master");
+
+        // 2 conditions Luminous Blue glow effect (Assist off, 24bit + 96kHz SSC-UHQ)
+        NpuAudio.setEnabled(app, false);
+        for (Runnable r : new java.util.ArrayList<>(Player.listeners)) r.run();
+        idle(400);
+        shot(a, "77_player_hires_blue");
+
+        // 1 condition Gold effect (Assist off, 24bit / 48kHz SSC)
+        mockSpec.codec = "SSC";
+        mockSpec.khz = 48f;
+        for (Runnable r : new java.util.ArrayList<>(Player.listeners)) r.run();
+        idle(400);
+        shot(a, "75_player_hires_gold");
+
+        // A style check: codec badge sits cleanly below album cover with zero overlap
+        Ui.gStyle = false;
+        MainActivity.prefs(app).edit().putString("player_style", "prism").commit();
+        a.np.applyStyle();
+        idle(400);
+        shot(a, "78_player_a_style_badge");
+
+        a.np.close(); idle(500);
+        AudioInfo.testSpec = null;
+        NpuAudio.testSupportedOverride = null;
+
         // restore defaults
         Ui.gStyle = false;
         MainActivity.prefs(app).edit().putString("accent_color", "red").putString("player_style", "prism").putString("source", "spotify").commit();

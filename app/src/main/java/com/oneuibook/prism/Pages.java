@@ -712,7 +712,16 @@ final class Pages {
                 default: path = "/me/top/tracks?limit=50&time_range=" + kind.substring(4); break;
             }
             if (isTracks()) addPlayButtons();
+            else if ("playlists".equals(kind)) addCreatePlaylistButton();
             more(path);
+        }
+
+        private void addCreatePlaylistButton() {
+            LinearLayout row = new LinearLayout(main);
+            row.setPadding(Ui.dp(16), Ui.dp(8), Ui.dp(16), Ui.dp(10));
+            row.addView(DetailPage.pillButton(main, Icons.QUEUE, main.getString(R.string.pl_create), true,
+                    v -> main.createPlaylistDialog(this::rebuild)), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(46)));
+            content.addView(row, 0 + (bigTitle != null ? 1 : 0));
         }
 
         private boolean isTracks() { return kind.equals("liked") || kind.equals("recent") || kind.startsWith("top:"); }
@@ -890,14 +899,61 @@ final class Pages {
             tracks.clear();
             tracks.addAll(l);
             if (l.isEmpty()) { list.addView(Widgets.caption(main, main.getString(R.string.empty))); return; }
+            boolean isPl = "playlist".equals(item.type);
             for (int i = 0; i < l.size(); i++) {
                 final int idx = i;
                 Widgets.Item it = l.get(i);
-                list.addView(Widgets.trackRow(main, it, numbered ? i + 1 : 0, v -> playAt(idx, false), v -> main.trackMenu(it, v)), Widgets.MW);
+                View.OnClickListener moreClick = isPl
+                        ? (v -> playlistTrackMenu(it, idx, v))
+                        : (v -> main.trackMenu(it, v));
+                list.addView(Widgets.trackRow(main, it, numbered ? i + 1 : 0, v -> playAt(idx, false), moreClick), Widgets.MW);
             }
             long total = 0;
             for (Widgets.Item it : l) if (it.raw != null) total += it.raw.optLong("duration_ms");
             list.addView(Widgets.caption(main, main.getString(R.string.n_tracks, l.size()) + " · " + main.getString(R.string.n_minutes, total / 60000)));
+        }
+
+        /** Track menu inside a Spotify playlist: includes remove & reorder actions for owned/editable playlists. */
+        private void playlistTrackMenu(Widgets.Item it, int idx, View anchor) {
+            float[] o = Glass.abs(anchor);
+            android.graphics.RectF a = new android.graphics.RectF(o[0], o[1], o[0] + anchor.getWidth(), o[1] + anchor.getHeight());
+            List<GlassMenu.Entry> e = new ArrayList<>();
+            e.add(new GlassMenu.Entry(main.getString(R.string.play), Icons.PLAY_SMALL, false, () -> playAt(idx, false)));
+            e.add(new GlassMenu.Entry(main.getString(R.string.add_to_queue), Icons.LIST, false, () ->
+                    Spotify.send("POST", "/me/player/queue?uri=" + Spotify.enc(it.uri), null, new Spotify.Cb() {
+                        @Override public void ok(JSONObject o2) { Player.toast(R.string.added_to_queue); }
+                        @Override public void err(int c, String m) { Player.toast(R.string.action_failed); }
+                    })));
+            if (it.uri != null && it.uri.startsWith("spotify:track:")) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_add_track), Icons.QUEUE, false, () -> main.addToPlaylistDialog(it.uri)));
+                if (idx > 0) {
+                    e.add(new GlassMenu.Entry(main.getString(R.string.pl_move_up), Icons.CHEVRON_UP, false, () ->
+                            Spotify.reorderPlaylistTrack(item.id, idx, idx - 1, new Spotify.Cb() {
+                                @Override public void ok(JSONObject r) { loadPlaylist(); }
+                                @Override public void err(int c, String m) { Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed); }
+                            })));
+                }
+                if (idx < tracks.size() - 1) {
+                    e.add(new GlassMenu.Entry(main.getString(R.string.pl_move_down), Icons.CHEVRON, false, () ->
+                            Spotify.reorderPlaylistTrack(item.id, idx, idx + 2, new Spotify.Cb() {
+                                @Override public void ok(JSONObject r) { loadPlaylist(); }
+                                @Override public void err(int c, String m) { Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed); }
+                            })));
+                }
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_remove_track), Icons.CLOSE, false, () ->
+                        Spotify.removeTrackFromPlaylist(item.id, it.uri, new Spotify.Cb() {
+                            @Override public void ok(JSONObject r) { Player.toast(R.string.pl_removed); loadPlaylist(); }
+                            @Override public void err(int c, String m) { Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed); }
+                        })));
+            }
+            JSONObject al = it.raw == null ? null : it.raw.optJSONObject("album");
+            if (al != null && al.optString("uri", null) != null)
+                e.add(new GlassMenu.Entry(main.getString(R.string.go_album), Icons.ALBUM, false, () -> main.openUri(al.optString("uri"), al.optString("name"))));
+            JSONArray ar = it.raw == null ? null : it.raw.optJSONArray("artists");
+            if (ar != null && ar.length() > 0)
+                e.add(new GlassMenu.Entry(main.getString(R.string.go_artist), Icons.ARTIST, false, () -> main.openUri(ar.optJSONObject(0).optString("uri"), ar.optJSONObject(0).optString("name"))));
+            e.add(new GlassMenu.Entry(main.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(it.uri)));
+            GlassMenu.show(main, a, e);
         }
 
         private void failed() {
@@ -1150,6 +1206,20 @@ final class Pages {
 
         void openMenu(android.graphics.RectF anchor) {
             List<GlassMenu.Entry> e = new ArrayList<>();
+            if ("playlist".equals(item.type)) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_edit), Icons.APPEARANCE, false, () -> {
+                    String curDesc = item.raw == null ? "" : item.raw.optString("description", "");
+                    main.editPlaylistDialog(item.id, item.title, curDesc, (newName, newDesc) -> {
+                        item.title = newName;
+                        title = newName;
+                        if (item.raw != null) {
+                            try { item.raw.put("name", newName).put("description", newDesc); } catch (Exception ignored) {}
+                        }
+                        main.syncHeader();
+                        rebuild();
+                    });
+                }));
+            }
             e.add(new GlassMenu.Entry(main.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(item.uri)));
             e.add(new GlassMenu.Entry(main.getString(R.string.shuffle), Icons.SHUFFLE, false, () -> playAt(0, true)));
             GlassMenu.show(main, anchor, e);
