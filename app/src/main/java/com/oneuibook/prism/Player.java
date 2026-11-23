@@ -63,8 +63,14 @@ final class Player {
     private static final Runnable POLL = new Runnable() {
         @Override public void run() {
             if (!polling) return;
-            refresh();
-            Spotify.MAIN.postDelayed(this, fast ? 1500 : 4000);
+            // In-app SpotifyWeb SDK already pushes real-time track/position/pause state with 0 Web API calls!
+            // Keep background polling very light (45s in-app, 12-15s remote) and NEVER poll while 429 cooldown is active.
+            if (!Spotify.isRateLimited()) {
+                boolean sdkHasState = SpotifyWeb.active() && track != null;
+                if (!sdkHasState || SystemClock.elapsedRealtime() - lastRefresh >= 42000) refresh();
+            }
+            long nextDelay = (SpotifyWeb.active() && track != null) ? 45000 : (fast ? 12000 : 16000);
+            Spotify.MAIN.postDelayed(this, nextDelay);
         }
     };
 
@@ -97,10 +103,10 @@ final class Player {
 
     static void refresh() {
         if (local()) { LocalMusic.sync(); return; }
-        if (!Spotify.loggedIn()) return;
+        if (!Spotify.loggedIn() || Spotify.isRateLimited()) return;
         final long requested = SystemClock.elapsedRealtime();
-        // the in-app player reports state many times per song; one /me/player request per second is plenty
-        if (requested - lastRefresh < 1000) return;
+        // Throttle /me/player polls so rapid UI events never burn through 2026 Dev Mode rolling rate limits
+        if (requested - lastRefresh < 4000) return;
         lastRefresh = requested;
         Spotify.get("/me/player?additional_types=track,episode", new Spotify.Cb() {
             @Override public void ok(JSONObject o) {
@@ -136,7 +142,8 @@ final class Player {
         shuffle = o.optBoolean("shuffle_state");
         String serverRepeat = o.optString("repeat_state", "off");
         repeat = wantedRepeat();
-        if (!serverRepeat.equals(repeat) && SystemClock.elapsedRealtime() - lastRepeatFix > 3000) {
+        // Only sync repeat on an actual track change (never hammer PUT /me/player/repeat every 3s!)
+        if (changed && !serverRepeat.equals(repeat) && !Spotify.isRateLimited() && SystemClock.elapsedRealtime() - lastRepeatFix > 15000) {
             lastRepeatFix = SystemClock.elapsedRealtime();
             applyWantedRepeat();
         }
@@ -169,14 +176,29 @@ final class Player {
         boolean wasPlaying = playing;
         playing = !playing;
         optimistic();
+        if (SpotifyWeb.active()) { SpotifyWeb.togglePlay(); return; }
         command("PUT", wasPlaying ? "/me/player/pause" : "/me/player/play", null, null);
     }
 
-    static void next() { if (local()) { LocalMusic.next(); return; } SpotifyWeb.switchTrack(() -> command("POST", "/me/player/next", null, null)); progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic(); later(); }
+    static void next() {
+        if (local()) { LocalMusic.next(); return; }
+        if (SpotifyWeb.active()) {
+            SpotifyWeb.switchTrack(SpotifyWeb::nextTrack);
+            progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic();
+            return;
+        }
+        SpotifyWeb.switchTrack(() -> command("POST", "/me/player/next", null, null));
+        progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic(); later();
+    }
 
     static void prev() {
         if (local()) { LocalMusic.prev(); return; }
         if (position() > 3000) { seek(0); return; }
+        if (SpotifyWeb.active()) {
+            SpotifyWeb.switchTrack(SpotifyWeb::prevTrack);
+            progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic();
+            return;
+        }
         SpotifyWeb.switchTrack(() -> command("POST", "/me/player/previous", null, null));
         progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic(); later();
     }
@@ -186,6 +208,7 @@ final class Player {
         progress = ms;
         stamp = SystemClock.elapsedRealtime();
         optimistic();
+        if (SpotifyWeb.active()) { SpotifyWeb.seekTo(ms); return; }
         command("PUT", "/me/player/seek?position_ms=" + ms, null, null);
     }
 
@@ -403,7 +426,10 @@ final class Player {
         Spotify.send("PUT", "/me/player/repeat?state=" + w, null, null);
     }
 
-    private static void later() { Spotify.MAIN.postDelayed(Player::refresh, 700); }
+    private static void later() {
+        // When in-app SpotifyWeb SDK is active, onState() delivers the updated track within ~150ms for 0 API calls
+        if (!SpotifyWeb.active()) Spotify.MAIN.postDelayed(Player::refresh, 1500);
+    }
 
     /** Forces an immediate /me/player sync, bypassing throttle and optimistic guard, so cover never gets stuck on a failed switch. */
     private static void refreshForce() {

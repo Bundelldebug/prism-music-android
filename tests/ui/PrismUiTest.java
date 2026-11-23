@@ -964,11 +964,22 @@ public class PrismUiTest {
             // (a) Player.stripDeviceId prevents duplicate device_id=...&device_id=... on playback recovery
             assertEquals("/me/player/play", Player.stripDeviceId("/me/player/play?device_id=old123"));
             assertEquals("/me/player/play?foo=1", Player.stripDeviceId("/me/player/play?foo=1&device_id=old123"));
-            // (b) Spotify.playable preserves user library playlists (even empty) with zero network calls
+            // (b) Spotify.playable keeps ONLY owned & collaborative playlists when user_id is known (hides unplayable 3rd-party & Spotify playlists with 0 network calls!)
+            Spotify.prefs.edit().putString("user_id", "me").commit();
             org.json.JSONArray myPls = new org.json.JSONArray()
                     .put(new org.json.JSONObject().put("type", "playlist").put("id", "my1").put("name", "My Empty PL")
-                            .put("owner", new org.json.JSONObject().put("id", "me")).put("items", new org.json.JSONObject().put("total", 0)));
-            assertEquals("User library playlists never dropped", 1, Spotify.playable(myPls, true).length());
+                            .put("owner", new org.json.JSONObject().put("id", "me")).put("collaborative", false).put("items", new org.json.JSONObject().put("total", 0)))
+                    .put(new org.json.JSONObject().put("type", "playlist").put("id", "collab1").put("name", "Collab PL")
+                            .put("owner", new org.json.JSONObject().put("id", "friend")).put("collaborative", true).put("items", new org.json.JSONObject().put("total", 5)))
+                    .put(new org.json.JSONObject().put("type", "playlist").put("id", "other1").put("name", "Other User PL")
+                            .put("owner", new org.json.JSONObject().put("id", "stranger")).put("collaborative", false).put("items", new org.json.JSONObject().put("total", 20)))
+                    .put(new org.json.JSONObject().put("type", "playlist").put("id", "sp1").put("name", "Spotify Editorial")
+                            .put("owner", new org.json.JSONObject().put("id", "spotify")).put("collaborative", false).put("items", new org.json.JSONObject().put("total", 50)));
+            org.json.JSONArray filteredPls = Spotify.playable(myPls, true);
+            assertEquals("Only owned + collaborative playlists survive", 2, filteredPls.length());
+            assertEquals("my1", filteredPls.optJSONObject(0).optString("id"));
+            assertEquals("collab1", filteredPls.optJSONObject(1).optString("id"));
+            Spotify.prefs.edit().remove("user_id").commit();
             // (c) Album detail recovers tracks via /search?type=track even when /albums/{id} & /albums/{id}/tracks fail
             java.util.List<String> seenReqs = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
             Spotify.fixtures = req -> {

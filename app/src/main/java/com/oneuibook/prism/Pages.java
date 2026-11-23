@@ -337,7 +337,7 @@ final class Pages {
                 @Override public void err(int code, String msg) { s1.setVisibility(GONE); }
             });
 
-            loadRail(s2, R.string.home_playlists, "/me/playlists?limit=30", "items", 92);
+            loadRail(s2, R.string.home_playlists, "/me/playlists?limit=50", "items", 92);
 
             s3.addView(Widgets.section(m, m.getString(R.string.home_for_you)));
             Spotify.get("/me/top/tracks?limit=18&time_range=short_term", new Spotify.Cb() {
@@ -1256,9 +1256,23 @@ final class Pages {
             GlassMenu.show(main, a, e);
         }
 
+        private boolean isOwnedPlaylist() {
+            if (isAlbumItem() || item.raw == null) return false;
+            if (item.raw.optBoolean("collaborative", false)) return true;
+            JSONObject ow = item.raw.optJSONObject("owner");
+            String me = Spotify.userId();
+            return ow != null && !me.isEmpty() && me.equals(ow.optString("id"));
+        }
+
         private void failed(int code, String msg) {
+            // Only hide third-party playlists when Spotify explicitly refuses them with 403 (NEVER on 429 and NEVER own playlists!)
+            if (code == 403 && "playlist".equals(item.type) && !isOwnedPlaylist()) {
+                Spotify.block(item.id);
+            }
             list.removeAllViews();
-            String codeLabel = code > 0 ? ("HTTP " + code) : (msg != null && !msg.isEmpty() ? msg : "net");
+            String codeLabel;
+            if (code == 429 && !Spotify.lastRateReason.isEmpty()) codeLabel = Spotify.lastRateReason;
+            else codeLabel = code > 0 ? ("HTTP " + code) : (msg != null && !msg.isEmpty() ? msg : "net");
             String text;
             if (code == 429) {
                 text = main.getString(R.string.rate_limited_retry, codeLabel);
@@ -1267,7 +1281,7 @@ final class Pages {
             } else {
                 text = main.getString(R.string.playlist_tracks_unavailable, codeLabel);
             }
-            // Never permanently block/hide the user's playlists or kick them back! Always offer Retry + Open in Spotify.
+            // Never kick the user back on error: always offer Retry + Open in Spotify.
             list.addView(Widgets.messageCard(main, Icons.REPEAT, text, main.getString(R.string.retry), v -> {
                 Spotify.cooldownUntil = 0;
                 list.removeAllViews();
@@ -1726,12 +1740,12 @@ final class Pages {
         }
 
         /**
-         * 9.5.7 horizontal rail UI tuned for 2026 Spotify Development Mode (gentle 2-3 spaced calls instead of 9-16 burst calls!):
-         *   0) Instant 0-call seed from loadArtistTracks() (already merged as soon as Popular Songs arrive)
-         *   1) Combined GET /artists/{id}/albums?include_groups=album,single&limit=10 (max 2 pages = 20 releases) +
-         *      1 call for appears_on,compilation (120ms spaced, aborts immediately on 400/403/404/429)
-         *   2) Free-text album search (/search?type=album&q=<name>) filtered by artist ID / normalized name
-         *   3) Second page of track search (offset=10) if total releases < 6
+         * 9.5.7 horizontal rail UI with clean per-group paced loading (now that SpotifyWeb SDK eliminates /me/player polling!):
+         *   0) Instant 0-call seed from loadArtistTracks()
+         *   1) Per-group GET /artists/{id}/albums?include_groups=<g>&limit=10 (album: up to 20, single: up to 30,
+         *      appears_on: 10, compilation: 10), paced by Spotify.paceRequest(), aborting immediately on 403/404/429
+         *   2) Free-text album search (/search?type=album&q=<name>) fallback when direct endpoint is blocked
+         *   3) Second page of track search (offset=10) if still sparse
          */
         private void loadAllArtistGroups(int gen) {
             Spotify.IO.execute(() -> {
@@ -1743,76 +1757,59 @@ final class Pages {
                 boolean directWorked = false;
                 String workingMkt = "";
 
-                // Step 1: Lean combined calls (album,single first, then appears_on,compilation) -> only 2-3 calls total!
+                // Step 1: Per-group /artists/{id}/albums (avoids Spotify's multi-group pagination bug; stops immediately on 403/404/429)
                 if (!wantId.isEmpty()) {
-                    JSONObject first = null;
-                    int firstErr = 0;
-                    try {
-                        first = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=album,single&limit=10&offset=0");
-                    } catch (Spotify.ApiError ae) {
-                        firstErr = ae.code;
-                        if (ae.code == 429) rateLimited = true;
-                    } catch (Exception ignored) { firstErr = -1; }
-
-                    JSONArray firstItems = first == null ? null : first.optJSONArray("items");
-                    if (!rateLimited && (firstItems == null || firstItems.length() == 0) && !mkt.isEmpty() && firstErr != 403 && firstErr != 404) {
-                        try {
-                            JSONObject p2 = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=album,single&limit=10&offset=0" + mkt);
-                            JSONArray a2 = p2 == null ? null : p2.optJSONArray("items");
-                            if (a2 != null && a2.length() > 0) {
-                                first = p2;
-                                firstItems = a2;
-                                workingMkt = mkt;
-                                firstErr = 0;
+                    String[] groups = {"album", "single", "appears_on", "compilation"};
+                    int[] maxOffsets = {20, 30, 10, 10};
+                    boolean stopDirect = false;
+                    for (int gi = 0; gi < groups.length && !stopDirect; gi++) {
+                        for (int off = 0; off < maxOffsets[gi] && !stopDirect; off += 10) {
+                            JSONObject o = null;
+                            try {
+                                o = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off + workingMkt);
+                            } catch (Spotify.ApiError ae) {
+                                if (ae.code == 429) rateLimited = true;
+                                if (errLog.length() == 0) {
+                                    errLog.append(ae.code == 429 && !Spotify.lastRateReason.isEmpty() ? Spotify.lastRateReason : ("albums " + ae.code));
+                                }
+                                stopDirect = true;
+                                break;
+                            } catch (Exception ignored) {
+                                if (errLog.length() == 0) errLog.append("albums net");
+                                stopDirect = true;
+                                break;
                             }
-                        } catch (Spotify.ApiError ae2) {
-                            if (firstErr == 0) firstErr = ae2.code;
-                            if (ae2.code == 429) rateLimited = true;
-                        } catch (Exception ignored) {}
-                    }
-
-                    if (firstItems != null && firstItems.length() > 0) {
-                        directWorked = true;
-                        if (mergeAlbumsIntoDiscog(gen, firstItems, -1, wantId, wantName)) {
-                            Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                            JSONArray a = o == null ? null : o.optJSONArray("items");
+                            if ((a == null || a.length() == 0) && gi == 0 && off == 0 && workingMkt.isEmpty() && !mkt.isEmpty()) {
+                                try {
+                                    JSONObject p2 = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=album&limit=10&offset=0" + mkt);
+                                    JSONArray a2 = p2 == null ? null : p2.optJSONArray("items");
+                                    if (a2 != null && a2.length() > 0) {
+                                        o = p2;
+                                        a = a2;
+                                        workingMkt = mkt;
+                                    }
+                                } catch (Spotify.ApiError ae2) {
+                                    if (ae2.code == 429) rateLimited = true;
+                                    stopDirect = true;
+                                    break;
+                                } catch (Exception ignored) {}
+                            }
+                            if (a == null || a.length() == 0) break;
+                            directWorked = true;
+                            if (mergeAlbumsIntoDiscog(gen, a, gi, wantId, wantName)) {
+                                Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                            }
+                            String next = o.optString("next", null);
+                            if (next == null || "null".equals(next)) break;
                         }
-                        // Page 2 of album,single (up to 20 main releases) with gentle 120ms spacing
-                        String next1 = first.optString("next", null);
-                        if (next1 != null && !"null".equals(next1) && !rateLimited) {
-                            try {
-                                if (Spotify.fixtures == null) Thread.sleep(120);
-                                JSONObject o2 = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=album,single&limit=10&offset=10" + workingMkt);
-                                JSONArray a2 = o2 == null ? null : o2.optJSONArray("items");
-                                if (a2 != null && a2.length() > 0 && mergeAlbumsIntoDiscog(gen, a2, -1, wantId, wantName)) {
-                                    Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
-                                }
-                            } catch (Spotify.ApiError ae) {
-                                if (ae.code == 429) rateLimited = true;
-                            } catch (Exception ignored) {}
-                        }
-                        // 1 combined call for appears_on + compilation
-                        if (!rateLimited) {
-                            try {
-                                if (Spotify.fixtures == null) Thread.sleep(120);
-                                JSONObject o3 = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=appears_on,compilation&limit=10&offset=0" + workingMkt);
-                                JSONArray a3 = o3 == null ? null : o3.optJSONArray("items");
-                                if (a3 != null && a3.length() > 0 && mergeAlbumsIntoDiscog(gen, a3, -1, wantId, wantName)) {
-                                    Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
-                                }
-                            } catch (Spotify.ApiError ae) {
-                                if (ae.code == 429) rateLimited = true;
-                            } catch (Exception ignored) {}
-                        }
-                    } else if (firstErr != 0) {
-                        errLog.append("albums ").append(firstErr > 0 ? firstErr : "net");
                     }
                 }
 
-                // Step 2: Free-text album search (runs whenever direct endpoint failed or returned < 4 releases)
+                // Step 2: Free-text album search (runs whenever direct endpoint failed or returned very few releases)
                 if (!rateLimited && (!directWorked || discogCount(gen) < 4) && item.title != null && !item.title.trim().isEmpty()) {
                     for (int off = 0; off < 20 && !rateLimited; off += 10) {
                         try {
-                            if (off > 0 && Spotify.fixtures == null) Thread.sleep(120);
                             JSONObject s = Spotify.callCached("/search?type=album&limit=10&offset=" + off + "&q=" + Spotify.enc(item.title));
                             JSONObject albObj = s == null ? null : s.optJSONObject("albums");
                             JSONArray a = albObj == null ? null : albObj.optJSONArray("items");
@@ -1831,7 +1828,7 @@ final class Pages {
                         } catch (Spotify.ApiError ae) {
                             if (ae.code == 429) rateLimited = true;
                             if (errLog.length() > 0) errLog.append(" · ");
-                            errLog.append("search ").append(ae.code);
+                            errLog.append(ae.code == 429 && !Spotify.lastRateReason.isEmpty() ? Spotify.lastRateReason : ("search " + ae.code));
                             break;
                         } catch (Exception ignored) { break; }
                     }
@@ -1840,7 +1837,6 @@ final class Pages {
                 // Step 3: Second page of track search to catch more releases when direct album endpoint is blocked
                 if (!rateLimited && !directWorked && discogCount(gen) < 8 && item.title != null && !item.title.trim().isEmpty()) {
                     try {
-                        if (Spotify.fixtures == null) Thread.sleep(120);
                         JSONObject s = Spotify.callCached("/search?type=track&limit=10&offset=10&q=" + Spotify.enc("artist:\"" + item.title + "\""));
                         JSONObject trObj = s == null ? null : s.optJSONObject("tracks");
                         JSONArray a = trObj == null ? null : trObj.optJSONArray("items");
@@ -1850,8 +1846,9 @@ final class Pages {
                     } catch (Exception ignored) {}
                 }
 
+                final boolean partialFail = rateLimited || (!directWorked && errLog.length() > 0);
                 final String errSummary = errLog.length() > 0 ? errLog.toString() : "empty";
-                Spotify.MAIN.post(() -> finishDiscog(gen, errSummary));
+                Spotify.MAIN.post(() -> finishDiscog(gen, partialFail, errSummary));
             });
         }
 
@@ -1960,13 +1957,15 @@ final class Pages {
             }
         }
 
-        private void finishDiscog(int gen, String errSummary) {
+        private void finishDiscog(int gen, boolean partialFail, String errSummary) {
             if (gen != discogGen) return;
             renderDiscogBuckets(gen);
             if (discogStatusSlot == null) return;
             discogStatusSlot.removeAllViews();
-            if (discogCount(gen) > 0) return;
-            TextView retry = Ui.text(main, main.getString(R.string.artist_releases_retry, errSummary), 13, Ui.medium, Ui.text2());
+            int count = discogCount(gen);
+            if (count > 0 && !partialFail) return;
+            int msgRes = count > 0 ? R.string.artist_releases_partial : R.string.artist_releases_retry;
+            TextView retry = Ui.text(main, main.getString(msgRes, errSummary), 13, Ui.medium, count > 0 ? Ui.ACCENT : Ui.text2());
             retry.setSingleLine(false);
             retry.setPadding(Ui.dp(20), Ui.dp(10), Ui.dp(20), Ui.dp(10));
             retry.setBackground(Widgets.ripple());

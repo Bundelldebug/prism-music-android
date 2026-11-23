@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.12";
+    static final String VERSION = "9.5.13";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -157,7 +157,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         syncHeader();
         setLightStatus(true);
 
-        if (Spotify.loggedIn() && Spotify.userName == null) Spotify.loadProfile(null);
+        if (Spotify.loggedIn() && (Spotify.userName == null || Spotify.userId().isEmpty())) Spotify.loadProfile(null);
         // pre-warm OAuth token off-thread right away, and defer WebView creation past the first home frame
         // so Chromium init never stalls the initial cover/track reveal
         if (Spotify.loggedIn()) Spotify.prewarm();

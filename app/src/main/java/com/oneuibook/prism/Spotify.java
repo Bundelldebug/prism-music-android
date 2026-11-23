@@ -171,21 +171,44 @@ final class Spotify {
     /** Test seam: when set, answers requests from fixtures instead of the network (UI tests only). */
     static java.util.function.Function<String, JSONObject> fixtures;
 
+    private static final Object PACE_LOCK = new Object();
+    private static long nextPaceMs;
+
+    static boolean isRateLimited() { return System.currentTimeMillis() < cooldownUntil; }
+
+    /** Spaces out outgoing non-play requests by 160ms so parallel UI loads never trip Spotify's anti-burst 429 filter. */
+    private static void paceRequest() throws InterruptedException {
+        long wait;
+        synchronized (PACE_LOCK) {
+            long now = System.currentTimeMillis();
+            if (nextPaceMs > now) {
+                wait = nextPaceMs - now;
+                nextPaceMs += 160L;
+            } else {
+                wait = 0;
+                nextPaceMs = now + 160L;
+            }
+        }
+        if (wait > 0 && wait <= 4000) Thread.sleep(wait);
+    }
+
     static JSONObject call(String method, String path, String jsonBody) throws Exception {
         if (fixtures != null) {
             JSONObject f = fixtures.apply(method + " " + path);
             if (f == null) throw new ApiError(404, "no fixture", "");
             return f;
         }
-        final boolean isPlayer = path.startsWith("/me/player");
+        // Only explicit playback mutations (PUT/POST/DELETE /me/player/*) bypass browsing cooldown;
+        // background GET /me/player polls MUST respect cooldownUntil so polling NEVER extends a 429 penalty window!
+        final boolean isPlayCmd = path.startsWith("/me/player") && !"GET".equals(method);
         for (int attempt = 0; attempt < 3; attempt++) {
-            // Separate playback commands (/me/player/*) from browsing cooldown so browsing 429s NEVER freeze Play/Pause/Playlists!
-            long until = isPlayer ? playCooldownUntil : cooldownUntil;
+            long until = isPlayCmd ? playCooldownUntil : cooldownUntil;
             long cool = until - System.currentTimeMillis();
             if (cool > 0) {
                 if (cool > 3500) throw new ApiError(429, lastRateReason.isEmpty() ? "rate limited" : lastRateReason, "rate");
                 Thread.sleep(cool);
             }
+            if (!isPlayCmd) paceRequest();
             String url = path.startsWith("http") ? path : API + path;
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
             c.setRequestMethod(method);
@@ -215,9 +238,11 @@ final class Spotify {
                     JSONObject eo = new JSONObject(errBody).optJSONObject("error");
                     if (eo != null) reason = eo.optString("reason", "");
                 } catch (Exception ignored) {}
-                lastRateReason = "QUOTA_EXCEEDED".equalsIgnoreCase(reason) ? "QUOTA_EXCEEDED" : ("rate limited (" + wait + "s)");
-                long storeWait = isPlayer ? Math.min(wait, 3) : Math.min(wait, 20);
-                if (isPlayer) playCooldownUntil = Math.max(playCooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
+                lastRateReason = "QUOTA_EXCEEDED".equalsIgnoreCase(reason)
+                        ? ("QUOTA_EXCEEDED (" + wait + "s)")
+                        : ("429 (" + wait + "s)");
+                long storeWait = isPlayCmd ? Math.min(wait, 3) : Math.min(wait, 25);
+                if (isPlayCmd) playCooldownUntil = Math.max(playCooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
                 else cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
                 if (wait <= 3 && attempt == 0) continue;
                 throw new ApiError(429, lastRateReason, reason.isEmpty() ? "rate" : reason);
@@ -251,8 +276,9 @@ final class Spotify {
     }
 
     /**
-     * Local-only playlist filter (0 network calls — never fires burst probes that trigger 2026 Dev Mode 429s
-     * and never hides the user's own playlists).
+     * Deterministic 0-call playlist filter for Spotify's Feb 2026 Development Mode rules:
+     * only playlists owned by the signed-in user or marked collaborative can have their tracks read via Web API;
+     * all other third-party & Spotify editorial playlists return 403 and are hidden locally with ZERO probe calls!
      */
     static JSONArray playable(JSONArray in) {
         return playable(in, false);
@@ -266,23 +292,30 @@ final class Spotify {
             JSONObject p = in.optJSONObject(i);
             if (p == null) continue;
             if (!"playlist".equals(p.optString("type"))) { out.put(p); continue; }
+            String id = p.optString("id");
             JSONObject owner = p.optJSONObject("owner");
             String ownerId = owner == null ? "" : owner.optString("id");
+            boolean collaborative = p.optBoolean("collaborative", false);
             boolean mine = !me.isEmpty() && me.equals(ownerId);
-            if (isUserLibrary || mine) {
+            if (!me.isEmpty()) {
+                // Keep strictly owned or collaborative playlists (owned playlists kept even if empty so newly created ones appear)
+                if (!mine && !collaborative) continue;
                 out.put(p);
-                continue;
+            } else {
+                // Fallback only when user_id hasn't been fetched yet: hide Spotify editorial, empty, and known 403-blocked lists
+                if ("spotify".equals(ownerId) || isBlocked(id) || (!isUserLibrary && total(p) == 0)) continue;
+                out.put(p);
             }
-            // In public search results, hide Spotify-owned editorial playlists (blocked in dev mode) and empty lists locally
-            if ("spotify".equals(ownerId) || total(p) == 0) continue;
-            out.put(p);
         }
         return out;
     }
 
-    /** Applies local-only {@link #playable} filter without making any extra network calls. */
+    /** Applies local-only {@link #playable} filter (fetches /me once if user_id was never saved so third-party playlists never leak). */
     static void filterPlaylists(JSONObject o, String path) {
         try {
+            if (fixtures == null && prefs != null && prefs.getString("user_id", "").isEmpty() && !isRateLimited()) {
+                try { loadProfileSync(); } catch (Exception ignored) {}
+            }
             boolean isUserLib = path != null && path.startsWith("/me/playlists");
             JSONObject pl = o.optJSONObject("playlists");
             if (pl != null) pl.put("items", playable(pl.optJSONArray("items"), isUserLib));

@@ -336,4 +336,5 @@
     <string name="rate_limited_retry">Spotify API rate limit reached (%1$s). Wait a moment and tap Retry.</string>
     <string name="retry">Retry</string>
     <string name="playback_failed_code">Couldn’t start playback (%1$s)</string>
+    <string name="artist_releases_partial">Showing partial releases (%1$s) · Tap to load all</string>
 </resources>

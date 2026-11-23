@@ -41,6 +41,14 @@ final class SpotifyWeb {
 
     static boolean ready() { return deviceId != null; }
 
+    /** True when the hidden in-app Web Playback SDK is currently the active output device (zero Web API calls needed for controls/state). */
+    static boolean active() { return web != null && ready() && deviceId.equals(Player.deviceId); }
+
+    static void togglePlay() { if (web != null) web.evaluateJavascript("window.prismPlayer && window.prismPlayer.togglePlay()", null); }
+    static void nextTrack() { if (web != null) web.evaluateJavascript("window.prismPlayer && window.prismPlayer.nextTrack()", null); }
+    static void prevTrack() { if (web != null) web.evaluateJavascript("window.prismPlayer && window.prismPlayer.previousTrack()", null); }
+    static void seekTo(long ms) { if (web != null) web.evaluateJavascript("window.prismPlayer && window.prismPlayer.seek(" + Math.max(0, ms) + ")", null); }
+
     private static final String SDK_URL = "https://sdk.scdn.co/spotify-player.js";
     private static final long SDK_TTL_MS = 24L * 60 * 60 * 1000;
 
@@ -64,7 +72,21 @@ final class SpotifyWeb {
             + "  ['initialization_error','authentication_error','account_error','playback_error'].forEach(function(n) {\n"
             + "    player.addListener(n, function(e) { Prism.onError(n + ': ' + e.message); });\n"
             + "  });\n"
-            + "  player.addListener('player_state_changed', function(s) { if (s) Prism.onState(JSON.stringify({paused: s.paused, position: s.position, id: (s.track_window && s.track_window.current_track && s.track_window.current_track.id) || ''})); });\n"
+            + "  player.addListener('player_state_changed', function(s) {\n"
+            + "    if (!s) return;\n"
+            + "    var t = s.track_window && s.track_window.current_track;\n"
+            + "    var al = t && t.album;\n"
+            + "    var ars = (t && t.artists) ? t.artists.map(function(a){ return {name: a.name || '', uri: a.uri || ''}; }) : [];\n"
+            + "    var imgs = (al && al.images) ? al.images.map(function(im){ return {url: im.url || '', width: im.width || 0}; }) : [];\n"
+            + "    Prism.onState(JSON.stringify({\n"
+            + "      paused: !!s.paused, position: s.position || 0, duration: s.duration || (t && t.duration_ms) || 0,\n"
+            + "      shuffle: !!s.shuffle, repeat_mode: s.repeat_mode || 0,\n"
+            + "      context_uri: (s.context && s.context.uri) || '',\n"
+            + "      id: (t && t.id) || '', uri: (t && t.uri) || '', name: (t && t.name) || '',\n"
+            + "      album_name: (al && al.name) || '', album_uri: (al && al.uri) || '',\n"
+            + "      images: imgs, artists: ars\n"
+            + "    }));\n"
+            + "  });\n"
             + "  player.connect();\n"
             + "};\n"
             // short volume ramps: cutting a waveform mid-cycle (old song) or starting one at full level (new song)
@@ -340,17 +362,59 @@ final class SpotifyWeb {
                     if (Player.local() || !ready()) return;
                     if (Player.deviceId == null || deviceId.equals(Player.deviceId)) {
                         Player.deviceId = deviceId;
+                        Player.hasDevice = true;
                         boolean wasPlaying = Player.playing;
                         Player.playing = !o.optBoolean("paused");
                         Player.progress = o.optLong("position");
                         Player.stamp = android.os.SystemClock.elapsedRealtime();
+                        Player.shuffle = o.optBoolean("shuffle", Player.shuffle);
+                        String ctxUri = o.optString("context_uri", "");
+                        if (!ctxUri.isEmpty()) Player.contextUri = ctxUri;
+                        boolean trackChanged = false;
+                        if (!sid.isEmpty() && (Player.track == null || !sid.equals(Player.track.id))) {
+                            Player.Track t = new Player.Track();
+                            t.id = sid;
+                            t.uri = o.optString("uri", "spotify:track:" + sid);
+                            t.name = o.optString("name", "");
+                            t.duration = o.optLong("duration", 0);
+                            t.album = o.optString("album_name", "");
+                            String aUri = o.optString("album_uri", "");
+                            t.albumUri = aUri.isEmpty() ? null : aUri;
+                            JSONArray ars = o.optJSONArray("artists");
+                            StringBuilder sb = new StringBuilder();
+                            if (ars != null) {
+                                for (int i = 0; i < ars.length(); i++) {
+                                    JSONObject ar = ars.optJSONObject(i);
+                                    if (ar == null) continue;
+                                    if (sb.length() > 0) sb.append(", ");
+                                    sb.append(ar.optString("name"));
+                                    if (t.artistUri == null && !ar.optString("uri").isEmpty()) t.artistUri = ar.optString("uri");
+                                }
+                            }
+                            t.artist = sb.toString();
+                            JSONArray imgs = o.optJSONArray("images");
+                            if (imgs != null && imgs.length() > 0) {
+                                JSONObject imgWrap = new JSONObject().put("images", imgs);
+                                t.art = Spotify.image(imgWrap, 600);
+                                t.artSmall = Spotify.image(imgWrap, 120);
+                            }
+                            Player.track = t;
+                            Player.liked = false;
+                            trackChanged = true;
+                        } else if (Player.track != null && o.optLong("duration", 0) > 0 && Player.track.duration <= 0) {
+                            Player.track.duration = o.optLong("duration");
+                        }
+                        if (trackChanged) {
+                            for (Runnable r : new ArrayList<>(Player.trackListeners)) r.run();
+                            Spotify.MAIN.postDelayed(Player::checkLiked, 800);
+                        }
                         Player.notifyAll0();
                         if (ctx != null && (Player.playing || wasPlaying)) {
                             LocalMusic.PlaybackService.claimControl(ctx.getApplicationContext());
                         }
                     }
                 } catch (Exception ignored) {}
-                Player.refresh();
+                // Do NOT call Player.refresh() on every SDK state event: SDK already pushes full track/position/pause state with 0 Web API calls!
             });
         }
     }

@@ -336,4 +336,5 @@
     <string name="rate_limited_retry">Spotify API 요청 한도에 걸렸어요 (%1$s). 잠시 후 다시 시도해 주세요.</string>
     <string name="retry">다시 시도</string>
     <string name="playback_failed_code">재생을 시작하지 못했어요 (%1$s)</string>
+    <string name="artist_releases_partial">일부 발매만 표시됨 (%1$s) · 탭하여 전체 불러오기</string>
 </resources>

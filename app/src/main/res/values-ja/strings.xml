@@ -336,4 +336,5 @@
     <string name="rate_limited_retry">Spotify API の制限に達しました (%1$s)。しばらくしてから再試行してください。</string>
     <string name="retry">再試行</string>
     <string name="playback_failed_code">再生を開始できませんでした (%1$s)</string>
+    <string name="artist_releases_partial">一部のリリースのみ表示 (%1$s) · タップしてすべて読み込む</string>
 </resources>
