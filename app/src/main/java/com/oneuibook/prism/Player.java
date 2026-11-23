@@ -205,10 +205,29 @@ final class Player {
     }
 
     static void playContext(String contextUri, String offsetUri, Track preview) {
+        playContext(contextUri, offsetUri, preview, null, 0);
+    }
+
+    /**
+     * Starts playback for an album/playlist context, automatically falling back to {@code fallbackUris} if Spotify
+     * rejects {@code context_uri} or {@code offset.uri} (e.g. relinked tracks or restricted Connect state).
+     */
+    static void playContext(String contextUri, String offsetUri, Track preview, List<String> fallbackUris, int fallbackOffset) {
         try {
             JSONObject b = new JSONObject().put("context_uri", contextUri);
-            if (offsetUri != null) b.put("offset", new JSONObject().put("uri", offsetUri));
-            startPlay(b, preview, offsetUri != null ? offsetUri : contextUri);
+            if (offsetUri != null && (offsetUri.startsWith("spotify:track:") || offsetUri.startsWith("spotify:episode:"))) {
+                b.put("offset", new JSONObject().put("uri", offsetUri));
+            }
+            String fallbackBody = null;
+            if (fallbackUris != null && !fallbackUris.isEmpty()) {
+                JSONArray a = new JSONArray();
+                for (String u : fallbackUris) a.put(u);
+                fallbackBody = new JSONObject()
+                        .put("uris", a)
+                        .put("offset", new JSONObject().put("position", Math.max(0, Math.min(fallbackOffset, fallbackUris.size() - 1))))
+                        .toString();
+            }
+            startPlay(b, preview, offsetUri != null ? offsetUri : contextUri, fallbackBody);
         } catch (Exception ignored) {}
     }
 
@@ -334,13 +353,13 @@ final class Player {
             JSONArray a = new JSONArray();
             for (String u : uris) a.put(u);
             JSONObject b = new JSONObject().put("uris", a).put("offset", new JSONObject().put("position", Math.max(0, index)));
-            startPlay(b, preview, index >= 0 && index < uris.size() ? uris.get(index) : null);
+            startPlay(b, preview, index >= 0 && index < uris.size() ? uris.get(index) : null, null);
         } catch (Exception ignored) {}
     }
 
     private static int playSeq;
 
-    private static void startPlay(JSONObject body, Track preview, String openUri) {
+    private static void startPlay(JSONObject body, Track preview, String openUri, String fallbackBody) {
         final int seq = ++playSeq;
         final boolean wasPlaying = playing && !local();
         LocalMusic.stopForOther();
@@ -360,13 +379,13 @@ final class Player {
         SpotifyWeb.whenReady(() -> {
             if (seq != playSeq) return;
             String dev = SpotifyWeb.deviceId;
-            SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay(seq, "PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, true, true));
+            SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay(seq, "PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, fallbackBody, true, true));
             deviceId = dev;
             Spotify.MAIN.postDelayed(Player::applyWantedRepeat, 900);
             later();
         }, () -> {
             if (seq != playSeq) return;
-            commandPlay(seq, "PUT", "/me/player/play", body.toString(), openUri, false, true);
+            commandPlay(seq, "PUT", "/me/player/play", body.toString(), openUri, fallbackBody, false, true);
             later();
         });
         // defer secondary metadata call so it never competes with the first play request
@@ -393,8 +412,24 @@ final class Player {
         refresh();
     }
 
-    /** High-priority playback command on the dedicated PLAY_IO lane, with single-track & device recovery fallbacks. */
-    private static void commandPlay(int seq, String method, String path, String body, String openUri, boolean allowFastRetry, boolean allowSingleFallback) {
+    /** Strips any existing device_id query param so recovery never appends duplicate device_id=...&device_id=... */
+    static String stripDeviceId(String path) {
+        if (path == null) return "/me/player/play";
+        int q = path.indexOf('?');
+        if (q < 0) return path;
+        String base = path.substring(0, q);
+        String[] parts = path.substring(q + 1).split("&");
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) {
+            if (p.isEmpty() || p.startsWith("device_id=")) continue;
+            if (sb.length() > 0) sb.append('&');
+            sb.append(p);
+        }
+        return sb.length() == 0 ? base : (base + "?" + sb);
+    }
+
+    /** High-priority playback command on the dedicated PLAY_IO lane, with URI-list, single-track & device recovery fallbacks. */
+    private static void commandPlay(int seq, String method, String path, String body, String openUri, String fallbackBody, boolean allowFastRetry, boolean allowSingleFallback) {
         if (!Spotify.loggedIn()) { toast(R.string.login_needed); return; }
         Spotify.sendPlay(method, path, body, new Spotify.Cb() {
             @Override public void ok(JSONObject o) { }
@@ -403,8 +438,12 @@ final class Player {
                 if (code == 404) {
                     if (allowFastRetry && SpotifyWeb.ready() && path.contains("device_id=")) {
                         Spotify.MAIN.postDelayed(() -> {
-                            if (seq == playSeq) commandPlay(seq, method, path, body, openUri, false, allowSingleFallback);
+                            if (seq == playSeq) commandPlay(seq, method, path, body, openUri, fallbackBody, false, allowSingleFallback);
                         }, 250);
+                    } else if (fallbackBody != null) {
+                        // A 404 on context_uri + offset.uri can mean the track isn't matched inside the context: retry with explicit URIs
+                        String retryPath = SpotifyWeb.ready() ? ("/me/player/play?device_id=" + Spotify.enc(SpotifyWeb.deviceId)) : "/me/player/play";
+                        commandPlay(seq, method, retryPath, fallbackBody, openUri, null, false, allowSingleFallback);
                     } else {
                         recoverNoDevice(method, path, body, openUri);
                     }
@@ -416,18 +455,25 @@ final class Player {
                     SpotifyWeb.restoreVolume();
                     toast(R.string.login_needed);
                     refreshForce();
+                } else if (fallbackBody != null) {
+                    // Context playback rejected (400/403/5xx): fall back seamlessly to the loaded track URI list!
+                    String retryPath = SpotifyWeb.ready() ? ("/me/player/play?device_id=" + Spotify.enc(SpotifyWeb.deviceId)) : "/me/player/play";
+                    commandPlay(seq, method, retryPath, fallbackBody, openUri, null, false, allowSingleFallback);
                 } else if (allowSingleFallback && openUri != null && (openUri.startsWith("spotify:track:") || openUri.startsWith("spotify:episode:"))) {
-                    // Fallback: if a multi-track uris/context payload was rejected (400/403/5xx), retry playing just the tapped track
+                    // Fallback: if a multi-track uris payload was rejected, retry playing just the tapped track
                     try {
                         String singleBody = new JSONObject().put("uris", new JSONArray().put(openUri)).toString();
                         String retryPath = SpotifyWeb.ready() ? ("/me/player/play?device_id=" + Spotify.enc(SpotifyWeb.deviceId)) : "/me/player/play";
-                        commandPlay(seq, method, retryPath, singleBody, openUri, false, false);
+                        commandPlay(seq, method, retryPath, singleBody, openUri, null, false, false);
                     } catch (Exception ignored) {
                         SpotifyWeb.restoreVolume();
                         refreshForce();
                     }
                 } else {
                     SpotifyWeb.restoreVolume();
+                    if (activity != null) {
+                        Toast.makeText(activity, activity.getString(R.string.playback_failed_code, code > 0 ? String.valueOf(code) : "net"), Toast.LENGTH_SHORT).show();
+                    }
                     refreshForce();
                 }
             }
@@ -455,38 +501,54 @@ final class Player {
     }
 
     private static void recoverNoDevice(String method, String path, String body, String openUri) {
-        Spotify.get("/me/player/devices", new Spotify.Cb() {
+        final String cleanPath = stripDeviceId(path);
+        Spotify.getPlay("/me/player/devices", new Spotify.Cb() {
             @Override public void ok(JSONObject o) {
                 JSONArray ds = o.optJSONArray("devices");
                 JSONObject pick = null;
                 if (SpotifyWeb.ready()) {
-                    try { pick = new JSONObject().put("id", SpotifyWeb.deviceId); } catch (Exception ignored) {}
-                } else if (ds != null) {
+                    // Prefer the in-app player if Spotify actually sees it in /devices, else pick any active non-restricted device
+                    if (ds != null) {
+                        for (int i = 0; i < ds.length(); i++) {
+                            JSONObject d = ds.optJSONObject(i);
+                            if (d != null && SpotifyWeb.deviceId.equals(d.optString("id"))) { pick = d; break; }
+                        }
+                    }
+                    if (pick == null) {
+                        try { pick = new JSONObject().put("id", SpotifyWeb.deviceId); } catch (Exception ignored) {}
+                    }
+                }
+                if (pick == null && ds != null) {
                     for (int i = 0; i < ds.length(); i++) {
                         JSONObject d = ds.optJSONObject(i);
                         if (d == null || d.optBoolean("is_restricted")) continue;
-                        if (pick == null || "Smartphone".equalsIgnoreCase(d.optString("type"))) pick = d;
+                        if (pick == null || d.optBoolean("is_active") || "Smartphone".equalsIgnoreCase(d.optString("type"))) pick = d;
                     }
                 }
                 if (pick != null) {
                     String id = pick.optString("id");
-                    String sep = path.contains("?") ? "&" : "?";
-                    Spotify.send(method, path + sep + "device_id=" + Spotify.enc(id), body, new Spotify.Cb() {
+                    String sep = cleanPath.contains("?") ? "&" : "?";
+                    Spotify.sendPlay(method, cleanPath + sep + "device_id=" + Spotify.enc(id), body, new Spotify.Cb() {
                         @Override public void ok(JSONObject r) { later(); }
-                        @Override public void err(int c, String m) { toast(R.string.playback_failed); refresh(); }
+                        @Override public void err(int c, String m) {
+                            if (activity != null) Toast.makeText(activity, activity.getString(R.string.playback_failed_code, c > 0 ? String.valueOf(c) : "net"), Toast.LENGTH_SHORT).show();
+                            refresh();
+                        }
                     });
                 } else {
                     // no Spotify app needed: wait for the in-app player instead of launching Spotify
                     toast(SpotifyWeb.failed ? R.string.prism_player_failed : R.string.prism_player_starting);
                     SpotifyWeb.whenReady(() -> {
-                        String sep = path.contains("?") ? "&" : "?";
-                        Spotify.send(method, path + sep + "device_id=" + Spotify.enc(SpotifyWeb.deviceId), body, new Spotify.Cb() {
+                        String sep = cleanPath.contains("?") ? "&" : "?";
+                        Spotify.sendPlay(method, cleanPath + sep + "device_id=" + Spotify.enc(SpotifyWeb.deviceId), body, new Spotify.Cb() {
                             @Override public void ok(JSONObject r) { later(); }
                         });
                     }, () -> {});
                 }
             }
-            @Override public void err(int code, String message) { toast(R.string.playback_failed); }
+            @Override public void err(int code, String message) {
+                if (activity != null) Toast.makeText(activity, activity.getString(R.string.playback_failed_code, code > 0 ? String.valueOf(code) : "net"), Toast.LENGTH_SHORT).show();
+            }
         });
     }
 

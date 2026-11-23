@@ -331,4 +331,9 @@
     <string name="lyrics_providers">가사 조회 소스</string>
     <string name="lyrics_clear_cache">가사 캐시 비우기</string>
     <string name="artist_releases_retry">발매 목록을 불러오지 못했어요 (%1$s) · 탭하여 다시 시도</string>
+    <string name="album_tracks_unavailable">앨범 곡 목록을 불러오지 못했어요 (%1$s). 위의 재생 버튼을 누르거나 다시 시도해 주세요.</string>
+    <string name="playlist_tracks_unavailable">플레이리스트 곡 목록을 불러오지 못했어요 (%1$s). 위의 재생 버튼을 누르거나 다시 시도해 주세요.</string>
+    <string name="rate_limited_retry">Spotify API 요청 한도에 걸렸어요 (%1$s). 잠시 후 다시 시도해 주세요.</string>
+    <string name="retry">다시 시도</string>
+    <string name="playback_failed_code">재생을 시작하지 못했어요 (%1$s)</string>
 </resources>

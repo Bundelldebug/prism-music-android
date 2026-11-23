@@ -959,6 +959,62 @@ public class PrismUiTest {
             android.widget.LinearLayout[] dSlots2 = (android.widget.LinearLayout[]) slotsF.get(dp2);
             assertTrue("Direct /artists/{id}/albums populates Albums rail", dSlots2[0].getChildCount() >= 2);
             ia.pop(); idle(300);
+
+            // [14] 9.5.12 regression checks:
+            // (a) Player.stripDeviceId prevents duplicate device_id=...&device_id=... on playback recovery
+            assertEquals("/me/player/play", Player.stripDeviceId("/me/player/play?device_id=old123"));
+            assertEquals("/me/player/play?foo=1", Player.stripDeviceId("/me/player/play?foo=1&device_id=old123"));
+            // (b) Spotify.playable preserves user library playlists (even empty) with zero network calls
+            org.json.JSONArray myPls = new org.json.JSONArray()
+                    .put(new org.json.JSONObject().put("type", "playlist").put("id", "my1").put("name", "My Empty PL")
+                            .put("owner", new org.json.JSONObject().put("id", "me")).put("items", new org.json.JSONObject().put("total", 0)));
+            assertEquals("User library playlists never dropped", 1, Spotify.playable(myPls, true).length());
+            // (c) Album detail recovers tracks via /search?type=track even when /albums/{id} & /albums/{id}/tracks fail
+            java.util.List<String> seenReqs = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            Spotify.fixtures = req -> {
+                seenReqs.add(req);
+                try {
+                    if (req.startsWith("GET /albums/")) return null; // both /albums/{id} and /albums/{id}/tracks fail!
+                    if (req.startsWith("GET /search?type=track")) {
+                        org.json.JSONObject al = new org.json.JSONObject().put("type", "album").put("id", "al4")
+                                .put("uri", "spotify:album:al4").put("name", "Completeness").put("images", new org.json.JSONArray());
+                        org.json.JSONArray trs = new org.json.JSONArray()
+                                .put(new org.json.JSONObject().put("type", "track").put("id", "t10").put("uri", "spotify:track:t10")
+                                        .put("name", "神の名を").put("track_number", 1).put("duration_ms", 200000).put("album", al)
+                                        .put("artists", new org.json.JSONArray().put(new org.json.JSONObject().put("name", "Ave Mujica"))));
+                        return new org.json.JSONObject().put("tracks", new org.json.JSONObject().put("items", trs));
+                    }
+                    if (req.startsWith("GET /playlists/pl9512/items?limit=50")) {
+                        org.json.JSONArray items = new org.json.JSONArray()
+                                .put(new org.json.JSONObject().put("item", track(0)));
+                        return new org.json.JSONObject().put("items", items);
+                    }
+                    if (req.startsWith("GET /playlists/pl9512")) return null; // force fallback to /items?limit=50
+                } catch (Exception ignored) {}
+                return null;
+            };
+            Widgets.Item albItem = Widgets.Item.of(new org.json.JSONObject()
+                    .put("type", "album").put("id", "al4").put("uri", "spotify:album:al4").put("name", "Completeness"));
+            Pages.DetailPage albPage = new Pages.DetailPage(ia, albItem);
+            ia.push(albPage);
+            Thread.sleep(100);
+            idle(700);
+            java.lang.reflect.Field trField = Pages.DetailPage.class.getDeclaredField("tracks");
+            trField.setAccessible(true);
+            assertEquals("Album recovered tracks via search fallback", 1, ((java.util.List<?>) trField.get(albPage)).size());
+            ia.pop(); idle(250);
+
+            // (d) Playlist detail falls back to /playlists/{id}/items?limit=50 (never limit=100!) and never blocks
+            Widgets.Item plItem = Widgets.Item.of(new org.json.JSONObject()
+                    .put("type", "playlist").put("id", "pl9512").put("uri", "spotify:playlist:pl9512").put("name", "My Playlist"));
+            Pages.DetailPage plPage = new Pages.DetailPage(ia, plItem);
+            ia.push(plPage);
+            Thread.sleep(100);
+            idle(700);
+            assertEquals("Playlist loaded via /items?limit=50", 1, ((java.util.List<?>) trField.get(plPage)).size());
+            assertTrue("Playlist fallback used limit=50 not limit=100", seenReqs.contains("GET /playlists/pl9512/items?limit=50"));
+            assertTrue("Playlist not blocked", !Spotify.isBlocked("pl9512"));
+            ia.pop(); idle(250);
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {

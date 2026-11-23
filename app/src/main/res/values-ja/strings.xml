@@ -331,4 +331,9 @@
     <string name="lyrics_providers">歌詞ソース</string>
     <string name="lyrics_clear_cache">歌詞キャッシュを消去</string>
     <string name="artist_releases_retry">リリース一覧を読み込めませんでした (%1$s) · タップして再試行</string>
+    <string name="album_tracks_unavailable">アルバムの曲一覧を読み込めませんでした (%1$s)。上の再生ボタンまたは再試行をお試しください。</string>
+    <string name="playlist_tracks_unavailable">プレイリストの曲一覧を読み込めませんでした (%1$s)。上の再生ボタンまたは再試行をお試しください。</string>
+    <string name="rate_limited_retry">Spotify API の制限に達しました (%1$s)。しばらくしてから再試行してください。</string>
+    <string name="retry">再試行</string>
+    <string name="playback_failed_code">再生を開始できませんでした (%1$s)</string>
 </resources>

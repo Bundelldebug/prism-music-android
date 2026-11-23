@@ -331,4 +331,9 @@
     <string name="lyrics_providers">Lyrics sources</string>
     <string name="lyrics_clear_cache">Clear lyrics cache</string>
     <string name="artist_releases_retry">Couldn’t load releases (%1$s) · Tap to retry</string>
+    <string name="album_tracks_unavailable">Couldn’t load album tracks (%1$s). You can still tap Play above or retry.</string>
+    <string name="playlist_tracks_unavailable">Couldn’t load playlist tracks (%1$s). You can still tap Play above or retry.</string>
+    <string name="rate_limited_retry">Spotify API rate limit reached (%1$s). Wait a moment and tap Retry.</string>
+    <string name="retry">Retry</string>
+    <string name="playback_failed_code">Couldn’t start playback (%1$s)</string>
 </resources>
