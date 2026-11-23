@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.9";
+    static final String VERSION = "9.5.10";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -879,18 +879,36 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     }
 
     void playList(List<Widgets.Item> items, int idx, String ctx) {
-        if (items.isEmpty()) return;
+        if (items == null || items.isEmpty()) return;
+        idx = Math.max(0, Math.min(idx, items.size() - 1));
         if (items.get(0).track != null) {
             List<Player.Track> l = new ArrayList<>();
             for (Widgets.Item i : items) if (i.track != null) l.add(i.track);
             LocalMusic.play(l, idx);
             return;
         }
-        int from = Math.max(0, idx - 40), to = Math.min(items.size(), from + 100);
-        List<String> uris = new ArrayList<>();
-        for (int i = from; i < to; i++) uris.add(items.get(i).uri);
         Widgets.Item cur = items.get(idx);
-        Player.playUris(uris, idx - from, Player.Track.from(cur.raw));
+        int from = Math.max(0, idx - 15), to = Math.min(items.size(), idx + 50);
+        List<String> uris = new ArrayList<>();
+        int targetPos = -1;
+        for (int i = from; i < to; i++) {
+            Widgets.Item it = items.get(i);
+            String u = it == null ? null : it.uri;
+            // Only send valid Spotify playable URIs: a single local/null URI makes PUT /me/player/play fail with 400!
+            if (u == null || !(u.startsWith("spotify:track:") || u.startsWith("spotify:episode:"))) continue;
+            if (i == idx) targetPos = uris.size();
+            uris.add(u);
+        }
+        if (targetPos < 0) {
+            String cu = cur == null ? null : cur.uri;
+            if (cu != null && (cu.startsWith("spotify:track:") || cu.startsWith("spotify:episode:"))) {
+                uris.clear();
+                uris.add(cu);
+                targetPos = 0;
+            }
+        }
+        if (uris.isEmpty()) { Player.toast(R.string.playback_failed); return; }
+        Player.playUris(uris, Math.max(0, targetPos), Player.Track.from(cur.raw));
     }
 
     void shuffleList(List<Widgets.Item> items) {
@@ -1003,8 +1021,15 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     /** Shows the user's Spotify playlists to add {@code trackUri} (with a shortcut to create a new playlist). */
     void addToPlaylistDialog(String trackUri) {
         if (!Spotify.loggedIn() || trackUri == null || trackUri.isEmpty()) { Player.toast(R.string.login_needed); return; }
-        Spotify.get("/me/playlists?limit=50", new Spotify.Cb() {
-            @Override public void ok(JSONObject o) {
+        Spotify.IO.execute(() -> {
+            JSONObject res = null;
+            try { res = Spotify.call("GET", "/me/playlists?limit=50", null); }
+            catch (Exception e) {
+                try { res = Spotify.callCached("/me/playlists?limit=50"); } catch (Exception ignored) {}
+            }
+            final JSONObject o = res;
+            Spotify.MAIN.post(() -> {
+                if (o == null) { Player.toast(R.string.load_failed); return; }
                 org.json.JSONArray arr = o.optJSONArray("items");
                 List<String> names = new ArrayList<>();
                 List<String> ids = new ArrayList<>();
@@ -1036,14 +1061,13 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                             Spotify.addTracksToPlaylist(pid, uris, new Spotify.Cb() {
                                 @Override public void ok(JSONObject r) { Player.toast(R.string.pl_added); }
                                 @Override public void err(int c, String m) {
-                                    Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
+                                    Player.toast(c == 401 || c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
                                 }
                             });
                         })
                         .setNegativeButton(R.string.cancel, null)
                         .show();
-            }
-            @Override public void err(int c, String m) { Player.toast(R.string.load_failed); }
+            });
         });
     }
 }

@@ -338,7 +338,10 @@ final class Player {
         } catch (Exception ignored) {}
     }
 
+    private static int playSeq;
+
     private static void startPlay(JSONObject body, Track preview, String openUri) {
+        final int seq = ++playSeq;
         final boolean wasPlaying = playing && !local();
         LocalMusic.stopForOther();
         boolean changed = false;
@@ -355,12 +358,17 @@ final class Player {
         if (SpotifyWeb.web == null && activity instanceof MainActivity) ((MainActivity) activity).startSpotifyPlayer();
         SpotifyWeb.activate();
         SpotifyWeb.whenReady(() -> {
+            if (seq != playSeq) return;
             String dev = SpotifyWeb.deviceId;
-            SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay("PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, true));
+            SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay(seq, "PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, true, true));
             deviceId = dev;
             Spotify.MAIN.postDelayed(Player::applyWantedRepeat, 900);
             later();
-        }, () -> { commandPlay("PUT", "/me/player/play", body.toString(), openUri, false); later(); });
+        }, () -> {
+            if (seq != playSeq) return;
+            commandPlay(seq, "PUT", "/me/player/play", body.toString(), openUri, false, true);
+            later();
+        });
         // defer secondary metadata call so it never competes with the first play request
         if (changed) Spotify.MAIN.postDelayed(Player::checkLiked, 700);
     }
@@ -378,25 +386,49 @@ final class Player {
 
     private static void later() { Spotify.MAIN.postDelayed(Player::refresh, 700); }
 
-    /** High-priority playback command on the dedicated PLAY_IO lane, with a fast retry if the device just registered. */
-    private static void commandPlay(String method, String path, String body, String openUri, boolean allowFastRetry) {
+    /** Forces an immediate /me/player sync, bypassing throttle and optimistic guard, so cover never gets stuck on a failed switch. */
+    private static void refreshForce() {
+        lastRefresh = 0;
+        lastCommand = 0;
+        refresh();
+    }
+
+    /** High-priority playback command on the dedicated PLAY_IO lane, with single-track & device recovery fallbacks. */
+    private static void commandPlay(int seq, String method, String path, String body, String openUri, boolean allowFastRetry, boolean allowSingleFallback) {
         if (!Spotify.loggedIn()) { toast(R.string.login_needed); return; }
         Spotify.sendPlay(method, path, body, new Spotify.Cb() {
             @Override public void ok(JSONObject o) { }
             @Override public void err(int code, String message) {
+                if (seq != playSeq) return;
                 if (code == 404) {
                     if (allowFastRetry && SpotifyWeb.ready() && path.contains("device_id=")) {
-                        Spotify.MAIN.postDelayed(() -> commandPlay(method, path, body, openUri, false), 250);
+                        Spotify.MAIN.postDelayed(() -> {
+                            if (seq == playSeq) commandPlay(seq, method, path, body, openUri, false, allowSingleFallback);
+                        }, 250);
                     } else {
                         recoverNoDevice(method, path, body, openUri);
                     }
                 } else if (code == 403 && (!Spotify.isPremium() || String.valueOf(message).toLowerCase().contains("premium"))) {
+                    SpotifyWeb.restoreVolume();
                     toast(R.string.premium_needed);
-                    refresh();
+                    refreshForce();
                 } else if (code == 401) {
+                    SpotifyWeb.restoreVolume();
                     toast(R.string.login_needed);
+                    refreshForce();
+                } else if (allowSingleFallback && openUri != null && (openUri.startsWith("spotify:track:") || openUri.startsWith("spotify:episode:"))) {
+                    // Fallback: if a multi-track uris/context payload was rejected (400/403/5xx), retry playing just the tapped track
+                    try {
+                        String singleBody = new JSONObject().put("uris", new JSONArray().put(openUri)).toString();
+                        String retryPath = SpotifyWeb.ready() ? ("/me/player/play?device_id=" + Spotify.enc(SpotifyWeb.deviceId)) : "/me/player/play";
+                        commandPlay(seq, method, retryPath, singleBody, openUri, false, false);
+                    } catch (Exception ignored) {
+                        SpotifyWeb.restoreVolume();
+                        refreshForce();
+                    }
                 } else {
-                    refresh();
+                    SpotifyWeb.restoreVolume();
+                    refreshForce();
                 }
             }
         });

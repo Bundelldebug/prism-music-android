@@ -1516,9 +1516,8 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
-                    {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
-            for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
+            LinearLayout sAlbum = slot(), sSingle = slot(), sAppears = slot(), sComp = slot();
+            loadAllArtistGroups(sAlbum, sSingle, sAppears, sComp);
             loadArtistEvents(slot());
             loadArtistTracks();
         }
@@ -1562,9 +1561,8 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            String[][] groups = {{"album", m.getString(R.string.albums)}, {"single", m.getString(R.string.singles_eps)},
-                    {"appears_on", m.getString(R.string.appears_on)}, {"compilation", m.getString(R.string.compilations)}};
-            for (String[] g : groups) loadGroup(slot(), g[0], g[1]);
+            LinearLayout sAlbum = slot(), sSingle = slot(), sAppears = slot(), sComp = slot();
+            loadAllArtistGroups(sAlbum, sSingle, sAppears, sComp);
             loadArtistEvents(slot());
             loadArtistTracks();
         }
@@ -1614,15 +1612,52 @@ final class Pages {
             }
         }
 
-        /** 9.5.7 release rail UI: one horizontal rail per release type (album / single / appears_on / compilation). */
-        private void loadGroup(LinearLayout slot, String group, String title) {
+        /**
+         * 9.5.7 horizontal rail UI with 3-tier fallback so artist discography ALWAYS loads even under
+         * 2026 Spotify Development Mode restrictions:
+         *   1) GET /artists/{id}/albums (with explicit user market if available, then without market)
+         *   2) Free-text album search (/search?type=album&q=<name>, NO quotes or artist: operator bug!)
+         *      filtered strictly by matching artist ID / normalized name
+         *   3) Extract unique albums/singles from track search (/search?type=track&q=<name>) as final guarantee
+         */
+        private void loadAllArtistGroups(LinearLayout sAlbum, LinearLayout sSingle, LinearLayout sAppears, LinearLayout sComp) {
             Spotify.IO.execute(() -> {
-                JSONArray all = new JSONArray();
-                java.util.Set<String> seen = new java.util.HashSet<>();
-                for (int off = 0; off < 100; off += 10) {
-                    try {
-                        JSONObject o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + group + "&limit=10&offset=" + off);
+                LinearLayout[] slots = {sAlbum, sSingle, sAppears, sComp};
+                String[] groups = {"album", "single", "appears_on", "compilation"};
+                String[] titles = {main.getString(R.string.albums), main.getString(R.string.singles_eps),
+                        main.getString(R.string.appears_on), main.getString(R.string.compilations)};
+                String mkt = (Spotify.country != null && Spotify.country.length() == 2) ? ("&market=" + Spotify.enc(Spotify.country)) : "";
+                boolean anyShown = false;
+                boolean endpointBlocked = false;
+
+                // Tier 1: Direct /artists/{id}/albums per group
+                for (int gi = 0; gi < groups.length && !endpointBlocked; gi++) {
+                    JSONArray all = new JSONArray();
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (int off = 0; off < 20; off += 10) {
+                        JSONObject o = null;
+                        try {
+                            o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off + mkt);
+                        } catch (Spotify.ApiError ae) {
+                            if (ae.code == 403 || ae.code == 404) {
+                                // Retry once without market parameter; if still 403/404, endpoint is blocked in dev mode
+                                if (!mkt.isEmpty()) {
+                                    try { o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off); }
+                                    catch (Spotify.ApiError ae2) { if (ae2.code == 403 || ae2.code == 404) endpointBlocked = true; }
+                                    catch (Exception ignored2) {}
+                                } else {
+                                    endpointBlocked = true;
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                        if (o == null) break;
                         JSONArray a = o.optJSONArray("items");
+                        if ((a == null || a.length() == 0) && !mkt.isEmpty() && off == 0) {
+                            try {
+                                o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=0");
+                                a = o == null ? null : o.optJSONArray("items");
+                            } catch (Exception ignored) {}
+                        }
                         if (a == null || a.length() == 0) break;
                         for (int i = 0; i < a.length(); i++) {
                             JSONObject al = a.optJSONObject(i);
@@ -1630,22 +1665,110 @@ final class Pages {
                         }
                         String next = o.optString("next", null);
                         if (next == null || "null".equals(next)) break;
-                    } catch (Exception e) { break; }
-                }
-                Spotify.MAIN.post(() -> {
-                    List<Widgets.Item> l = items(all);
-                    if (l.isEmpty()) return;
-                    slot.addView(Widgets.section(main, title + "  " + l.size()));
-                    LinearLayout row = Widgets.rail(slot, 10);
-                    int size = Widgets.squareDp();
-                    for (Widgets.Item x : l) {
-                        String date = x.raw.optString("release_date", "");
-                        x.subtitle = date.length() >= 4 ? date.substring(0, 4) : "";
-                        x.count = -1;
-                        Widgets.addToRail(row, Widgets.squareCard(main, x, size, v -> main.openItem(x)), Ui.dp(size));
                     }
-                });
+                    if (all.length() > 0) {
+                        anyShown = true;
+                        final LinearLayout slot = slots[gi];
+                        final String title = titles[gi];
+                        final JSONArray res = all;
+                        Spotify.MAIN.post(() -> render957Rail(slot, title, items(res)));
+                    }
+                }
+
+                // Tier 2 + Tier 3: Free-text album search + track-album extraction (never uses buggy artist:"..." on type=album!)
+                if (!anyShown) {
+                    JSONArray alArr = new JSONArray(), sgArr = new JSONArray(), apArr = new JSONArray(), cpArr = new JSONArray();
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    String wantId = item.id == null ? "" : item.id;
+                    String wantName = item.title == null ? "" : item.title.trim().toLowerCase(java.util.Locale.ROOT);
+
+                    // Tier 2: Free-text album search (2 pages = up to 20 candidate albums)
+                    for (int off = 0; off < 20; off += 10) {
+                        try {
+                            JSONObject s = Spotify.callCached("/search?type=album&limit=10&offset=" + off + "&q=" + Spotify.enc(item.title));
+                            JSONObject albObj = s == null ? null : s.optJSONObject("albums");
+                            JSONArray a = albObj == null ? null : albObj.optJSONArray("items");
+                            if (a == null || a.length() == 0) break;
+                            for (int i = 0; i < a.length(); i++) {
+                                JSONObject al = a.optJSONObject(i);
+                                if (al == null) continue;
+                                int matchRank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
+                                if (matchRank == 0) continue;
+                                String key = al.optString("name").toLowerCase(java.util.Locale.ROOT);
+                                if (!seen.add(key)) continue;
+                                classifyRelease(al, matchRank == 2, alArr, sgArr, apArr, cpArr);
+                            }
+                        } catch (Exception ignored) { break; }
+                    }
+
+                    // Tier 3: Extract albums/singles/features from track search (already proven to work in dev mode!)
+                    if (alArr.length() == 0 && sgArr.length() == 0 && apArr.length() == 0) {
+                        for (String qStr : new String[]{"artist:\"" + item.title + "\"", item.title}) {
+                            try {
+                                JSONObject s = Spotify.callCached("/search?type=track&limit=10&q=" + Spotify.enc(qStr));
+                                JSONObject trObj = s == null ? null : s.optJSONObject("tracks");
+                                JSONArray a = trObj == null ? null : trObj.optJSONArray("items");
+                                if (a == null) continue;
+                                for (int i = 0; i < a.length(); i++) {
+                                    JSONObject tr = a.optJSONObject(i);
+                                    if (tr == null) continue;
+                                    JSONObject al = tr.optJSONObject("album");
+                                    if (al == null) continue;
+                                    int arRank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
+                                    int trRank = artistMatchRank(tr.optJSONArray("artists"), wantId, wantName);
+                                    if (arRank == 0 && trRank == 0) continue;
+                                    String key = al.optString("name").toLowerCase(java.util.Locale.ROOT);
+                                    if (!seen.add(key)) continue;
+                                    classifyRelease(al, arRank == 0 || arRank == 2, alArr, sgArr, apArr, cpArr);
+                                }
+                                if (alArr.length() > 0 || sgArr.length() > 0 || apArr.length() > 0) break;
+                            } catch (Exception ignored) {}
+                        }
+                    }
+
+                    if (alArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sAlbum, titles[0], items(alArr)));
+                    if (sgArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sSingle, titles[1], items(sgArr)));
+                    if (apArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sAppears, titles[2], items(apArr)));
+                    if (cpArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sComp, titles[3], items(cpArr)));
+                }
             });
+        }
+
+        /** Returns 1 if primary artist matches, 2 if featured/secondary artist matches, 0 if no match. */
+        private static int artistMatchRank(JSONArray artists, String wantId, String wantName) {
+            if (artists == null) return 0;
+            for (int i = 0; i < artists.length(); i++) {
+                JSONObject ar = artists.optJSONObject(i);
+                if (ar == null) continue;
+                String id = ar.optString("id", "");
+                String nm = ar.optString("name", "").trim().toLowerCase(java.util.Locale.ROOT);
+                if ((!wantId.isEmpty() && wantId.equals(id)) || (!wantName.isEmpty() && wantName.equals(nm))) {
+                    return i == 0 ? 1 : 2;
+                }
+            }
+            return 0;
+        }
+
+        private static void classifyRelease(JSONObject al, boolean isAppearsOn, JSONArray alArr, JSONArray sgArr, JSONArray apArr, JSONArray cpArr) {
+            String tp = al.optString("album_type", "album").toLowerCase(java.util.Locale.ROOT);
+            if (isAppearsOn) apArr.put(al);
+            else if ("single".equals(tp)) sgArr.put(al);
+            else if ("compilation".equals(tp)) cpArr.put(al);
+            else alArr.put(al);
+        }
+
+        private void render957Rail(LinearLayout slot, String title, List<Widgets.Item> l) {
+            if (l.isEmpty()) return;
+            slot.removeAllViews();
+            slot.addView(Widgets.section(main, title + "  " + l.size()));
+            LinearLayout row = Widgets.rail(slot, 10);
+            int size = Widgets.squareDp();
+            for (Widgets.Item x : l) {
+                String date = x.raw.optString("release_date", "");
+                x.subtitle = date.length() >= 4 ? date.substring(0, 4) : "";
+                x.count = -1;
+                Widgets.addToRail(row, Widgets.squareCard(main, x, size, v -> main.openItem(x)), Ui.dp(size));
+            }
         }
         private void playAt(int idx, boolean shuffle) {
             if (shuffle) {

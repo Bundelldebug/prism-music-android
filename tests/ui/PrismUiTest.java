@@ -785,8 +785,33 @@ public class PrismUiTest {
         assertTrue("QQ provider disabled", !Lyrics.isProviderEnabled(app, Lyrics.SRC_QQ));
         MainActivity.prefs(app).edit().putBoolean(Lyrics.providerPrefKey(Lyrics.SRC_QQ), true).commit();
 
-        // (b) Korean Buds3 / Buds4 UHQ detection (never misread as AAC)
+        // (b) Korean Buds3 / Buds4 UHQ detection AND non-Buds LDAC must NEVER be misread as SSC-UHQ
         assertTrue("Korean Buds3 Pro icon", Icons.BUDS == AudioInfo.deviceIconForName("지호의 버즈3 프로", true, false, false));
+        AudioInfo.OutputSpec ldacSpec = new AudioInfo.OutputSpec();
+        ldacSpec.deviceName = "WH-1000XM5"; ldacSpec.bits = 24; ldacSpec.khz = 96f; ldacSpec.codec = "";
+        AudioInfo.resolveBluetoothCodec(ldacSpec, true, "wh-1000xm5", false, false);
+        assertEquals("LDAC on Samsung host never misread as SSC-UHQ", "LDAC", ldacSpec.codec);
+        AudioInfo.OutputSpec buds3Spec = new AudioInfo.OutputSpec();
+        buds3Spec.deviceName = "지호의 버즈3 프로"; buds3Spec.bits = 24; buds3Spec.khz = 96f; buds3Spec.codec = "";
+        AudioInfo.resolveBluetoothCodec(buds3Spec, true, "지호의 버즈3 프로", true, false);
+        assertEquals("Korean Buds3 Pro resolved as SSC-UHQ", "SSC-UHQ", buds3Spec.codec);
+
+        // (b2) ChipArtView keeps full alpha=255 across repeated draws (background->foreground regression)
+        NpuAudio.ChipArtView chipV = new NpuAudio.ChipArtView(a, NpuAudio.SUPPORTED_CHIPS[1], "SM8850");
+        chipV.measure(View.MeasureSpec.makeMeasureSpec(128, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(128, View.MeasureSpec.EXACTLY));
+        chipV.layout(0, 0, 128, 128);
+        Bitmap c1 = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
+        Bitmap c2 = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888);
+        chipV.draw(new Canvas(c1));
+        chipV.draw(new Canvas(c2));
+        assertEquals("ChipArtView 2nd draw pixel matches 1st draw (no alpha fade)", c1.getPixel(64, 64), c2.getPixel(64, 64));
+
+        // (b3) Render enlarged Galaxy Buds icon preview for visual check
+        Bitmap budsPrev = Bitmap.createBitmap(240, 240, Bitmap.Config.ARGB_8888);
+        Canvas bcv = new Canvas(budsPrev);
+        bcv.drawColor(0xFF1C1C1E);
+        Icons.draw(bcv, Icons.BUDS, 120f, 120f, 176f, 0xFFFFFFFF);
+        try (FileOutputStream o = new FileOutputStream(new File(OUT, "83_buds_icon_preview.png"))) { budsPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
 
         // (c) NowPlaying ticker stays alive immediately after open() even before openP > 0
         a.np.open();

@@ -295,13 +295,19 @@ final class AudioInfo {
             } catch (Throwable ignored) {}
         }
 
-        // 5) Samsung One UI + Galaxy Buds SSC / SSC-UHQ detection (checks alias, raw BT name, product name & Buds UUIDs)
+        // 5) Samsung One UI + Galaxy Buds vs third-party LDAC / aptX / LHDC resolution
         String allNames = (s.deviceName + " " + btRawName + " " + productName).toLowerCase(Locale.US);
         boolean buds = samsungBudsUuid || isGalaxyBuds(allNames);
-        if (isSamsungDevice() && buds) {
-            boolean uhqModel = isSamsungUhqModel(allNames);
-            boolean hiRes24Model = uhqModel || allNames.contains("buds2 pro") || allNames.contains("buds 2 pro")
-                    || allNames.contains("버즈2 프로") || allNames.contains("버즈 2 프로") || allNames.contains("sm-r510");
+        resolveBluetoothCodec(s, isSamsungDevice(), allNames, buds, ble);
+    }
+
+    /** Resolves final BT codec without ever mislabeling non-Buds LDAC/aptX devices as SSC-UHQ. */
+    static void resolveBluetoothCodec(OutputSpec s, boolean samsungHost, String allNames, boolean buds, boolean ble) {
+        String n = allNames == null ? "" : allNames.toLowerCase(Locale.US);
+        if (samsungHost && buds) {
+            boolean uhqModel = isSamsungUhqModel(n);
+            boolean hiRes24Model = uhqModel || n.contains("buds2 pro") || n.contains("buds 2 pro")
+                    || n.contains("버즈2 프로") || n.contains("버즈 2 프로") || n.contains("sm-r510");
             if (s.codec.isEmpty() || "SBC".equals(s.codec) || "AAC".equals(s.codec) || "LC3".equals(s.codec)) {
                 if (uhqModel || (s.bits >= 24 && s.khz >= 96f)) {
                     s.codec = "SSC-UHQ";
@@ -316,16 +322,26 @@ final class AudioInfo {
                 if (s.bits < 24) s.bits = 24;
                 if (s.khz < 96f) s.khz = 96f;
             }
-        } else if (isSamsungDevice() && ("SSC".equals(s.codec) || s.codec.isEmpty()) && s.bits >= 24 && s.khz >= 96f) {
-            s.codec = "SSC-UHQ";
+            return;
         }
-
-        // 6) Clean fallback for third-party devices so it never shows a bare "Bluetooth" label
+        // Only upgrade explicit "SSC" (never empty codec!) on non-named Samsung SSC sinks
+        if (samsungHost && "SSC".equals(s.codec) && s.bits >= 24 && s.khz >= 96f) {
+            s.codec = "SSC-UHQ";
+            return;
+        }
         if (s.codec == null || s.codec.isEmpty()) {
-            if (allNames.contains("airpods") || allNames.contains("beats")) {
+            if (n.contains("airpods") || n.contains("beats")) {
                 s.codec = "AAC";
-            } else if ((allNames.contains("wh-1000") || allNames.contains("wf-1000") || allNames.contains("linkbuds")) && (s.khz >= 96f || s.bits >= 24)) {
-                s.codec = "LDAC";
+            } else if (s.khz >= 96f || s.bits >= 24) {
+                if (n.contains("aptx") || n.contains("sennheiser") || n.contains("momentum")
+                        || n.contains("bose") || n.contains("bowers") || n.contains("denon")) {
+                    s.codec = "aptX Adaptive";
+                } else if (n.contains("lhdc") || n.contains("nothing") || n.contains("oneplus")
+                        || n.contains("xiaomi") || n.contains("redmi")) {
+                    s.codec = "LHDC";
+                } else {
+                    s.codec = "LDAC";
+                }
             } else if (ble) {
                 s.codec = "LC3";
             } else {

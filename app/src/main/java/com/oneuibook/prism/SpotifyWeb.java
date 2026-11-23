@@ -252,6 +252,11 @@ final class SpotifyWeb {
         } catch (Exception ignored) {}
     }
 
+    static void restoreVolume() {
+        fadeInPending = false;
+        if (web != null) web.evaluateJavascript("window.prismRestoreVol && window.prismRestoreVol()", null);
+    }
+
     private static void fadeIn() {
         if (!fadeInPending || web == null) return;
         fadeInPending = false;

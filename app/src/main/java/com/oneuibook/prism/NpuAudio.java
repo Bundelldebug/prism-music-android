@@ -737,6 +737,7 @@ final class NpuAudio {
     static final class ChipArtView extends View {
         private final ChipSpec spec;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint borderP = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final Path clipPath = new Path();
@@ -744,6 +745,7 @@ final class NpuAudio {
         ChipArtView(Context c, ChipSpec spec, String fallbackLabel) {
             super(c);
             this.spec = spec;
+            borderP.setStyle(Paint.Style.STROKE);
             tp.setTextAlign(Paint.Align.CENTER);
         }
 
@@ -757,20 +759,23 @@ final class NpuAudio {
 
             Bitmap bmp = (spec != null && spec.drawableRes != 0) ? chipBitmap(getContext(), spec.drawableRes) : null;
             if (bmp != null) {
+                p.setStyle(Paint.Style.FILL);
+                p.setShader(null);
+                p.setColor(0xFFFFFFFF);
+                p.setAlpha(255);
                 clipPath.reset();
                 clipPath.addRoundRect(r, rad, rad, Path.Direction.CW);
                 int sc = c.save();
                 c.clipPath(clipPath);
                 c.drawBitmap(bmp, null, r, p);
                 c.restoreToCount(sc);
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(Math.max(1f, Ui.dpf(0.6f)));
-                p.setColor(Ui.dark ? 0x26FFFFFF : 0x1A000000);
-                c.drawRoundRect(r, rad, rad, p);
-                p.setStyle(Paint.Style.FILL);
+                borderP.setStrokeWidth(Math.max(1f, Ui.dpf(0.6f)));
+                borderP.setColor(Ui.dark ? 0x26FFFFFF : 0x1A000000);
+                c.drawRoundRect(r, rad, rad, borderP);
                 return;
             }
             p.setStyle(Paint.Style.FILL);
+            p.setAlpha(255);
             p.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom, 0xFF1F2229, 0xFF2E323D, Shader.TileMode.CLAMP));
             c.drawRoundRect(r, rad, rad, p);
             p.setShader(null);

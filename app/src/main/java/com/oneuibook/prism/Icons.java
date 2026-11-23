@@ -463,18 +463,38 @@ final class Icons {
                 break;
             }
             case BUDS: {
-                // Galaxy Buds silhouette: twin angled blade stems with ergonomic rounded heads
-                P.setStyle(Paint.Style.FILL);
-                // Left bud head + blade stem
-                R.set(3.2f, 4.2f, 10.6f, 10.8f);
-                c.drawRoundRect(R, 3.3f, 3.3f, P);
-                R.set(6.6f, 9.6f, 9.4f, 19.8f);
-                c.drawRoundRect(R, 1.4f, 1.4f, P);
-                // Right bud head + blade stem
-                R.set(13.4f, 4.2f, 20.8f, 10.8f);
-                c.drawRoundRect(R, 3.3f, 3.3f, P);
-                R.set(14.6f, 9.6f, 17.4f, 19.8f);
-                c.drawRoundRect(R, 1.4f, 1.4f, P);
+                // Samsung One UI official Galaxy Buds3 / Buds3 Pro symmetric silhouette:
+                // ergonomic sculpted ear-head + inward eartip nozzle seamlessly flowing into a sleek angled blade stem
+                fill();
+                // Left earbud
+                p.moveTo(6.3f, 3.8f);
+                p.cubicTo(4.0f, 3.8f, 2.7f, 5.5f, 2.8f, 7.8f);
+                p.cubicTo(2.9f, 9.7f, 3.8f, 11.1f, 4.9f, 11.9f);
+                p.lineTo(5.6f, 19.3f);
+                p.cubicTo(5.7f, 20.2f, 6.4f, 20.6f, 7.1f, 20.5f);
+                p.cubicTo(7.8f, 20.4f, 8.2f, 19.8f, 8.1f, 19.0f);
+                p.lineTo(7.8f, 11.3f);
+                p.cubicTo(9.0f, 11.0f, 10.1f, 10.2f, 10.5f, 9.2f);
+                p.cubicTo(11.1f, 8.8f, 11.3f, 8.2f, 11.2f, 7.5f);
+                p.cubicTo(11.1f, 6.7f, 10.5f, 6.2f, 9.8f, 6.0f);
+                p.cubicTo(9.2f, 4.6f, 7.9f, 3.8f, 6.3f, 3.8f);
+                p.close();
+                c.drawPath(p, P);
+                // Right earbud (exact mirror of left across x = 12)
+                p.reset();
+                p.moveTo(17.7f, 3.8f);
+                p.cubicTo(20.0f, 3.8f, 21.3f, 5.5f, 21.2f, 7.8f);
+                p.cubicTo(21.1f, 9.7f, 20.2f, 11.1f, 19.1f, 11.9f);
+                p.lineTo(18.4f, 19.3f);
+                p.cubicTo(18.3f, 20.2f, 17.6f, 20.6f, 16.9f, 20.5f);
+                p.cubicTo(16.2f, 20.4f, 15.8f, 19.8f, 15.9f, 19.0f);
+                p.lineTo(16.2f, 11.3f);
+                p.cubicTo(15.0f, 11.0f, 13.9f, 10.2f, 13.5f, 9.2f);
+                p.cubicTo(12.9f, 8.8f, 12.7f, 8.2f, 12.8f, 7.5f);
+                p.cubicTo(12.9f, 6.7f, 13.5f, 6.2f, 14.2f, 6.0f);
+                p.cubicTo(14.8f, 4.6f, 16.1f, 3.8f, 17.7f, 3.8f);
+                p.close();
+                c.drawPath(p, P);
                 break;
             }
             case EARBUDS: {

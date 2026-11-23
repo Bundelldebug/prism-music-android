@@ -179,8 +179,7 @@ final class Spotify {
             // piling on (which only extends the penalty and made whole home sections fail after a fold / refresh)
             long cool = cooldownUntil - System.currentTimeMillis();
             if (cool > 0) {
-                // Never stall the whole IO thread pool for 10-30s on a long Retry-After
-                if (cool > 2500) throw new ApiError(429, "rate limited", "rate");
+                if (cool > 7000) throw new ApiError(429, "rate limited", "rate");
                 Thread.sleep(cool);
             }
             String url = path.startsWith("http") ? path : API + path;
@@ -205,9 +204,9 @@ final class Spotify {
             if (code == 429) {
                 long wait = 2;
                 try { wait = Math.max(1, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Exception ignored) {}
-                long capWait = Math.min(wait, 15);
+                long capWait = Math.min(wait, 6);
                 cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + capWait * 1000L);
-                if (wait <= 5 && attempt == 0) continue;
+                if (wait <= 6 && attempt == 0) continue;
                 throw new ApiError(429, "rate limited (" + wait + "s)", "rate");
             }
             String text = read(code >= 400 ? c.getErrorStream() : c.getInputStream());
@@ -425,27 +424,38 @@ final class Spotify {
 
     static String userId() { return prefs == null ? "" : prefs.getString("user_id", ""); }
 
-    /** Creates a Spotify playlist under the current user's account. */
+    /** Creates a Spotify playlist (2026 POST /me/playlists first, legacy /users/{uid}/playlists fallback). */
     static void createPlaylist(String name, String description, boolean isPublic, Cb cb) {
         IO.execute(() -> {
+            Exception last = null;
             try {
-                String uid = userId();
-                if (uid == null || uid.isEmpty()) {
-                    loadProfileSync();
-                    uid = userId();
-                }
-                if (uid == null || uid.isEmpty()) throw new ApiError(401, "missing user id", "login");
                 JSONObject body = new JSONObject()
                         .put("name", name)
                         .put("description", description == null ? "" : description)
                         .put("public", isPublic);
-                JSONObject o = call("POST", "/users/" + enc(uid) + "/playlists", body.toString());
-                if (cb != null) MAIN.post(() -> cb.ok(o));
-            } catch (Exception e) {
-                int code = e instanceof ApiError ? ((ApiError) e).code : 0;
-                String msg = String.valueOf(e.getMessage());
-                if (cb != null) MAIN.post(() -> cb.err(code, msg));
-            }
+                try {
+                    JSONObject o = call("POST", "/me/playlists", body.toString());
+                    GET_CACHE.clear();
+                    if (cb != null) MAIN.post(() -> cb.ok(o));
+                    return;
+                } catch (Exception e1) {
+                    last = e1;
+                }
+                String uid = userId();
+                if (uid == null || uid.isEmpty()) {
+                    try { loadProfileSync(); } catch (Exception ignored) {}
+                    uid = userId();
+                }
+                if (uid != null && !uid.isEmpty()) {
+                    JSONObject o2 = call("POST", "/users/" + enc(uid) + "/playlists", body.toString());
+                    GET_CACHE.clear();
+                    if (cb != null) MAIN.post(() -> cb.ok(o2));
+                    return;
+                }
+            } catch (Exception e) { last = e; }
+            int code = last instanceof ApiError ? ((ApiError) last).code : 0;
+            String msg = last == null ? "" : String.valueOf(last.getMessage());
+            if (cb != null) MAIN.post(() -> cb.err(code, msg));
         });
     }
 
@@ -461,37 +471,76 @@ final class Spotify {
         }
     }
 
-    /** Adds one or more track URIs to a Spotify playlist. */
+    /** Adds one or more track URIs to a Spotify playlist (2026 /items first, legacy /tracks fallback). */
     static void addTracksToPlaylist(String playlistId, java.util.List<String> uris, Cb cb) {
-        try {
-            JSONArray a = new JSONArray();
-            for (String u : uris) if (u != null && !u.isEmpty()) a.put(u);
-            JSONObject body = new JSONObject().put("uris", a);
-            send("POST", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
-        } catch (Exception e) {
-            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
-        }
+        IO.execute(() -> {
+            Exception last = null;
+            try {
+                JSONArray a = new JSONArray();
+                for (String u : uris) if (u != null && !u.isEmpty()) a.put(u);
+                String body = new JSONObject().put("uris", a).toString();
+                for (String suffix : new String[]{"/items", "/tracks"}) {
+                    try {
+                        JSONObject o = call("POST", "/playlists/" + enc(playlistId) + suffix, body);
+                        GET_CACHE.clear();
+                        if (cb != null) MAIN.post(() -> cb.ok(o));
+                        return;
+                    } catch (Exception e) { last = e; }
+                }
+            } catch (Exception e) { last = e; }
+            int code = last instanceof ApiError ? ((ApiError) last).code : 0;
+            String msg = last == null ? "" : String.valueOf(last.getMessage());
+            if (cb != null) MAIN.post(() -> cb.err(code, msg));
+        });
     }
 
-    /** Removes a track URI from a Spotify playlist. */
+    /** Removes a track URI from a Spotify playlist (2026 /items first, legacy /tracks fallback). */
     static void removeTrackFromPlaylist(String playlistId, String uri, Cb cb) {
-        try {
-            JSONArray tracks = new JSONArray().put(new JSONObject().put("uri", uri));
-            JSONObject body = new JSONObject().put("tracks", tracks);
-            send("DELETE", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
-        } catch (Exception e) {
-            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
-        }
+        IO.execute(() -> {
+            Exception last = null;
+            try {
+                JSONArray arr = new JSONArray().put(new JSONObject().put("uri", uri));
+                String bodyItems = new JSONObject().put("items", arr).toString();
+                String bodyTracks = new JSONObject().put("tracks", arr).toString();
+                String[][] tries = {
+                        {"/items", bodyItems},
+                        {"/items", bodyTracks},
+                        {"/tracks", bodyTracks}
+                };
+                for (String[] t : tries) {
+                    try {
+                        JSONObject o = call("DELETE", "/playlists/" + enc(playlistId) + t[0], t[1]);
+                        GET_CACHE.clear();
+                        if (cb != null) MAIN.post(() -> cb.ok(o));
+                        return;
+                    } catch (Exception e) { last = e; }
+                }
+            } catch (Exception e) { last = e; }
+            int code = last instanceof ApiError ? ((ApiError) last).code : 0;
+            String msg = last == null ? "" : String.valueOf(last.getMessage());
+            if (cb != null) MAIN.post(() -> cb.err(code, msg));
+        });
     }
 
-    /** Moves a single track inside a Spotify playlist from {@code from} to {@code insertBefore}. */
+    /** Moves a single track inside a Spotify playlist (2026 /items first, legacy /tracks fallback). */
     static void reorderPlaylistTrack(String playlistId, int from, int insertBefore, Cb cb) {
-        try {
-            JSONObject body = new JSONObject().put("range_start", from).put("insert_before", insertBefore);
-            send("PUT", "/playlists/" + enc(playlistId) + "/tracks", body.toString(), cb);
-        } catch (Exception e) {
-            if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
-        }
+        IO.execute(() -> {
+            Exception last = null;
+            try {
+                String body = new JSONObject().put("range_start", from).put("insert_before", insertBefore).toString();
+                for (String suffix : new String[]{"/items", "/tracks"}) {
+                    try {
+                        JSONObject o = call("PUT", "/playlists/" + enc(playlistId) + suffix, body);
+                        GET_CACHE.clear();
+                        if (cb != null) MAIN.post(() -> cb.ok(o));
+                        return;
+                    } catch (Exception e) { last = e; }
+                }
+            } catch (Exception e) { last = e; }
+            int code = last instanceof ApiError ? ((ApiError) last).code : 0;
+            String msg = last == null ? "" : String.valueOf(last.getMessage());
+            if (cb != null) MAIN.post(() -> cb.err(code, msg));
+        });
     }
 
     /** Checks whether the signed-in user follows the given artist ID (2026 /me/library first, legacy fallback). */

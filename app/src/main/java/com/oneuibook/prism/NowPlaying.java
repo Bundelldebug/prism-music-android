@@ -333,59 +333,63 @@ final class NowPlaying extends FrameLayout {
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
         if (wide) {
             bottomY = H - Ui.navInset - Ui.dpf(26);
-            colW = Math.min(W * 0.44f, H * (oneui ? 0.48f : 0.52f));
+            colW = Math.min(W * 0.43f, H * (oneui ? 0.44f : 0.46f));
             colX = Math.max(Ui.dpf(32), W * 0.045f);
-            float extraH = oneui ? Ui.dpf(248) : Ui.dpf(236);
+            float extraH = Ui.dpf(268);
             float block = colW + extraH;
-            float y0 = Math.max(top + Ui.dpf(20), (H - block) / 2f);
+            float y0 = Math.max(top + Ui.dpf(14), (H - block) / 2f);
             artBig.set(colX, y0, colX + colW, y0 + colW);
             artSmall.set(artBig);
             if (oneui) {
-                float devY = artBig.bottom + Ui.dpf(20);
-                titleBigY = devY + Ui.dpf(22);
+                float devY = artBig.bottom + Ui.dpf(22);
+                titleBigY = devY + Ui.dpf(28);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(74);
+                seekY = titleBigY + Ui.dpf(72);
                 timesY = seekY + Ui.dpf(20);
-                ctrlY = timesY + Ui.dpf(54);
+                ctrlY = timesY + Ui.dpf(68);
             } else {
-                titleBigY = artBig.bottom + Ui.dpf(34);
+                titleBigY = artBig.bottom + Ui.dpf(42);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(64);
-                timesY = seekY + Ui.dpf(22);
-                ctrlY = timesY + Ui.dpf(58);
+                seekY = titleBigY + Ui.dpf(60);
+                timesY = seekY + Ui.dpf(18);
+                // Keep comfortable breathing room between the output device pill (timesY..timesY+30) and play controls
+                ctrlY = timesY + Ui.dpf(78);
             }
             float px = colX + colW + Math.max(Ui.dpf(28), W * 0.04f);
             panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(28));
             return;
         }
         float side = Ui.dpf(28);
-        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 30 : 38);
+        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 24 : 34);
         if (oneui) {
-            // G style: rounded cover -> output-device + action row -> centred marquee title/artist -> wave bar -> controls -> volume
-            float s1 = Ui.dpf(24);
-            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.38f : 0.40f));
-            artBig.set((W - size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 40), (W + size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 40) + size);
+            // G style: generous cover on 16:10 wide cover screens too, then output chip -> title/artist -> wave -> controls -> volume
+            float s1 = Ui.dpf(Ui.cover() ? 18 : 24);
+            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.44f : 0.38f));
+            float topPad = top + Ui.dpf(Ui.cover() ? 22 : 36);
+            artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
             float sm = Ui.dpf(64);
             artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 24);
-            titleBigY = devY + Ui.dpf(24);
+            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26);
+            titleBigY = devY + Ui.dpf(Ui.cover() ? 26 : 36);
             titleSmallY = artSmall.centerY() - Ui.dpf(23);
-            seekY = titleBigY + Ui.dpf(Ui.cover() ? 70 : 80);
-            timesY = seekY + Ui.dpf(22);
-            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 52 : 56), (timesY + bottomY) / 2f - Ui.dpf(24));
+            seekY = titleBigY + Ui.dpf(Ui.cover() ? 66 : 80);
+            timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 22);
+            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 48 : 54), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 18 : 22));
             panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
             return;
         }
-        float size = Math.min(W - side * 2, H * (Ui.cover() ? 0.40f : 0.42f));
-        artBig.set((W - size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 42), (W + size) / 2f, top + Ui.dpf(Ui.cover() ? 24 : 42) + size);
+        float aSide = Ui.dpf(Ui.cover() ? 18 : 28);
+        float size = Math.min(W - aSide * 2, H * (Ui.cover() ? 0.46f : 0.40f));
+        float topPad = top + Ui.dpf(Ui.cover() ? 22 : 38);
+        artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
         float sm = Ui.dpf(64);
         artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-        titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 32 : 38);
+        titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 40 : 54);
         titleSmallY = artSmall.centerY() - Ui.dpf(23);
-        seekY = titleBigY + Ui.dpf(Ui.cover() ? 58 : 64);
-        timesY = seekY + Ui.dpf(20);
-        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 52 : 62);
-        ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(16) + bottomY) / 2f - Ui.dpf(6));
+        seekY = titleBigY + Ui.dpf(Ui.cover() ? 56 : 66);
+        timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 20);
+        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 54 : 58);
+        ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(14) + bottomY) / 2f - Ui.dpf(8));
         panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(18));
     }
 
@@ -449,7 +453,7 @@ final class NowPlaying extends FrameLayout {
             if (wide) { layoutWide(W); applyMode(); return; }
             if (oneui) { layoutOneUi(W); applyMode(); return; }
             int side = Ui.dp(28);
-            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(14));
+            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 10 : 14));
             place(title, side, (int) titleBigY);
             place(artist, side, (int) titleBigY + Ui.dp(30));
             place(star, W - side - Ui.dp(76), (int) titleBigY + Ui.dp(6));
@@ -490,9 +494,9 @@ final class NowPlaying extends FrameLayout {
         /** One UI 9.x (G style) media player: cover → device chip + AOD/star/more row → centred marquee title/artist → wave → controls → volume. */
         private void layoutOneUi(int W) {
             int side = Ui.dp(28);
-            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(14));
+            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 10 : 14));
             // output-device pill on left, AOD / like / more on right
-            int devY = (int) (artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 24));
+            int devY = (int) (artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26));
             place(chip, side, devY - chip.getMeasuredHeight() / 2);
             int rightX = W - side;
             place(more, rightX - more.getMeasuredWidth(), devY - more.getMeasuredHeight() / 2);
