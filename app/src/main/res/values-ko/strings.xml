@@ -330,4 +330,5 @@
     <string name="lyrics_ko_trans_note">기계 번역 대신, 자막 소스에 한국어 번역 자막이 함께 포함된 경우에만 원문 아래에 작게 표시해요.</string>
     <string name="lyrics_providers">가사 조회 소스</string>
     <string name="lyrics_clear_cache">가사 캐시 비우기</string>
+    <string name="artist_releases_retry">발매 목록을 불러오지 못했어요 (%1$s) · 탭하여 다시 시도</string>
 </resources>

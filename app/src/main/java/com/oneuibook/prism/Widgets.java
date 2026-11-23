@@ -45,6 +45,16 @@ final class Widgets {
             i.type = o.optString("type");
             i.id = o.optString("id");
             i.uri = o.optString("uri");
+            if ((i.id == null || i.id.isEmpty()) && i.uri != null && i.uri.startsWith("spotify:")) {
+                String[] parts = i.uri.split(":");
+                if (parts.length >= 3) {
+                    if (i.type == null || i.type.isEmpty()) i.type = parts[1];
+                    i.id = parts[2];
+                }
+            }
+            if ((i.uri == null || i.uri.isEmpty()) && i.id != null && !i.id.isEmpty() && i.type != null && !i.type.isEmpty()) {
+                i.uri = "spotify:" + i.type + ":" + i.id;
+            }
             i.title = o.optString("name");
             i.image = Spotify.image(o, 300);
             switch (i.type) {
@@ -207,10 +217,14 @@ final class Widgets {
     }
 
     static void addToRail(LinearLayout row, View card, int widthPx) {
+        addToRail(row, card, widthPx, true);
+    }
+
+    static void addToRail(LinearLayout row, View card, int widthPx, boolean animate) {
         row.addView(card, railLp(row, widthPx));
         // cards rise in one after another; done per card so a row can't be left half-animated
         int i = row.getChildCount() - 1;
-        if (i < 8) {
+        if (animate && i < 8) {
             card.setAlpha(0f);
             card.setTranslationY(Ui.dpf(18));
             card.animate().alpha(1f).translationY(0f).setStartDelay(i * 35L).setDuration(380)

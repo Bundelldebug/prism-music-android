@@ -330,4 +330,5 @@
     <string name="lyrics_ko_trans_note">機械翻訳は使わず、歌詞ソース自体に韓国語訳トラックが含まれている場合のみ原詞の下に表示します。</string>
     <string name="lyrics_providers">歌詞ソース</string>
     <string name="lyrics_clear_cache">歌詞キャッシュを消去</string>
+    <string name="artist_releases_retry">リリース一覧を読み込めませんでした (%1$s) · タップして再試行</string>
 </resources>

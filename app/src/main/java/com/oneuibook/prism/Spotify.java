@@ -175,11 +175,11 @@ final class Spotify {
             return f;
         }
         for (int attempt = 0; attempt < 3; attempt++) {
-            // shared rate-limit cooldown: once Spotify says "slow down", every request waits it out instead of
-            // piling on (which only extends the penalty and made whole home sections fail after a fold / refresh)
+            // shared rate-limit cooldown: short micro-bursts (<=3.5s) wait once; longer penalties fail fast instead of
+            // chaining 6s sleeps and hammering Spotify while its penalty window is still active.
             long cool = cooldownUntil - System.currentTimeMillis();
             if (cool > 0) {
-                if (cool > 7000) throw new ApiError(429, "rate limited", "rate");
+                if (cool > 3500) throw new ApiError(429, "rate limited", "rate");
                 Thread.sleep(cool);
             }
             String url = path.startsWith("http") ? path : API + path;
@@ -204,9 +204,9 @@ final class Spotify {
             if (code == 429) {
                 long wait = 2;
                 try { wait = Math.max(1, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Exception ignored) {}
-                long capWait = Math.min(wait, 6);
-                cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + capWait * 1000L);
-                if (wait <= 6 && attempt == 0) continue;
+                long storeWait = Math.min(wait, 30);
+                cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
+                if (wait <= 3 && attempt == 0) continue;
                 throw new ApiError(429, "rate limited (" + wait + "s)", "rate");
             }
             String text = read(code >= 400 ? c.getErrorStream() : c.getInputStream());

@@ -893,6 +893,78 @@ public class PrismUiTest {
         shot(ia, "81_wide_inner_4_3");
         ia.np.close(); idle(300);
 
+        // [13] 9.5.11 Artist discography on 4:3 wide foldable even when /artists/{id}/albums AND /search?type=album BOTH fail!
+        java.util.function.Function<String, org.json.JSONObject> prevFix = Spotify.fixtures;
+        try {
+            Ui.gStyle = true;
+            MainActivity.prefs(app).edit().putString("player_style", "oneui").commit();
+            Spotify.fixtures = req -> {
+                try {
+                    if (req.startsWith("GET /me/library/contains")) return new org.json.JSONObject().put("items", new org.json.JSONArray().put(true));
+                    if (req.startsWith("EVENTS ")) return new org.json.JSONObject().put("items", new org.json.JSONArray());
+                    if (req.contains("/albums") || req.contains("type=album")) return null; // simulate 403/429 block on BOTH endpoints!
+                    if (req.startsWith("GET /search?type=track")) {
+                        org.json.JSONArray trs = new org.json.JSONArray();
+                        org.json.JSONObject ar = new org.json.JSONObject().put("id", "avemujica1").put("name", "Ave Mujica").put("type", "artist").put("uri", "spotify:artist:avemujica1");
+                        org.json.JSONArray ars = new org.json.JSONArray().put(ar);
+                        String[][] rows = {
+                                {"t1", "BADDY BADDY", "al1", "BADDY BADDY", "single", "2025-09-01"},
+                                {"t2", "Ave Mujica", "al2", "Alea jacta est", "album", "2023-09-13"},
+                                {"t3", "KiLLKiSS", "al3", "KiLLKiSS", "single", "2025-01-15"},
+                                {"t4", "神の名を", "al4", "Completeness", "album", "2025-04-23"},
+                                {"t5", "Symbol I : △", "al5", "ELEMENTS", "album", "2024-10-02"},
+                                {"t6", "Georgette Me, Georgette You", "al3", "KiLLKiSS", "single", "2025-01-15"}
+                        };
+                        for (String[] r : rows) {
+                            org.json.JSONObject al = new org.json.JSONObject()
+                                    .put("type", "album").put("id", r[2]).put("uri", "spotify:album:" + r[2])
+                                    .put("name", r[3]).put("album_type", r[4]).put("release_date", r[5])
+                                    .put("artists", ars).put("images", new org.json.JSONArray());
+                            trs.put(new org.json.JSONObject()
+                                    .put("type", "track").put("id", r[0]).put("uri", "spotify:track:" + r[0])
+                                    .put("name", r[1]).put("duration_ms", 210000)
+                                    .put("artists", ars).put("album", al));
+                        }
+                        return new org.json.JSONObject().put("tracks", new org.json.JSONObject().put("items", trs));
+                    }
+                } catch (Exception ignored) {}
+                return prevFix != null ? prevFix.apply(req) : null;
+            };
+            Widgets.Item ave = Widgets.Item.of(new org.json.JSONObject()
+                    .put("type", "artist").put("id", "avemujica1").put("uri", "spotify:artist:avemujica1")
+                    .put("name", "Ave Mujica").put("images", new org.json.JSONArray()));
+            Pages.DetailPage dp = new Pages.DetailPage(ia, ave);
+            ia.push(dp);
+            Thread.sleep(100);
+            idle(900);
+            java.lang.reflect.Field slotsF = Pages.DetailPage.class.getDeclaredField("discogSlots");
+            slotsF.setAccessible(true);
+            android.widget.LinearLayout[] dSlots = (android.widget.LinearLayout[]) slotsF.get(dp);
+            assertTrue("Albums rail rendered even when /albums & search?type=album blocked", dSlots[0].getChildCount() >= 2);
+            assertTrue("Singles rail rendered even when /albums & search?type=album blocked", dSlots[1].getChildCount() >= 2);
+            dp.scroll.scrollTo(0, Ui.dp(240));
+            idle(200);
+            shot(ia, "84_artist_wide_albums");
+            ia.pop(); idle(300);
+
+            // Also verify direct /artists/{id}/albums path renders all release rails cleanly
+            Spotify.fixtures = PrismUiTest::fixture;
+            Widgets.Item directAr = Widgets.Item.of(new org.json.JSONObject()
+                    .put("type", "artist").put("id", "a0").put("uri", "spotify:artist:a0")
+                    .put("name", "Artist 0").put("images", new org.json.JSONArray()));
+            Pages.DetailPage dp2 = new Pages.DetailPage(ia, directAr);
+            ia.push(dp2);
+            Thread.sleep(100);
+            idle(900);
+            android.widget.LinearLayout[] dSlots2 = (android.widget.LinearLayout[]) slotsF.get(dp2);
+            assertTrue("Direct /artists/{id}/albums populates Albums rail", dSlots2[0].getChildCount() >= 2);
+            ia.pop(); idle(300);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            Spotify.fixtures = prevFix;
+        }
+
         AudioInfo.testSpec = null;
         NpuAudio.testSupportedOverride = null;
         NpuAudio.testSocOverride = null;

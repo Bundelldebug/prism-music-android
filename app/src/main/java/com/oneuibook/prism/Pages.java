@@ -1304,10 +1304,30 @@ final class Pages {
                     JSONObject t = o.optJSONObject("tracks");
                     JSONArray a = t == null ? null : t.optJSONArray("items");
                     List<Widgets.Item> l = items(a);
+                    if (l.isEmpty()) { loadAlbumTracksFallback(o); return; }
                     String img = Spotify.image(o, 120);
                     for (Widgets.Item it : l) {
                         it.image = img;
                         try { it.raw.put("album", new JSONObject().put("name", o.optString("name")).put("uri", o.optString("uri")).put("images", o.optJSONArray("images"))); } catch (Exception ignored) {}
+                    }
+                    showTracks(l, true);
+                }
+                @Override public void err(int c, String e) { loadAlbumTracksFallback(item.raw); }
+            });
+        }
+
+        private void loadAlbumTracksFallback(JSONObject albumObj) {
+            Spotify.get("/albums/" + item.id + "/tracks?limit=10", new Spotify.Cb() {
+                @Override public void ok(JSONObject o) {
+                    List<Widgets.Item> l = items(o.optJSONArray("items"));
+                    if (l.isEmpty()) { failed(); return; }
+                    JSONObject src = albumObj != null ? albumObj : item.raw;
+                    String img = src != null ? Spotify.image(src, 120) : item.image;
+                    for (Widgets.Item it : l) {
+                        it.image = img;
+                        if (src != null) {
+                            try { it.raw.put("album", new JSONObject().put("name", src.optString("name", item.title)).put("uri", src.optString("uri", item.uri)).put("images", src.optJSONArray("images"))); } catch (Exception ignored) {}
+                        }
                     }
                     showTracks(l, true);
                 }
@@ -1317,6 +1337,11 @@ final class Pages {
 
         // ------------------------------------------------------------ artist
         private LinearLayout topSlot;
+        private LinearLayout[] discogSlots;
+        private LinearLayout discogStatusSlot;
+        private int discogGen;
+        private final Object discogLock = new Object();
+        private final List<LinkedHashMap<String, JSONObject>> discogBuckets = new ArrayList<>(4);
         private boolean following;
         private boolean followBusy;
         private LinearLayout followBtn;
@@ -1516,8 +1541,7 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            LinearLayout sAlbum = slot(), sSingle = slot(), sAppears = slot(), sComp = slot();
-            loadAllArtistGroups(sAlbum, sSingle, sAppears, sComp);
+            initArtistDiscog();
             loadArtistEvents(slot());
             loadArtistTracks();
         }
@@ -1561,16 +1585,31 @@ final class Pages {
             topSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
             list = slot();
             list.addView(Widgets.spinner(m, 120));
-            LinearLayout sAlbum = slot(), sSingle = slot(), sAppears = slot(), sComp = slot();
-            loadAllArtistGroups(sAlbum, sSingle, sAppears, sComp);
+            initArtistDiscog();
             loadArtistEvents(slot());
             loadArtistTracks();
         }
 
+        /** Sets up the 4 horizontal 9.5.7 release slots (album / single / appears_on / compilation) and starts loading. */
+        private void initArtistDiscog() {
+            final int gen = ++discogGen;
+            synchronized (discogLock) {
+                discogBuckets.clear();
+                for (int i = 0; i < 4; i++) discogBuckets.add(new LinkedHashMap<>());
+            }
+            discogSlots = new LinearLayout[]{slot(), slot(), slot(), slot()};
+            discogStatusSlot = slot();
+            discogStatusSlot.addView(Widgets.spinner(main, 64));
+            loadAllArtistGroups(gen);
+        }
+
         private void loadArtistTracks() {
+            final int gen = discogGen;
             Spotify.IO.execute(() -> {
                 // /artists/{id}/top-tracks was removed in Spotify's Feb 2026 dev-mode update -> go straight to 1 cached search!
-                JSONArray tracks = new JSONArray();
+                JSONArray trArr = new JSONArray();
+                String wantId = item.id == null ? "" : item.id;
+                String wantName = normArtistName(item.title);
                 try {
                     String q = "/search?type=track&limit=10&q=" + Spotify.enc("artist:\"" + item.title + "\"");
                     JSONObject t = Spotify.callCached(q).optJSONObject("tracks");
@@ -1578,11 +1617,30 @@ final class Pages {
                     if (a != null) {
                         for (int i = 0; i < a.length(); i++) {
                             JSONObject tr = a.optJSONObject(i);
-                            if (tr != null) tracks.put(tr);
+                            if (tr != null) trArr.put(tr);
                         }
                     }
                 } catch (Exception ignored) {}
-                final JSONArray ft = tracks;
+                // Fallback for artists whose localized/punctuation name doesn't match quoted artist:"..."
+                if (trArr.length() == 0 && item.title != null && !item.title.trim().isEmpty()) {
+                    try {
+                        String q2 = "/search?type=track&limit=10&q=" + Spotify.enc(item.title);
+                        JSONObject t2 = Spotify.callCached(q2).optJSONObject("tracks");
+                        JSONArray a2 = t2 == null ? null : t2.optJSONArray("items");
+                        if (a2 != null) {
+                            for (int i = 0; i < a2.length(); i++) {
+                                JSONObject tr = a2.optJSONObject(i);
+                                if (tr != null && artistMatchRank(tr.optJSONArray("artists"), wantId, wantName) > 0) trArr.put(tr);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+                // Immediately seed release rails from these proven tracks (0 extra API calls!) so albums appear the
+                // instant Popular Songs appear, even if /artists/{id}/albums or /search?type=album is 403/429!
+                if (trArr.length() > 0 && mergeTracksIntoDiscog(gen, trArr, true)) {
+                    Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                }
+                final JSONArray ft = trArr;
                 Spotify.MAIN.post(() -> showTopTracks(items(ft)));
             });
         }
@@ -1613,161 +1671,304 @@ final class Pages {
         }
 
         /**
-         * 9.5.7 horizontal rail UI with 3-tier fallback so artist discography ALWAYS loads even under
-         * 2026 Spotify Development Mode restrictions:
-         *   1) GET /artists/{id}/albums (with explicit user market if available, then without market)
-         *   2) Free-text album search (/search?type=album&q=<name>, NO quotes or artist: operator bug!)
-         *      filtered strictly by matching artist ID / normalized name
-         *   3) Extract unique albums/singles from track search (/search?type=track&q=<name>) as final guarantee
+         * 9.5.7 horizontal rail UI engineered for 2026 Spotify Development Mode:
+         *   0) Instant 0-call seed from loadArtistTracks() (already merged as soon as Popular Songs arrive)
+         *   1) Single lightweight probe to GET /artists/{id}/albums?limit=10 (no market param first, matching 9.5.7);
+         *      if it succeeds, upgrades all 4 groups (aborts immediately on any 400/403/404/429 — never chains 429 sleeps!)
+         *   2) Free-text album search (/search?type=album&q=<name>) filtered by artist ID / normalized name
+         *   3) Second page of track search (offset=10) if total releases < 6
          */
-        private void loadAllArtistGroups(LinearLayout sAlbum, LinearLayout sSingle, LinearLayout sAppears, LinearLayout sComp) {
+        private void loadAllArtistGroups(int gen) {
             Spotify.IO.execute(() -> {
-                LinearLayout[] slots = {sAlbum, sSingle, sAppears, sComp};
-                String[] groups = {"album", "single", "appears_on", "compilation"};
-                String[] titles = {main.getString(R.string.albums), main.getString(R.string.singles_eps),
-                        main.getString(R.string.appears_on), main.getString(R.string.compilations)};
+                String wantId = item.id == null ? "" : item.id;
+                String wantName = normArtistName(item.title);
                 String mkt = (Spotify.country != null && Spotify.country.length() == 2) ? ("&market=" + Spotify.enc(Spotify.country)) : "";
-                boolean anyShown = false;
-                boolean endpointBlocked = false;
+                StringBuilder errLog = new StringBuilder();
+                boolean rateLimited = false;
+                boolean directWorked = false;
+                String workingMkt = "";
 
-                // Tier 1: Direct /artists/{id}/albums per group
-                for (int gi = 0; gi < groups.length && !endpointBlocked; gi++) {
-                    JSONArray all = new JSONArray();
-                    java.util.Set<String> seen = new java.util.HashSet<>();
-                    for (int off = 0; off < 20; off += 10) {
-                        JSONObject o = null;
+                // Step 1: Single lightweight probe on /artists/{id}/albums?limit=10 (NO market first, just like 9.5.7)
+                if (!wantId.isEmpty()) {
+                    JSONObject probe = null;
+                    int probeErr = 0;
+                    try {
+                        probe = Spotify.callCached("/artists/" + wantId + "/albums?limit=10&offset=0");
+                    } catch (Spotify.ApiError ae) {
+                        probeErr = ae.code;
+                        if (ae.code == 429) rateLimited = true;
+                    } catch (Exception ignored) { probeErr = -1; }
+
+                    JSONArray probeItems = probe == null ? null : probe.optJSONArray("items");
+                    if (!rateLimited && (probeItems == null || probeItems.length() == 0) && !mkt.isEmpty() && probeErr != 403 && probeErr != 404) {
                         try {
-                            o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off + mkt);
-                        } catch (Spotify.ApiError ae) {
-                            if (ae.code == 403 || ae.code == 404) {
-                                // Retry once without market parameter; if still 403/404, endpoint is blocked in dev mode
-                                if (!mkt.isEmpty()) {
-                                    try { o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off); }
-                                    catch (Spotify.ApiError ae2) { if (ae2.code == 403 || ae2.code == 404) endpointBlocked = true; }
-                                    catch (Exception ignored2) {}
-                                } else {
-                                    endpointBlocked = true;
+                            JSONObject p2 = Spotify.callCached("/artists/" + wantId + "/albums?limit=10&offset=0" + mkt);
+                            JSONArray a2 = p2 == null ? null : p2.optJSONArray("items");
+                            if (a2 != null && a2.length() > 0) {
+                                probe = p2;
+                                probeItems = a2;
+                                workingMkt = mkt;
+                                probeErr = 0;
+                            }
+                        } catch (Spotify.ApiError ae2) {
+                            if (probeErr == 0) probeErr = ae2.code;
+                            if (ae2.code == 429) rateLimited = true;
+                        } catch (Exception ignored) {}
+                    }
+
+                    if (probeItems != null && probeItems.length() > 0) {
+                        directWorked = true;
+                        if (mergeAlbumsIntoDiscog(gen, probeItems, -1, wantId, wantName)) {
+                            Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                        }
+                        // Fetch per-group pages (max 2 pages per group, abort immediately on ANY error/429!)
+                        String[] groups = {"album", "single", "appears_on", "compilation"};
+                        boolean stopDirect = false;
+                        for (int gi = 0; gi < groups.length && !stopDirect; gi++) {
+                            for (int off = 0; off < 20 && !stopDirect; off += 10) {
+                                try {
+                                    JSONObject o = Spotify.callCached("/artists/" + wantId + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=" + off + workingMkt);
+                                    JSONArray a = o == null ? null : o.optJSONArray("items");
+                                    if (a == null || a.length() == 0) break;
+                                    if (mergeAlbumsIntoDiscog(gen, a, gi, wantId, wantName)) {
+                                        Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                                    }
+                                    String next = o.optString("next", null);
+                                    if (next == null || "null".equals(next)) break;
+                                } catch (Spotify.ApiError ae) {
+                                    if (ae.code == 429) rateLimited = true;
+                                    stopDirect = true;
+                                } catch (Exception ignored) {
+                                    stopDirect = true;
                                 }
                             }
-                        } catch (Exception ignored) {}
-                        if (o == null) break;
-                        JSONArray a = o.optJSONArray("items");
-                        if ((a == null || a.length() == 0) && !mkt.isEmpty() && off == 0) {
-                            try {
-                                o = Spotify.callCached("/artists/" + item.id + "/albums?include_groups=" + groups[gi] + "&limit=10&offset=0");
-                                a = o == null ? null : o.optJSONArray("items");
-                            } catch (Exception ignored) {}
                         }
-                        if (a == null || a.length() == 0) break;
-                        for (int i = 0; i < a.length(); i++) {
-                            JSONObject al = a.optJSONObject(i);
-                            if (al != null && seen.add(al.optString("name").toLowerCase(java.util.Locale.ROOT))) all.put(al);
-                        }
-                        String next = o.optString("next", null);
-                        if (next == null || "null".equals(next)) break;
-                    }
-                    if (all.length() > 0) {
-                        anyShown = true;
-                        final LinearLayout slot = slots[gi];
-                        final String title = titles[gi];
-                        final JSONArray res = all;
-                        Spotify.MAIN.post(() -> render957Rail(slot, title, items(res)));
+                    } else if (probeErr != 0) {
+                        errLog.append("albums ").append(probeErr > 0 ? probeErr : "net");
                     }
                 }
 
-                // Tier 2 + Tier 3: Free-text album search + track-album extraction (never uses buggy artist:"..." on type=album!)
-                if (!anyShown) {
-                    JSONArray alArr = new JSONArray(), sgArr = new JSONArray(), apArr = new JSONArray(), cpArr = new JSONArray();
-                    java.util.Set<String> seen = new java.util.HashSet<>();
-                    String wantId = item.id == null ? "" : item.id;
-                    String wantName = item.title == null ? "" : item.title.trim().toLowerCase(java.util.Locale.ROOT);
-
-                    // Tier 2: Free-text album search (2 pages = up to 20 candidate albums)
-                    for (int off = 0; off < 20; off += 10) {
+                // Step 2: Free-text album search (runs whenever direct endpoint failed or returned < 4 releases)
+                if (!rateLimited && (!directWorked || discogCount(gen) < 4) && item.title != null && !item.title.trim().isEmpty()) {
+                    for (int off = 0; off < 20 && !rateLimited; off += 10) {
                         try {
                             JSONObject s = Spotify.callCached("/search?type=album&limit=10&offset=" + off + "&q=" + Spotify.enc(item.title));
                             JSONObject albObj = s == null ? null : s.optJSONObject("albums");
                             JSONArray a = albObj == null ? null : albObj.optJSONArray("items");
                             if (a == null || a.length() == 0) break;
+                            boolean changed = false;
                             for (int i = 0; i < a.length(); i++) {
                                 JSONObject al = a.optJSONObject(i);
                                 if (al == null) continue;
-                                int matchRank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
-                                if (matchRank == 0) continue;
-                                String key = al.optString("name").toLowerCase(java.util.Locale.ROOT);
-                                if (!seen.add(key)) continue;
-                                classifyRelease(al, matchRank == 2, alArr, sgArr, apArr, cpArr);
+                                int rank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
+                                if (rank == 0) continue;
+                                int bucket = classifyBucket(al, rank == 2);
+                                if (putDiscog(gen, bucket, al)) changed = true;
                             }
+                            if (changed) Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                            if (a.length() < 10) break;
+                        } catch (Spotify.ApiError ae) {
+                            if (ae.code == 429) rateLimited = true;
+                            if (errLog.length() > 0) errLog.append(" · ");
+                            errLog.append("search ").append(ae.code);
+                            break;
                         } catch (Exception ignored) { break; }
                     }
-
-                    // Tier 3: Extract albums/singles/features from track search (already proven to work in dev mode!)
-                    if (alArr.length() == 0 && sgArr.length() == 0 && apArr.length() == 0) {
-                        for (String qStr : new String[]{"artist:\"" + item.title + "\"", item.title}) {
-                            try {
-                                JSONObject s = Spotify.callCached("/search?type=track&limit=10&q=" + Spotify.enc(qStr));
-                                JSONObject trObj = s == null ? null : s.optJSONObject("tracks");
-                                JSONArray a = trObj == null ? null : trObj.optJSONArray("items");
-                                if (a == null) continue;
-                                for (int i = 0; i < a.length(); i++) {
-                                    JSONObject tr = a.optJSONObject(i);
-                                    if (tr == null) continue;
-                                    JSONObject al = tr.optJSONObject("album");
-                                    if (al == null) continue;
-                                    int arRank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
-                                    int trRank = artistMatchRank(tr.optJSONArray("artists"), wantId, wantName);
-                                    if (arRank == 0 && trRank == 0) continue;
-                                    String key = al.optString("name").toLowerCase(java.util.Locale.ROOT);
-                                    if (!seen.add(key)) continue;
-                                    classifyRelease(al, arRank == 0 || arRank == 2, alArr, sgArr, apArr, cpArr);
-                                }
-                                if (alArr.length() > 0 || sgArr.length() > 0 || apArr.length() > 0) break;
-                            } catch (Exception ignored) {}
-                        }
-                    }
-
-                    if (alArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sAlbum, titles[0], items(alArr)));
-                    if (sgArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sSingle, titles[1], items(sgArr)));
-                    if (apArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sAppears, titles[2], items(apArr)));
-                    if (cpArr.length() > 0) Spotify.MAIN.post(() -> render957Rail(sComp, titles[3], items(cpArr)));
                 }
+
+                // Step 3: Second page of track search to catch more releases when direct album endpoint is blocked
+                if (!rateLimited && !directWorked && discogCount(gen) < 6 && item.title != null && !item.title.trim().isEmpty()) {
+                    try {
+                        JSONObject s = Spotify.callCached("/search?type=track&limit=10&offset=10&q=" + Spotify.enc("artist:\"" + item.title + "\""));
+                        JSONObject trObj = s == null ? null : s.optJSONObject("tracks");
+                        JSONArray a = trObj == null ? null : trObj.optJSONArray("items");
+                        if (a != null && a.length() > 0 && mergeTracksIntoDiscog(gen, a, false)) {
+                            Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                final String errSummary = errLog.length() > 0 ? errLog.toString() : "empty";
+                Spotify.MAIN.post(() -> finishDiscog(gen, errSummary));
             });
+        }
+
+        private int discogCount(int gen) {
+            synchronized (discogLock) {
+                if (gen != discogGen || discogBuckets.size() < 4) return 0;
+                int n = 0;
+                for (LinkedHashMap<String, JSONObject> b : discogBuckets) n += b.size();
+                return n;
+            }
+        }
+
+        private boolean putDiscog(int gen, int bucket, JSONObject al) {
+            if (al == null || bucket < 0 || bucket >= 4) return false;
+            String id = al.optString("id", "");
+            String uri = al.optString("uri", "");
+            if (id.isEmpty() && uri.startsWith("spotify:album:")) id = uri.substring("spotify:album:".length());
+            String name = al.optString("name", "").trim();
+            if (id.isEmpty() || name.isEmpty()) return false;
+            String key = name.toLowerCase(java.util.Locale.ROOT);
+            synchronized (discogLock) {
+                if (gen != discogGen || discogBuckets.size() < 4) return false;
+                // Avoid placing the exact same release in two different rails (prefer album/single over appears_on)
+                for (int bi = 0; bi < 4; bi++) {
+                    if (bi == bucket) continue;
+                    if (discogBuckets.get(bi).containsKey(key)) {
+                        if (bi < bucket) return false;
+                        discogBuckets.get(bi).remove(key);
+                    }
+                }
+                LinkedHashMap<String, JSONObject> map = discogBuckets.get(bucket);
+                if (map.containsKey(key)) return false;
+                map.put(key, al);
+                return true;
+            }
+        }
+
+        private boolean mergeAlbumsIntoDiscog(int gen, JSONArray arr, int forcedBucket, String wantId, String wantName) {
+            boolean changed = false;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject al = arr.optJSONObject(i);
+                if (al == null) continue;
+                int bucket = forcedBucket;
+                if (bucket < 0) {
+                    String grp = al.optString("album_group", "").toLowerCase(java.util.Locale.ROOT);
+                    if ("album".equals(grp)) bucket = 0;
+                    else if ("single".equals(grp)) bucket = 1;
+                    else if ("appears_on".equals(grp)) bucket = 2;
+                    else if ("compilation".equals(grp)) bucket = 3;
+                    else {
+                        int rank = artistMatchRank(al.optJSONArray("artists"), wantId, wantName);
+                        bucket = classifyBucket(al, rank == 2);
+                    }
+                }
+                if (putDiscog(gen, bucket, al)) changed = true;
+            }
+            return changed;
+        }
+
+        private boolean mergeTracksIntoDiscog(int gen, JSONArray trArr, boolean trustArtist) {
+            boolean changed = false;
+            String wantId = item.id == null ? "" : item.id;
+            String wantName = normArtistName(item.title);
+            for (int i = 0; i < trArr.length(); i++) {
+                JSONObject tr = trArr.optJSONObject(i);
+                if (tr == null) continue;
+                JSONObject al = tr.optJSONObject("album");
+                if (al == null) continue;
+                JSONArray alArtists = al.optJSONArray("artists");
+                int arRank = artistMatchRank(alArtists, wantId, wantName);
+                int trRank = artistMatchRank(tr.optJSONArray("artists"), wantId, wantName);
+                if (!trustArtist && arRank == 0 && trRank == 0) continue;
+                boolean isAppears = (arRank == 2) || (arRank == 0 && trRank > 0 && alArtists != null && alArtists.length() > 0);
+                int bucket = classifyBucket(al, isAppears);
+                if (putDiscog(gen, bucket, al)) changed = true;
+            }
+            return changed;
+        }
+
+        private void renderDiscogBuckets(int gen) {
+            if (gen != discogGen || discogSlots == null || discogSlots.length < 4) return;
+            String[] titles = {main.getString(R.string.albums), main.getString(R.string.singles_eps),
+                    main.getString(R.string.appears_on), main.getString(R.string.compilations)};
+            JSONArray[] snaps = new JSONArray[4];
+            int total = 0;
+            synchronized (discogLock) {
+                if (gen != discogGen || discogBuckets.size() < 4) return;
+                for (int bi = 0; bi < 4; bi++) {
+                    JSONArray a = new JSONArray();
+                    for (JSONObject o : discogBuckets.get(bi).values()) a.put(o);
+                    snaps[bi] = a;
+                    total += a.length();
+                }
+            }
+            if (total > 0 && discogStatusSlot != null) discogStatusSlot.removeAllViews();
+            for (int bi = 0; bi < 4; bi++) {
+                List<Widgets.Item> l = items(snaps[bi]);
+                if (l.isEmpty()) continue;
+                // Newest releases first (YYYY-MM-DD lexicographical descending)
+                java.util.Collections.sort(l, (a, b) -> {
+                    String da = a.raw == null ? "" : a.raw.optString("release_date", "");
+                    String db = b.raw == null ? "" : b.raw.optString("release_date", "");
+                    return db.compareTo(da);
+                });
+                render957Rail(discogSlots[bi], titles[bi], l);
+            }
+        }
+
+        private void finishDiscog(int gen, String errSummary) {
+            if (gen != discogGen) return;
+            renderDiscogBuckets(gen);
+            if (discogStatusSlot == null) return;
+            discogStatusSlot.removeAllViews();
+            if (discogCount(gen) > 0) return;
+            TextView retry = Ui.text(main, main.getString(R.string.artist_releases_retry, errSummary), 13, Ui.medium, Ui.text2());
+            retry.setSingleLine(false);
+            retry.setPadding(Ui.dp(20), Ui.dp(10), Ui.dp(20), Ui.dp(10));
+            retry.setBackground(Widgets.ripple());
+            retry.setOnClickListener(v -> {
+                Spotify.cooldownUntil = 0;
+                if (discogStatusSlot != null) {
+                    discogStatusSlot.removeAllViews();
+                    discogStatusSlot.addView(Widgets.spinner(main, 64));
+                }
+                loadAllArtistGroups(discogGen);
+                if (tracks.isEmpty()) loadArtistTracks();
+            });
+            discogStatusSlot.addView(retry, Widgets.MW);
+        }
+
+        private static String normArtistName(String s) {
+            if (s == null) return "";
+            return s.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
         }
 
         /** Returns 1 if primary artist matches, 2 if featured/secondary artist matches, 0 if no match. */
         private static int artistMatchRank(JSONArray artists, String wantId, String wantName) {
             if (artists == null) return 0;
+            String wantCompact = wantName.replaceAll("[\\s\\p{Punct}]+", "");
             for (int i = 0; i < artists.length(); i++) {
                 JSONObject ar = artists.optJSONObject(i);
                 if (ar == null) continue;
                 String id = ar.optString("id", "");
-                String nm = ar.optString("name", "").trim().toLowerCase(java.util.Locale.ROOT);
-                if ((!wantId.isEmpty() && wantId.equals(id)) || (!wantName.isEmpty() && wantName.equals(nm))) {
-                    return i == 0 ? 1 : 2;
-                }
+                String nm = normArtistName(ar.optString("name", ""));
+                boolean match = (!wantId.isEmpty() && wantId.equals(id))
+                        || (!wantName.isEmpty() && wantName.equals(nm))
+                        || (!wantCompact.isEmpty() && wantCompact.length() >= 3 && wantCompact.equals(nm.replaceAll("[\\s\\p{Punct}]+", "")));
+                if (match) return i == 0 ? 1 : 2;
             }
             return 0;
         }
 
-        private static void classifyRelease(JSONObject al, boolean isAppearsOn, JSONArray alArr, JSONArray sgArr, JSONArray apArr, JSONArray cpArr) {
+        private static int classifyBucket(JSONObject al, boolean isAppearsOn) {
+            if (isAppearsOn) return 2;
             String tp = al.optString("album_type", "album").toLowerCase(java.util.Locale.ROOT);
-            if (isAppearsOn) apArr.put(al);
-            else if ("single".equals(tp)) sgArr.put(al);
-            else if ("compilation".equals(tp)) cpArr.put(al);
-            else alArr.put(al);
+            if ("single".equals(tp)) return 1;
+            if ("compilation".equals(tp)) return 3;
+            return 0;
         }
 
         private void render957Rail(LinearLayout slot, String title, List<Widgets.Item> l) {
             if (l.isEmpty()) return;
+            StringBuilder sig = new StringBuilder();
+            for (Widgets.Item x : l) sig.append(x.id).append('|');
+            String s = sig.toString();
+            if (s.equals(slot.getTag())) return;
+            boolean animate = slot.getChildCount() == 0;
+            slot.setTag(s);
             slot.removeAllViews();
             slot.addView(Widgets.section(main, title + "  " + l.size()));
             LinearLayout row = Widgets.rail(slot, 10);
             int size = Widgets.squareDp();
             for (Widgets.Item x : l) {
-                String date = x.raw.optString("release_date", "");
+                if (x.type == null || x.type.isEmpty()) x.type = "album";
+                if ((x.uri == null || x.uri.isEmpty()) && x.id != null && !x.id.isEmpty()) x.uri = "spotify:album:" + x.id;
+                String date = x.raw == null ? "" : x.raw.optString("release_date", "");
                 x.subtitle = date.length() >= 4 ? date.substring(0, 4) : "";
                 x.count = -1;
-                Widgets.addToRail(row, Widgets.squareCard(main, x, size, v -> main.openItem(x)), Ui.dp(size));
+                Widgets.addToRail(row, Widgets.squareCard(main, x, size, v -> main.openItem(x)), Ui.dp(size), animate);
             }
         }
         private void playAt(int idx, boolean shuffle) {

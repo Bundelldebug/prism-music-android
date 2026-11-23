@@ -330,4 +330,5 @@
     <string name="lyrics_ko_trans_note">Displays native Korean subtitle tracks embedded in lyric sources under non-Korean lyrics (no machine translation).</string>
     <string name="lyrics_providers">Lyrics sources</string>
     <string name="lyrics_clear_cache">Clear lyrics cache</string>
+    <string name="artist_releases_retry">Couldn’t load releases (%1$s) · Tap to retry</string>
 </resources>
