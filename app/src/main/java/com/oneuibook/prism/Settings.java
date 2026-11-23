@@ -263,22 +263,24 @@ final class Settings {
         }
 
         private View buildIconPicker(MainActivity m) {
-            String cur = MainActivity.prefs(m).getString("app_icon", "rainbow");
+            String cur = MainActivity.prefs(m).getString("app_icon", "classic");
+            if (!"classic".equals(cur) && !"neon".equals(cur) && !"bloom".equals(cur)) cur = "classic";
             LinearLayout row = new LinearLayout(m);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setPadding(Ui.dp(14), Ui.dp(14), Ui.dp(14), Ui.dp(14));
+            row.setPadding(Ui.dp(12), Ui.dp(14), Ui.dp(12), Ui.dp(14));
             String[][] icons = {
-                    {"rainbow", m.getString(R.string.app_icon_rainbow)},
-                    {"classic", m.getString(R.string.app_icon_classic)}
+                    {"classic", m.getString(R.string.app_icon_classic)},
+                    {"neon", m.getString(R.string.app_icon_neon)},
+                    {"bloom", m.getString(R.string.app_icon_bloom)}
             };
-            int[] resIds = {R.mipmap.ic_launcher, R.mipmap.ic_launcher_classic};
+            int[] resIds = {R.mipmap.ic_launcher_classic, R.mipmap.ic_launcher_neon, R.mipmap.ic_launcher_bloom};
             for (int i = 0; i < icons.length; i++) {
                 final String key = icons[i][0];
                 final boolean sel = key.equals(cur);
                 LinearLayout card = new LinearLayout(m);
                 card.setOrientation(LinearLayout.VERTICAL);
                 card.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-                card.setPadding(Ui.dp(12), Ui.dp(14), Ui.dp(12), Ui.dp(12));
+                card.setPadding(Ui.dp(8), Ui.dp(13), Ui.dp(8), Ui.dp(11));
                 android.graphics.drawable.GradientDrawable bg = Ui.round(sel ? Ui.alpha(Ui.ACCENT, 0.11f) : Ui.chip(), 18);
                 bg.setStroke(Ui.dp(sel ? 2f : 0.8f), sel ? Ui.ACCENT : Ui.separator());
                 card.setBackground(bg);
@@ -288,47 +290,59 @@ final class Settings {
                 iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
                 iv.setOutlineProvider(new android.view.ViewOutlineProvider() {
                     @Override public void getOutline(View v, android.graphics.Outline o) {
-                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(18));
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(16));
                     }
                 });
                 iv.setClipToOutline(true);
                 iv.setElevation(Ui.dpf(4));
-                card.addView(iv, new LinearLayout.LayoutParams(Ui.dp(62), Ui.dp(62)));
+                card.addView(iv, new LinearLayout.LayoutParams(Ui.dp(56), Ui.dp(56)));
 
-                TextView lbl = Ui.text(m, icons[i][1], 13.5f, sel ? Ui.semibold : Ui.medium, sel ? Ui.ACCENT : Ui.text());
+                TextView lbl = Ui.text(m, icons[i][1], 12.5f, sel ? Ui.semibold : Ui.medium, sel ? Ui.ACCENT : Ui.text());
                 lbl.setGravity(android.view.Gravity.CENTER);
                 LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                llp.topMargin = Ui.dp(9);
+                llp.topMargin = Ui.dp(8);
                 card.addView(lbl, llp);
 
                 card.setOnClickListener(v -> {
-                    if (key.equals(MainActivity.prefs(m).getString("app_icon", "rainbow"))) return;
+                    String saved = MainActivity.prefs(m).getString("app_icon", "classic");
+                    if (key.equals(saved)) return;
                     applyAppIcon(m, key);
                     rebuild();
                 });
                 Ui.press(card, 0.96f);
                 LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                if (i == 0) clp.rightMargin = Ui.dp(10);
+                if (i < icons.length - 1) clp.rightMargin = Ui.dp(8);
                 row.addView(card, clp);
             }
             return row;
         }
 
         static void applyAppIcon(Context c, String key) {
-            boolean classic = "classic".equals(key);
-            MainActivity.prefs(c).edit().putString("app_icon", classic ? "classic" : "rainbow").apply();
+            if (!"neon".equals(key) && !"bloom".equals(key)) key = "classic";
+            MainActivity.prefs(c).edit().putString("app_icon", key).apply();
             try {
                 android.content.pm.PackageManager pm = c.getPackageManager();
                 String pkg = c.getPackageName();
-                android.content.ComponentName rainbowCn = new android.content.ComponentName(pkg, pkg + ".LauncherRainbow");
-                android.content.ComponentName classicCn = new android.content.ComponentName(pkg, pkg + ".LauncherClassic");
-                // Enable target alias FIRST before disabling the old one so Android never briefly sees 0 launcher activities
-                pm.setComponentEnabledSetting(classic ? classicCn : rainbowCn,
-                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                        android.content.pm.PackageManager.DONT_KILL_APP);
-                pm.setComponentEnabledSetting(classic ? rainbowCn : classicCn,
-                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                        android.content.pm.PackageManager.DONT_KILL_APP);
+                String[][] map = {
+                        {"classic", pkg + ".LauncherClassic"},
+                        {"neon", pkg + ".LauncherNeon"},
+                        {"bloom", pkg + ".LauncherBloom"}
+                };
+                // Enable target alias FIRST before disabling the others so Android never sees 0 launcher activities
+                for (String[] m : map) {
+                    if (m[0].equals(key)) {
+                        pm.setComponentEnabledSetting(new android.content.ComponentName(pkg, m[1]),
+                                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                android.content.pm.PackageManager.DONT_KILL_APP);
+                    }
+                }
+                for (String[] m : map) {
+                    if (!m[0].equals(key)) {
+                        pm.setComponentEnabledSetting(new android.content.ComponentName(pkg, m[1]),
+                                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                android.content.pm.PackageManager.DONT_KILL_APP);
+                    }
+                }
                 Toast.makeText(c, R.string.app_icon_changed, Toast.LENGTH_SHORT).show();
             } catch (Throwable ignored) {}
         }

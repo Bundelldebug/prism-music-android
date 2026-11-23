@@ -338,9 +338,10 @@
     <string name="playback_failed_code">재생을 시작하지 못했어요 (%1$s)</string>
     <string name="artist_releases_partial">일부 발매만 표시됨 (%1$s) · 탭하여 전체 불러오기</string>
     <string name="set_app_icon">앱 아이콘</string>
-    <string name="app_icon_rainbow">레인보우 프리즘</string>
     <string name="app_icon_classic">클래식 프리즘</string>
-    <string name="app_icon_note">정중앙 프리즘에서 전방향으로 무지개 프레임이 퍼지는 새 아이콘과 기존 클래식 아이콘 중 선택할 수 있어요.</string>
+    <string name="app_icon_neon">옵시디언 네온</string>
+    <string name="app_icon_bloom">스펙트럼 블룸</string>
+    <string name="app_icon_note">기본 클래식 프리즘 아이콘과 부드러운 무지개 그라데이션 아이콘(옵시디언 네온 프레임·전방향 스펙트럼 블룸) 중 선택할 수 있어요.</string>
     <string name="app_icon_changed">앱 아이콘을 바꿨어요. 홈 화면에 반영되기까지 잠시 걸릴 수 있어요.</string>
     <string name="lyrics_namuwiki">나무위키 실시간 번역 가사</string>
     <string name="lyrics_namuwiki_note">기본은 꺼짐입니다. 켜면 외국어 가사에 번역 자막이 없을 때 나무위키 문서의 한국어 번역을 실시간으로 매칭해 표시해요(접근이 제한된 경우 건너뜁니다).</string>

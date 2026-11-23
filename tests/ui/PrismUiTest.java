@@ -845,32 +845,33 @@ public class PrismUiTest {
         }
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "83_buds_icon_preview.png"))) { budsPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
 
-        // (b4) Render Rainbow Prism vs Classic Prism app icon preview
-        Bitmap appIcPrev = Bitmap.createBitmap(660, 360, Bitmap.Config.ARGB_8888);
+        // (b4) Render Classic Prism (Default) vs Obsidian Neon (#3) vs Spectrum Bloom (#5) app icon preview
+        Bitmap appIcPrev = Bitmap.createBitmap(960, 360, Bitmap.Config.ARGB_8888);
         Canvas acv = new Canvas(appIcPrev);
         acv.drawColor(0xFF141418);
         int[][] icRes = {
-                {R.drawable.ic_launcher_rainbow_bg, R.drawable.ic_launcher_rainbow_fg},
-                {R.drawable.ic_launcher_bg, R.drawable.ic_launcher_fg}
+                {R.drawable.ic_launcher_bg, R.drawable.ic_launcher_fg},
+                {R.drawable.ic_launcher_neon_bg, R.drawable.ic_launcher_neon_fg},
+                {R.drawable.ic_launcher_bloom_bg, R.drawable.ic_launcher_bloom_fg}
         };
-        String[] icLabels = {"Rainbow Prism (New)", "Classic Prism"};
-        for (int i = 0; i < 2; i++) {
-            float x0 = 36f + i * 310f;
+        String[] icLabels = {"Classic Prism (Default)", "Obsidian Neon (#3)", "Spectrum Bloom (#5)"};
+        for (int i = 0; i < 3; i++) {
+            float x0 = 26f + i * 314f;
             bp.setColor(0xFF22232A);
-            acv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 278f, 336f), 36f, 36f, bp);
+            acv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 280f, 336f), 36f, 36f, bp);
             acv.save();
             android.graphics.Path clip = new android.graphics.Path();
-            clip.addRoundRect(new android.graphics.RectF(x0 + 49f, 54f, x0 + 229f, 234f), 46f, 46f, android.graphics.Path.Direction.CW);
+            clip.addRoundRect(new android.graphics.RectF(x0 + 50f, 54f, x0 + 230f, 234f), 46f, 46f, android.graphics.Path.Direction.CW);
             acv.clipPath(clip);
             android.graphics.drawable.Drawable bgD = a.getDrawable(icRes[i][0]);
             android.graphics.drawable.Drawable fgD = a.getDrawable(icRes[i][1]);
-            if (bgD != null) { bgD.setBounds((int) (x0 + 25), 30, (int) (x0 + 253), 258); bgD.draw(acv); }
-            if (fgD != null) { fgD.setBounds((int) (x0 + 25), 30, (int) (x0 + 253), 258); fgD.draw(acv); }
+            if (bgD != null) { bgD.setBounds((int) (x0 + 6), 10, (int) (x0 + 274), 278); bgD.draw(acv); }
+            if (fgD != null) { fgD.setBounds((int) (x0 + 6), 10, (int) (x0 + 274), 278); fgD.draw(acv); }
             acv.restore();
             bp.setColor(0xFFEAEAF0);
-            bp.setTextSize(24f);
+            bp.setTextSize(22f);
             bp.setTextAlign(android.graphics.Paint.Align.CENTER);
-            acv.drawText(icLabels[i], x0 + 139f, 294f, bp);
+            acv.drawText(icLabels[i], x0 + 140f, 294f, bp);
         }
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "85_app_icons_preview.png"))) { appIcPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
 

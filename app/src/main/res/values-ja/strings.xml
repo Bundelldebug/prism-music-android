@@ -338,9 +338,10 @@
     <string name="playback_failed_code">再生を開始できませんでした (%1$s)</string>
     <string name="artist_releases_partial">一部のリリースのみ表示 (%1$s) · タップしてすべて読み込む</string>
     <string name="set_app_icon">アプリアイコン</string>
-    <string name="app_icon_rainbow">レインボープリズム</string>
     <string name="app_icon_classic">クラシックプリズム</string>
-    <string name="app_icon_note">中央のプリズムから全方位へ虹色のフレームが広がる新アイコンと、従来のクラシックアイコンを切り替えられます。</string>
+    <string name="app_icon_neon">オブシディアンネオン</string>
+    <string name="app_icon_bloom">スペクトラムブルーム</string>
+    <string name="app_icon_note">既定のクラシックプリズムアイコンと、滑らかな虹色グラデーションアイコン（オブシディアンネオン・スペクトラムブルーム）を切り替えられます。</string>
     <string name="app_icon_changed">アプリアイコンを変更しました。ホーム画面の反映まで少し時間がかかる場合があります。</string>
     <string name="lyrics_namuwiki">ナムウィキ リアルタイム韓国語訳歌詞</string>
     <string name="lyrics_namuwiki_note">既定はオフです。オンにすると翻訳字幕がない外国語歌詞に対し、ナムウィキの韓国語訳をリアルタイムで照合して表示します。</string>

@@ -184,15 +184,33 @@ final class NowPlaying extends FrameLayout {
         play = icon(Icons.PAUSE, 46, 0xFFFFFFFF, v -> Player.toggle());
         next = icon(Icons.NEXT, 40, 0xFFFFFFFF, v -> Player.next());
         actionPill = new GlassChip(m);
-        actionPill.darkBackdropGlass = true;
+        actionPill.isActionPill = true;
         actionPill.setClickable(false);
         actionPill.setFocusable(false);
         content.addView(actionPill);
-        lyricsBtn = icon(Icons.LYRICS, 23, 0xCCFFFFFF, v -> setPanel(panel == 1 ? 0 : 1));
-        shuffleBtn = icon(Icons.SHUFFLE, 23, 0xCCFFFFFF, v -> Player.toggleShuffle());
-        repeatBtn = icon(Icons.REPEAT, 23, 0xCCFFFFFF, v -> { Player.cycleRepeat(); Player.toast("track".equals(Player.repeat) ? R.string.repeat_one : ("context".equals(Player.repeat) ? R.string.repeat_all : R.string.repeat_off)); });
-        queueBtn = icon(Icons.LIST, 23, 0xCCFFFFFF, v -> setPanel(panel == 2 ? 0 : 2));
+        lyricsBtn = icon(Icons.LYRICS, 23, 0xCCFFFFFF, v -> {
+            actionPill.pulseAt(v);
+            popButton(v);
+            setPanel(panel == 1 ? 0 : 1);
+        });
+        shuffleBtn = icon(Icons.SHUFFLE, 23, 0xCCFFFFFF, v -> {
+            if (!oneui && !wide) actionPill.pulseAt(v);
+            popButton(v);
+            Player.toggleShuffle();
+        });
+        repeatBtn = icon(Icons.REPEAT, 23, 0xCCFFFFFF, v -> {
+            if (!oneui && !wide) actionPill.pulseAt(v);
+            popButton(v);
+            Player.cycleRepeat();
+            Player.toast("track".equals(Player.repeat) ? R.string.repeat_one : ("context".equals(Player.repeat) ? R.string.repeat_all : R.string.repeat_off));
+        });
+        queueBtn = icon(Icons.LIST, 23, 0xCCFFFFFF, v -> {
+            actionPill.pulseAt(v);
+            popButton(v);
+            setPanel(panel == 2 ? 0 : 2);
+        });
         for (View v : new View[]{prev, play, next}) Ui.press(v, 0.82f);
+        for (View v : new View[]{lyricsBtn, shuffleBtn, repeatBtn, queueBtn}) Ui.press(v, 0.86f);
         // One UI style: output-device button at the end of the device row
         outBtn = icon(Icons.OUTPUT, 24, 0xE6FFFFFF, v -> deviceMenu(chip));
         outBtn.setVisibility(GONE);
@@ -230,6 +248,15 @@ final class NowPlaying extends FrameLayout {
         v.setOnClickListener(click);
         content.addView(v);
         return v;
+    }
+
+    /** Springy pop-bounce feedback on tapping any bottom action button. */
+    private void popButton(View v) {
+        if (v == null || !isAttachedToWindow()) return;
+        v.animate().cancel();
+        v.setScaleX(0.84f);
+        v.setScaleY(0.84f);
+        v.animate().scaleX(1f).scaleY(1f).setDuration(340).setInterpolator(Ui.ONEUI_POPUP_ENTER).start();
     }
 
     boolean isOpen() { return getVisibility() == VISIBLE && (openAnim == null || !openAnim.isRunning() || openTarget > 0.5f); }
@@ -1183,22 +1210,59 @@ final class NowPlaying extends FrameLayout {
         chipIcon.setColor(cfg);
         chipText.setTextColor(cfg);
         chip.invalidate();
-        if (actionPill != null) actionPill.invalidate();
         star.setColor(Player.liked ? Ui.ACCENT : 0xFFFFFFFF);
-        int activeTint = o ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
-        int activeFg = o ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
-        shuffleBtn.setColor(Player.shuffle ? activeFg : 0xB8FFFFFF);
-        shuffleBtn.setBackground(Player.shuffle ? Ui.round(activeTint, 100) : null);
-        boolean rep = !"off".equals(Player.repeat);
-        repeatBtn.setColor(rep ? activeFg : 0xB8FFFFFF);
-        repeatBtn.setBackground(rep ? Ui.round(activeTint, 100) : null);
-        lyricsBtn.setColor(panel == 1 ? activeFg : 0xB8FFFFFF);
-        lyricsBtn.setBackground(panel == 1 ? Ui.round(activeTint, 100) : null);
-        queueBtn.setColor(panel == 2 ? activeFg : 0xB8FFFFFF);
-        queueBtn.setBackground(panel == 2 ? Ui.round(activeTint, 100) : null);
+        syncActionButtons(getVisibility() == VISIBLE && openP > 0.5f);
         seek.invalidate();
         if (vol != null) vol.invalidate();
         invalidate();
+    }
+
+    /**
+     * Synchronizes colors & active backgrounds of the 4 action buttons (lyrics, shuffle, repeat, queue):
+     * - In A-style (!oneui), buttons inside {@link #actionPill} share the exact {@link #chipFg()} palette of the output
+     *   device pill, while {@link #actionPill} renders spring-animated morphing active capsules behind them.
+     * - In G-style (oneui) or wide-mode outer shuffle/repeat, buttons sit directly over the dark backdrop.
+     */
+    private void syncActionButtons(boolean animate) {
+        boolean o = oneui;
+        int cfg = chipFg();
+        int pillActiveFg = cfg;
+        int pillInactiveFg = Ui.alpha(cfg, 0.58f);
+        int bgActiveTint = o ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
+        int bgActiveFg = o ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
+        int bgInactiveFg = 0xB8FFFFFF;
+
+        boolean rep = !"off".equals(Player.repeat);
+        boolean shufInPill = !o && !wide;
+        boolean lyrInPill = !o;
+
+        if (shufInPill) {
+            shuffleBtn.setColor(Player.shuffle ? pillActiveFg : pillInactiveFg);
+            shuffleBtn.setBackground(null);
+            repeatBtn.setColor(rep ? pillActiveFg : pillInactiveFg);
+            repeatBtn.setBackground(null);
+        } else {
+            shuffleBtn.setColor(Player.shuffle ? bgActiveFg : bgInactiveFg);
+            shuffleBtn.setBackground(Player.shuffle ? Ui.round(bgActiveTint, 100) : null);
+            repeatBtn.setColor(rep ? bgActiveFg : bgInactiveFg);
+            repeatBtn.setBackground(rep ? Ui.round(bgActiveTint, 100) : null);
+        }
+
+        if (lyrInPill) {
+            lyricsBtn.setColor(panel == 1 ? pillActiveFg : pillInactiveFg);
+            lyricsBtn.setBackground(null);
+            queueBtn.setColor(panel == 2 ? pillActiveFg : pillInactiveFg);
+            queueBtn.setBackground(null);
+        } else {
+            lyricsBtn.setColor(panel == 1 ? bgActiveFg : bgInactiveFg);
+            lyricsBtn.setBackground(panel == 1 ? Ui.round(bgActiveTint, 100) : null);
+            queueBtn.setColor(panel == 2 ? bgActiveFg : bgInactiveFg);
+            queueBtn.setBackground(panel == 2 ? Ui.round(bgActiveTint, 100) : null);
+        }
+
+        if (actionPill != null) {
+            actionPill.updateTargets(panel == 1, Player.shuffle && shufInPill, rep && shufInPill, panel == 2, animate);
+        }
     }
 
     /** Immediately refreshes the volume bar from AudioManager / Spotify without waiting for the 250ms ticker. */
@@ -1351,12 +1415,7 @@ final class NowPlaying extends FrameLayout {
     private void setPanel(int p) {
         int old = panel;
         panel = p;
-        int activeTint = oneui ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
-        int activeFg = oneui ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
-        lyricsBtn.setColor(p == 1 ? activeFg : 0xB8FFFFFF);
-        lyricsBtn.setBackground(p == 1 ? Ui.round(activeTint, 100) : null);
-        queueBtn.setColor(p == 2 ? activeFg : 0xB8FFFFFF);
-        queueBtn.setBackground(p == 2 ? Ui.round(activeTint, 100) : null);
+        syncActionButtons(getVisibility() == VISIBLE && openP > 0.5f);
         if (p == 1) loadLyrics();
         if (p == 2) loadQueue();
         if (p != 0) updatePanelVisibility();
@@ -1794,13 +1853,31 @@ final class NowPlaying extends FrameLayout {
         }
     }
 
-    // ================================================================ liquid-glass device pill
-    /** Output-device / Spotify Connect pill rendered with the same liquid-glass material & transparency setting as the bars. */
+    // ================================================================ liquid-glass device & 4-button action pill
+    /**
+     * Output-device pill ({@link #chip}) and A-style 4-button action pill ({@link #actionPill}) rendered with the
+     * EXACT same Liquid Glass material, background color ({@link Ui#barTint()}) and transparency ({@link Ui#glassT}).
+     * When used as {@link #actionPill}, also renders spring-animated active button capsules, sliding panel highlight,
+     * and AGSL touch-bloom + refraction swell on button press.
+     */
     private final class GlassChip extends LinearLayout {
         private final Glass.Surface pill = new Glass.Surface();
         private final RectF bounds = new RectF();
+        private final RectF capRect = new RectF();
+        private final Paint capFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint capStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final android.graphics.RenderNode localBg = new android.graphics.RenderNode("chip-bg");
-        boolean darkBackdropGlass;
+        boolean isActionPill;
+
+        // Spring animations for actionPill: 4 per-button active springs + touch-bloom pulse spring
+        private final Ui.Spring[] actSprings = {
+                new Ui.Spring(520f, 0.72f, 0.002f),
+                new Ui.Spring(520f, 0.72f, 0.002f),
+                new Ui.Spring(520f, 0.72f, 0.002f),
+                new Ui.Spring(520f, 0.72f, 0.002f)
+        };
+        private final Ui.Spring pulse = new Ui.Spring(560f, 0.65f, 0.002f);
+        private float pulseX, pulseY;
 
         GlassChip(Context c) {
             super(c);
@@ -1809,6 +1886,35 @@ final class NowPlaying extends FrameLayout {
             pill.edgeDp = 14f;
             pill.rim = 0.28f;
             pill.shadowAlpha = 0.14f;
+            capStroke.setStyle(Paint.Style.STROKE);
+            capStroke.setStrokeWidth(Math.max(1f, Ui.dpf(0.8f)));
+            Runnable inv = () -> {
+                float p = pulse.value;
+                setScaleX(1f + 0.026f * p);
+                setScaleY(1f + 0.026f * p);
+                invalidate();
+            };
+            for (Ui.Spring s : actSprings) s.onUpdate = this::invalidate;
+            pulse.onUpdate = inv;
+        }
+
+        void pulseAt(View btn) {
+            if (btn == null) return;
+            pulseX = (btn.getLeft() + btn.getRight()) * 0.5f - getLeft();
+            pulseY = getHeight() * 0.5f;
+            pulse.snap(1f);
+            pulse.to(0f);
+            invalidate();
+        }
+
+        void updateTargets(boolean b0, boolean b1, boolean b2, boolean b3, boolean animate) {
+            boolean[] targets = {b0, b1, b2, b3};
+            for (int i = 0; i < 4; i++) {
+                float t = targets[i] ? 1f : 0f;
+                if (animate && isAttachedToWindow()) actSprings[i].to(t);
+                else actSprings[i].snap(t);
+            }
+            invalidate();
         }
 
         @Override protected void onDraw(Canvas c) {
@@ -1816,20 +1922,20 @@ final class NowPlaying extends FrameLayout {
             if (w <= 0 || h <= 0) return;
             bounds.set(0, 0, w, h);
             float r = h / 2f;
+            float p = isActionPill ? Ui.clamp(pulse.value, 0f, 1.2f) : 0f;
             pill.shapes(bounds, r, null, 0, null, 0);
-            if (darkBackdropGlass) {
-                pill.refractDp = 14f;
-                pill.edgeDp = 16f;
-                pill.rim = 0.36f;
-                pill.shadowAlpha = 0.18f;
-                pill.tint = Ui.alpha(0xFF1A1B22, Ui.lerp(0.52f, 0.20f, Ui.glassT));
-                pill.blurDp = Ui.barBlur();
-                pill.strokeColor = 0x45FFFFFF;
-            } else {
-                pill.tint = Ui.barTint();
-                pill.blurDp = Ui.barBlur();
-                pill.strokeColor = Ui.glassStroke();
-            }
+            // Exact same background color & transparency as the output device pill!
+            pill.tint = Ui.barTint();
+            pill.blurDp = Ui.barBlur();
+            pill.strokeColor = Ui.glassStroke();
+            pill.refractDp = 12f + 6f * p;
+            pill.edgeDp = 14f + 3f * p;
+            pill.rim = 0.28f + 0.22f * p;
+            pill.shadowAlpha = 0.14f + 0.04f * p;
+            pill.pressX = pulseX;
+            pill.pressY = pulseY;
+            pill.pressR = Ui.dpf(44);
+            pill.pressAmt = 0.72f * p;
             pill.alpha = 1f;
             if (bgRecorded && c.isHardwareAccelerated()) {
                 float pad = Ui.dpf(pill.blurDp) * 2f + Ui.dpf(pill.refractDp);
@@ -1847,6 +1953,28 @@ final class NowPlaying extends FrameLayout {
                 pill.extra = null;
             }
             pill.draw(c, this, null);
+
+            // Draw spring-animated active circular/capsule highlights inside actionPill
+            if (isActionPill) {
+                View[] btns = {lyricsBtn, shuffleBtn, repeatBtn, queueBtn};
+                int baseFill = Ui.dark ? 0x3CFFFFFF : 0x26000000;
+                int baseRim = Ui.dark ? 0x52FFFFFF : 0x30000000;
+                for (int i = 0; i < 4; i++) {
+                    float k = actSprings[i].value;
+                    if (k <= 0.01f) continue;
+                    View b = btns[i];
+                    if (b == null || b.getVisibility() != VISIBLE) continue;
+                    float cx = (b.getLeft() + b.getRight()) * 0.5f - getLeft();
+                    float cy = h * 0.5f;
+                    float rad = (b.getWidth() * 0.5f) * Ui.lerp(0.55f, 1.0f, k);
+                    float a = Ui.clamp(k, 0f, 1f);
+                    capRect.set(cx - rad, cy - rad, cx + rad, cy + rad);
+                    capFill.setColor(Ui.alpha(baseFill, ((baseFill >>> 24) / 255f) * a));
+                    c.drawRoundRect(capRect, rad, rad, capFill);
+                    capStroke.setColor(Ui.alpha(baseRim, ((baseRim >>> 24) / 255f) * a));
+                    c.drawRoundRect(capRect, rad, rad, capStroke);
+                }
+            }
         }
     }
 
