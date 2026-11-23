@@ -333,38 +333,38 @@ final class NowPlaying extends FrameLayout {
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
         if (wide) {
             bottomY = H - Ui.navInset - Ui.dpf(26);
-            colW = Math.min(W * 0.43f, H * (oneui ? 0.44f : 0.46f));
+            colW = Math.min(W * 0.43f, H * (oneui ? 0.43f : 0.45f));
             colX = Math.max(Ui.dpf(32), W * 0.045f);
-            float extraH = Ui.dpf(268);
+            float extraH = Ui.dpf(280);
             float block = colW + extraH;
-            float y0 = Math.max(top + Ui.dpf(14), (H - block) / 2f);
+            float y0 = Math.max(top + Ui.dpf(12), (H - block) / 2f);
             artBig.set(colX, y0, colX + colW, y0 + colW);
             artSmall.set(artBig);
             if (oneui) {
                 float devY = artBig.bottom + Ui.dpf(22);
-                titleBigY = devY + Ui.dpf(28);
+                titleBigY = devY + Ui.dpf(26);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(72);
+                seekY = titleBigY + Ui.dpf(86);
                 timesY = seekY + Ui.dpf(20);
-                ctrlY = timesY + Ui.dpf(68);
+                ctrlY = timesY + Ui.dpf(64);
             } else {
-                titleBigY = artBig.bottom + Ui.dpf(42);
+                titleBigY = artBig.bottom + Ui.dpf(40);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(60);
+                seekY = titleBigY + Ui.dpf(74);
                 timesY = seekY + Ui.dpf(18);
                 // Keep comfortable breathing room between the output device pill (timesY..timesY+30) and play controls
-                ctrlY = timesY + Ui.dpf(78);
+                ctrlY = timesY + Ui.dpf(74);
             }
             float px = colX + colW + Math.max(Ui.dpf(28), W * 0.04f);
             panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(28));
             return;
         }
         float side = Ui.dpf(28);
-        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 24 : 34);
+        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 22 : 34);
         if (oneui) {
             // G style: generous cover on 16:10 wide cover screens too, then output chip -> title/artist -> wave -> controls -> volume
             float s1 = Ui.dpf(Ui.cover() ? 18 : 24);
-            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.44f : 0.38f));
+            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.43f : 0.38f));
             float topPad = top + Ui.dpf(Ui.cover() ? 22 : 36);
             artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
             float sm = Ui.dpf(64);
@@ -372,23 +372,23 @@ final class NowPlaying extends FrameLayout {
             float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26);
             titleBigY = devY + Ui.dpf(Ui.cover() ? 26 : 36);
             titleSmallY = artSmall.centerY() - Ui.dpf(23);
-            seekY = titleBigY + Ui.dpf(Ui.cover() ? 66 : 80);
+            seekY = titleBigY + Ui.dpf(Ui.cover() ? 80 : 92);
             timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 22);
-            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 48 : 54), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 18 : 22));
+            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 46 : 52), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 18 : 22));
             panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
             return;
         }
         float aSide = Ui.dpf(Ui.cover() ? 18 : 28);
-        float size = Math.min(W - aSide * 2, H * (Ui.cover() ? 0.46f : 0.40f));
+        float size = Math.min(W - aSide * 2, H * (Ui.cover() ? 0.45f : 0.40f));
         float topPad = top + Ui.dpf(Ui.cover() ? 22 : 38);
         artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
         float sm = Ui.dpf(64);
         artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
         titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 40 : 54);
         titleSmallY = artSmall.centerY() - Ui.dpf(23);
-        seekY = titleBigY + Ui.dpf(Ui.cover() ? 56 : 66);
+        seekY = titleBigY + Ui.dpf(Ui.cover() ? 70 : 78);
         timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 20);
-        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 54 : 58);
+        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 52 : 56);
         ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(14) + bottomY) / 2f - Ui.dpf(8));
         panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(18));
     }
