@@ -81,6 +81,7 @@ final class NowPlaying extends FrameLayout {
     private final View handle;
     private final TextView title, artist, elapsed, remain, chipText;
     private final GlassChip chip;
+    private final GlassChip actionPill;
     private final AudioBadge audioBadge;
     private int hiResTier;
     private float masterBgP;
@@ -182,10 +183,15 @@ final class NowPlaying extends FrameLayout {
         prev = icon(Icons.PREV, 40, 0xFFFFFFFF, v -> Player.prev());
         play = icon(Icons.PAUSE, 46, 0xFFFFFFFF, v -> Player.toggle());
         next = icon(Icons.NEXT, 40, 0xFFFFFFFF, v -> Player.next());
-        lyricsBtn = icon(Icons.LYRICS, 24, 0xB3FFFFFF, v -> setPanel(panel == 1 ? 0 : 1));
-        shuffleBtn = icon(Icons.SHUFFLE, 24, 0xB3FFFFFF, v -> Player.toggleShuffle());
-        repeatBtn = icon(Icons.REPEAT, 24, 0xB3FFFFFF, v -> { Player.cycleRepeat(); Player.toast("track".equals(Player.repeat) ? R.string.repeat_one : ("context".equals(Player.repeat) ? R.string.repeat_all : R.string.repeat_off)); });
-        queueBtn = icon(Icons.LIST, 24, 0xB3FFFFFF, v -> setPanel(panel == 2 ? 0 : 2));
+        actionPill = new GlassChip(m);
+        actionPill.darkBackdropGlass = true;
+        actionPill.setClickable(false);
+        actionPill.setFocusable(false);
+        content.addView(actionPill);
+        lyricsBtn = icon(Icons.LYRICS, 23, 0xCCFFFFFF, v -> setPanel(panel == 1 ? 0 : 1));
+        shuffleBtn = icon(Icons.SHUFFLE, 23, 0xCCFFFFFF, v -> Player.toggleShuffle());
+        repeatBtn = icon(Icons.REPEAT, 23, 0xCCFFFFFF, v -> { Player.cycleRepeat(); Player.toast("track".equals(Player.repeat) ? R.string.repeat_one : ("context".equals(Player.repeat) ? R.string.repeat_all : R.string.repeat_off)); });
+        queueBtn = icon(Icons.LIST, 23, 0xCCFFFFFF, v -> setPanel(panel == 2 ? 0 : 2));
         for (View v : new View[]{prev, play, next}) Ui.press(v, 0.82f);
         // One UI style: output-device button at the end of the device row
         outBtn = icon(Icons.OUTPUT, 24, 0xE6FFFFFF, v -> deviceMenu(chip));
@@ -332,7 +338,7 @@ final class NowPlaying extends FrameLayout {
         float top = Ui.statusInset;
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
         if (wide) {
-            bottomY = H - Ui.navInset - Ui.dpf(26);
+            bottomY = H - Ui.navInset - Ui.dpf(34);
             colW = Math.min(W * 0.43f, H * (oneui ? 0.43f : 0.45f));
             colX = Math.max(Ui.dpf(32), W * 0.045f);
             float extraH = Ui.dpf(280);
@@ -356,40 +362,41 @@ final class NowPlaying extends FrameLayout {
                 ctrlY = timesY + Ui.dpf(74);
             }
             float px = colX + colW + Math.max(Ui.dpf(28), W * 0.04f);
-            panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(28));
+            panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(34));
             return;
         }
         float side = Ui.dpf(28);
-        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 22 : 34);
+        // Keep >= 36dp center clearance above navInset on 16:10 cover screens so 44dp active circles & 54dp glass pill NEVER clip!
+        bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 36 : 38);
         if (oneui) {
             // G style: generous cover on 16:10 wide cover screens too, then output chip -> title/artist -> wave -> controls -> volume
-            float s1 = Ui.dpf(Ui.cover() ? 18 : 24);
-            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.43f : 0.38f));
-            float topPad = top + Ui.dpf(Ui.cover() ? 22 : 36);
+            float s1 = Ui.dpf(Ui.cover() ? 20 : 24);
+            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.405f : 0.38f));
+            float topPad = top + Ui.dpf(Ui.cover() ? 24 : 36);
             artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
             float sm = Ui.dpf(64);
             artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26);
-            titleBigY = devY + Ui.dpf(Ui.cover() ? 26 : 36);
+            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 18 : 26);
+            titleBigY = devY + Ui.dpf(Ui.cover() ? 24 : 36);
             titleSmallY = artSmall.centerY() - Ui.dpf(23);
-            seekY = titleBigY + Ui.dpf(Ui.cover() ? 80 : 92);
+            seekY = titleBigY + Ui.dpf(Ui.cover() ? 76 : 92);
             timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 22);
-            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 46 : 52), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 18 : 22));
+            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 44 : 52), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 16 : 22));
             panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
             return;
         }
-        float aSide = Ui.dpf(Ui.cover() ? 18 : 28);
-        float size = Math.min(W - aSide * 2, H * (Ui.cover() ? 0.45f : 0.40f));
-        float topPad = top + Ui.dpf(Ui.cover() ? 22 : 38);
+        float aSide = Ui.dpf(Ui.cover() ? 20 : 28);
+        float size = Math.min(W - aSide * 2, H * (Ui.cover() ? 0.415f : 0.40f));
+        float topPad = top + Ui.dpf(Ui.cover() ? 24 : 38);
         artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
         float sm = Ui.dpf(64);
         artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-        titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 40 : 54);
+        titleBigY = artBig.bottom + Ui.dpf(Ui.cover() ? 38 : 54);
         titleSmallY = artSmall.centerY() - Ui.dpf(23);
-        seekY = titleBigY + Ui.dpf(Ui.cover() ? 70 : 78);
+        seekY = titleBigY + Ui.dpf(Ui.cover() ? 66 : 78);
         timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 20);
-        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 52 : 56);
-        ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(14) + bottomY) / 2f - Ui.dpf(8));
+        float minCtrl = timesY + Ui.dpf(Ui.cover() ? 48 : 56);
+        ctrlY = Math.max(minCtrl, (timesY + Ui.dpf(12) + bottomY - Ui.dpf(8)) / 2f - Ui.dpf(6));
         panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(18));
     }
 
@@ -436,8 +443,15 @@ final class NowPlaying extends FrameLayout {
             }
             exact(outBtn, Ui.dp(40), Ui.dp(40));
             exact(vol, colWi, Ui.dp(36));
-            int smallBtn = wide ? Math.min(Ui.dp(44), Math.max(Ui.dp(36), (int) (colWi * 0.16f))) : Ui.dp(48);
+            int smallBtn = wide ? Math.min(Ui.dp(44), Math.max(Ui.dp(36), (int) (colWi * 0.16f))) : Ui.dp(oneui ? 44 : 42);
             for (View v : new View[]{lyricsBtn, shuffleBtn, repeatBtn, queueBtn}) exact(v, smallBtn, smallBtn);
+            if (!oneui) {
+                int pillH = Ui.dp(54);
+                int pillW = wide ? (smallBtn * 2 + Ui.dp(24)) : Math.min(Ui.dp(320), W - Ui.dp(44));
+                exact(actionPill, pillW, pillH);
+            } else {
+                exact(actionPill, 0, 0);
+            }
             exact(panelHost, wide ? (int) panelRect.width() : W, (int) panelRect.height());
         }
 
@@ -453,7 +467,7 @@ final class NowPlaying extends FrameLayout {
             if (wide) { layoutWide(W); applyMode(); return; }
             if (oneui) { layoutOneUi(W); applyMode(); return; }
             int side = Ui.dp(28);
-            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 10 : 14));
+            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 7 : 14));
             place(title, side, (int) titleBigY);
             place(artist, side, (int) titleBigY + Ui.dp(30));
             place(star, W - side - Ui.dp(76), (int) titleBigY + Ui.dp(6));
@@ -469,15 +483,22 @@ final class NowPlaying extends FrameLayout {
             place(prev, W / 2 - gap - Ui.dp(36), cy - Ui.dp(36));
             place(play, W / 2 - Ui.dp(42), cy - Ui.dp(42));
             place(next, W / 2 + gap - Ui.dp(36), cy - Ui.dp(36));
-            int by = (int) bottomY - Ui.dp(24);
-            // lyrics · shuffle · repeat · queue, evenly spaced
-            int span = Math.min(Ui.dp(300), W - Ui.dp(80));
-            int step = span / 3, x0 = (W - span) / 2;
-            place(lyricsBtn, x0 - Ui.dp(24), by);
-            place(shuffleBtn, x0 + step - Ui.dp(24), by);
-            place(repeatBtn, x0 + step * 2 - Ui.dp(24), by);
-            place(queueBtn, x0 + span - Ui.dp(24), by);
-            placeVolume(side, (int) (ctrlY + Ui.dpf(48)), by);
+            actionPill.setVisibility(oneui ? GONE : VISIBLE);
+            int pillW = actionPill.getMeasuredWidth(), pillH = actionPill.getMeasuredHeight();
+            int pillL = (W - pillW) / 2, pillT = (int) bottomY - pillH / 2;
+            place(actionPill, pillL, pillT);
+            int btnS = lyricsBtn.getMeasuredWidth();
+            int by = (int) bottomY - btnS / 2;
+            // A style: lyrics · shuffle · repeat · queue evenly grouped inside the floating Liquid Glass pill
+            int innerPad = Ui.dp(14);
+            int usable = Math.max(btnS * 4, pillW - innerPad * 2);
+            int step = (usable - btnS) / 3;
+            int x0 = pillL + (pillW - usable) / 2;
+            place(lyricsBtn, x0, by);
+            place(shuffleBtn, x0 + step, by);
+            place(repeatBtn, x0 + step * 2, by);
+            place(queueBtn, x0 + usable - btnS, by);
+            placeVolume(side, (int) (ctrlY + Ui.dpf(46)), pillT - Ui.dp(4));
             place(panelHost, 0, (int) panelRect.top);
             applyMode();
         }
@@ -494,7 +515,7 @@ final class NowPlaying extends FrameLayout {
         /** One UI 9.x (G style) media player: cover → device chip + AOD/star/more row → centred marquee title/artist → wave → controls → volume. */
         private void layoutOneUi(int W) {
             int side = Ui.dp(28);
-            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 10 : 14));
+            place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 7 : 14));
             // output-device pill on left, AOD / like / more on right
             int devY = (int) (artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26));
             place(chip, side, devY - chip.getMeasuredHeight() / 2);
@@ -522,7 +543,9 @@ final class NowPlaying extends FrameLayout {
             place(play, mid - play.getMeasuredWidth() / 2, cy - play.getMeasuredHeight() / 2);
             place(next, mid + step - next.getMeasuredWidth() / 2, cy - next.getMeasuredHeight() / 2);
             place(repeatBtn, W - side - repeatBtn.getMeasuredWidth() + Ui.dp(4), cy - repeatBtn.getMeasuredHeight() / 2);
-            int by = (int) bottomY - Ui.dp(24);
+            actionPill.setVisibility(GONE);
+            int btnS = lyricsBtn.getMeasuredHeight();
+            int by = (int) bottomY - btnS / 2;
             place(lyricsBtn, side - Ui.dp(4), by);
             place(queueBtn, W - side - queueBtn.getMeasuredWidth() + Ui.dp(4), by);
             placeVolume(side, cy + play.getMeasuredHeight() / 2 + Ui.dp(10), by);
@@ -570,9 +593,22 @@ final class NowPlaying extends FrameLayout {
             place(play, mid - play.getMeasuredWidth() / 2, cy - play.getMeasuredHeight() / 2);
             place(next, mid + step - next.getMeasuredWidth() / 2, cy - next.getMeasuredHeight() / 2);
             place(repeatBtn, Math.min(x + cw - repeatBtn.getMeasuredWidth() + Ui.dp(4), mid + step * 2 - repeatBtn.getMeasuredWidth() / 2), cy - repeatBtn.getMeasuredHeight() / 2);
-            int by = (int) bottomY - Ui.dp(24);
-            place(lyricsBtn, W - Ui.dp(36) - lyricsBtn.getMeasuredWidth() * 2 - Ui.dp(10), by);
-            place(queueBtn, W - Ui.dp(36) - queueBtn.getMeasuredWidth(), by);
+            int btnS = lyricsBtn.getMeasuredHeight();
+            int by = (int) bottomY - btnS / 2;
+            if (!oneui) {
+                actionPill.setVisibility(VISIBLE);
+                int pillW = actionPill.getMeasuredWidth(), pillH = actionPill.getMeasuredHeight();
+                int pillL = W - Ui.dp(30) - pillW;
+                place(actionPill, pillL, (int) bottomY - pillH / 2);
+                int gap = Math.max(Ui.dp(6), pillW - btnS * 2 - Ui.dp(18));
+                int lx = pillL + (pillW - btnS * 2 - gap) / 2;
+                place(lyricsBtn, lx, by);
+                place(queueBtn, lx + btnS + gap, by);
+            } else {
+                actionPill.setVisibility(GONE);
+                place(lyricsBtn, W - Ui.dp(36) - lyricsBtn.getMeasuredWidth() * 2 - Ui.dp(10), by);
+                place(queueBtn, W - Ui.dp(36) - queueBtn.getMeasuredWidth(), by);
+            }
             placeVolume(x, cy + play.getMeasuredHeight() / 2 + Ui.dp(12), by);
             place(panelHost, (int) panelRect.left, (int) panelRect.top);
         }
@@ -1115,6 +1151,7 @@ final class NowPlaying extends FrameLayout {
         seek.oneui = o;
         outBtn.setVisibility(GONE);
         aodBtn.setVisibility(o ? VISIBLE : GONE);
+        actionPill.setVisibility(o ? GONE : VISIBLE);
         if (changed) {
             // One UI 9.5: prominent play circle, softer prev/next circles, pill output chip, centred marquee title/artist
             for (Icons.IconView v : new Icons.IconView[]{prev, next}) v.setBackground(o ? Ui.round(0x21FFFFFF, 100) : null);
@@ -1146,14 +1183,19 @@ final class NowPlaying extends FrameLayout {
         chipIcon.setColor(cfg);
         chipText.setTextColor(cfg);
         chip.invalidate();
+        if (actionPill != null) actionPill.invalidate();
         star.setColor(Player.liked ? Ui.ACCENT : 0xFFFFFFFF);
-        int activeTint = o ? Ui.alpha(Ui.ACCENT, 0.32f) : 0x26FFFFFF;
+        int activeTint = o ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
         int activeFg = o ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
-        shuffleBtn.setColor(Player.shuffle ? activeFg : 0x8CFFFFFF);
+        shuffleBtn.setColor(Player.shuffle ? activeFg : 0xB8FFFFFF);
         shuffleBtn.setBackground(Player.shuffle ? Ui.round(activeTint, 100) : null);
         boolean rep = !"off".equals(Player.repeat);
-        repeatBtn.setColor(rep ? activeFg : 0x8CFFFFFF);
+        repeatBtn.setColor(rep ? activeFg : 0xB8FFFFFF);
         repeatBtn.setBackground(rep ? Ui.round(activeTint, 100) : null);
+        lyricsBtn.setColor(panel == 1 ? activeFg : 0xB8FFFFFF);
+        lyricsBtn.setBackground(panel == 1 ? Ui.round(activeTint, 100) : null);
+        queueBtn.setColor(panel == 2 ? activeFg : 0xB8FFFFFF);
+        queueBtn.setBackground(panel == 2 ? Ui.round(activeTint, 100) : null);
         seek.invalidate();
         if (vol != null) vol.invalidate();
         invalidate();
@@ -1309,10 +1351,12 @@ final class NowPlaying extends FrameLayout {
     private void setPanel(int p) {
         int old = panel;
         panel = p;
-        lyricsBtn.setColor(p == 1 ? 0xFFFFFFFF : 0xB3FFFFFF);
-        lyricsBtn.setBackground(p == 1 ? Ui.round(0x26FFFFFF, 24) : null);
-        queueBtn.setColor(p == 2 ? 0xFFFFFFFF : 0xB3FFFFFF);
-        queueBtn.setBackground(p == 2 ? Ui.round(0x26FFFFFF, 24) : null);
+        int activeTint = oneui ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
+        int activeFg = oneui ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
+        lyricsBtn.setColor(p == 1 ? activeFg : 0xB8FFFFFF);
+        lyricsBtn.setBackground(p == 1 ? Ui.round(activeTint, 100) : null);
+        queueBtn.setColor(p == 2 ? activeFg : 0xB8FFFFFF);
+        queueBtn.setBackground(p == 2 ? Ui.round(activeTint, 100) : null);
         if (p == 1) loadLyrics();
         if (p == 2) loadQueue();
         if (p != 0) updatePanelVisibility();
@@ -1756,6 +1800,7 @@ final class NowPlaying extends FrameLayout {
         private final Glass.Surface pill = new Glass.Surface();
         private final RectF bounds = new RectF();
         private final android.graphics.RenderNode localBg = new android.graphics.RenderNode("chip-bg");
+        boolean darkBackdropGlass;
 
         GlassChip(Context c) {
             super(c);
@@ -1772,9 +1817,19 @@ final class NowPlaying extends FrameLayout {
             bounds.set(0, 0, w, h);
             float r = h / 2f;
             pill.shapes(bounds, r, null, 0, null, 0);
-            pill.tint = Ui.barTint();
-            pill.blurDp = Ui.barBlur();
-            pill.strokeColor = Ui.glassStroke();
+            if (darkBackdropGlass) {
+                pill.refractDp = 14f;
+                pill.edgeDp = 16f;
+                pill.rim = 0.36f;
+                pill.shadowAlpha = 0.18f;
+                pill.tint = Ui.alpha(0xFF1A1B22, Ui.lerp(0.52f, 0.20f, Ui.glassT));
+                pill.blurDp = Ui.barBlur();
+                pill.strokeColor = 0x45FFFFFF;
+            } else {
+                pill.tint = Ui.barTint();
+                pill.blurDp = Ui.barBlur();
+                pill.strokeColor = Ui.glassStroke();
+            }
             pill.alpha = 1f;
             if (bgRecorded && c.isHardwareAccelerated()) {
                 float pad = Ui.dpf(pill.blurDp) * 2f + Ui.dpf(pill.refractDp);

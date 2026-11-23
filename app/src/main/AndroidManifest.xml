@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.oneuibook.prism"
-    android:versionCode="236"
-    android:versionName="9.5.13">
+    android:versionCode="237"
+    android:versionName="9.5.14">
 
     <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="35" />
 
@@ -40,10 +40,6 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Spotify OAuth (Authorization Code + PKCE) redirect -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -52,6 +48,36 @@
                 <data android:scheme="prismmusic" android:host="callback" />
             </intent-filter>
         </activity>
+
+        <!-- Default Rainbow Prism launcher icon -->
+        <activity-alias
+            android:name=".LauncherRainbow"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:enabled="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Classic Prism launcher icon (selectable in Settings -> Appearance) -->
+        <activity-alias
+            android:name=".LauncherClassic"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:enabled="false"
+            android:icon="@mipmap/ic_launcher_classic"
+            android:roundIcon="@mipmap/ic_launcher_classic"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <service
             android:name=".LocalMusic$PlaybackService"
             android:exported="false"

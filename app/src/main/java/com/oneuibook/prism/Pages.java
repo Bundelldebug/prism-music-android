@@ -526,17 +526,17 @@ final class Pages {
                     favId = fav.optString("id", "");
                 }
 
-                // 2) Build at most 2 discovery queries & run them IN PARALLEL with the favorite artist's albums!
+                // 2) Build 1 focused discovery query & run in parallel with the favorite artist's albums (2 calls total, 0 when cached)
                 java.util.List<String> queries = new java.util.ArrayList<>();
                 java.util.Set<String> usedGenres = new java.util.HashSet<>();
                 for (String g : seedGenres) {
                     if (usedGenres.add(g.toLowerCase(java.util.Locale.ROOT))) {
                         queries.add("genre:\"" + g + "\"");
-                        if (queries.size() >= 1) break;
+                        break;
                     }
                 }
-                for (int i = 0; i < Math.min(2, artistList.size()) && queries.size() < 2; i++) {
-                    String nm = artistList.get(i).optString("name", "").trim();
+                if (queries.isEmpty() && !artistList.isEmpty()) {
+                    String nm = artistList.get(0).optString("name", "").trim();
                     if (!nm.isEmpty()) queries.add(nm);
                 }
                 if (queries.isEmpty()) {
@@ -1757,10 +1757,12 @@ final class Pages {
                 boolean directWorked = false;
                 String workingMkt = "";
 
-                // Step 1: Per-group /artists/{id}/albums (avoids Spotify's multi-group pagination bug; stops immediately on 403/404/429)
+                // Step 1: Compact per-group /artists/{id}/albums (album up to 20, single up to 20, appears_on+compilation combined into 1 call;
+                // stops immediately on 403/404/429 and serves instant 0-call hits from 30-min disk cache on revisits!)
                 if (!wantId.isEmpty()) {
-                    String[] groups = {"album", "single", "appears_on", "compilation"};
-                    int[] maxOffsets = {20, 30, 10, 10};
+                    String[] groups = {"album", "single", "appears_on,compilation"};
+                    int[] maxOffsets = {20, 20, 10};
+                    int[] forcedBuckets = {0, 1, -1};
                     boolean stopDirect = false;
                     for (int gi = 0; gi < groups.length && !stopDirect; gi++) {
                         for (int off = 0; off < maxOffsets[gi] && !stopDirect; off += 10) {
@@ -1797,7 +1799,7 @@ final class Pages {
                             }
                             if (a == null || a.length() == 0) break;
                             directWorked = true;
-                            if (mergeAlbumsIntoDiscog(gen, a, gi, wantId, wantName)) {
+                            if (mergeAlbumsIntoDiscog(gen, a, forcedBuckets[gi], wantId, wantName)) {
                                 Spotify.MAIN.post(() -> renderDiscogBuckets(gen));
                             }
                             String next = o.optString("next", null);
@@ -1806,9 +1808,9 @@ final class Pages {
                     }
                 }
 
-                // Step 2: Free-text album search (runs whenever direct endpoint failed or returned very few releases)
-                if (!rateLimited && (!directWorked || discogCount(gen) < 4) && item.title != null && !item.title.trim().isEmpty()) {
-                    for (int off = 0; off < 20 && !rateLimited; off += 10) {
+                // Step 2: Free-text album search (only when direct endpoint failed/blocked and not rate-limited)
+                if (!rateLimited && !Spotify.isRateLimited() && !directWorked && item.title != null && !item.title.trim().isEmpty()) {
+                    for (int off = 0; off < 10 && !rateLimited; off += 10) {
                         try {
                             JSONObject s = Spotify.callCached("/search?type=album&limit=10&offset=" + off + "&q=" + Spotify.enc(item.title));
                             JSONObject albObj = s == null ? null : s.optJSONObject("albums");

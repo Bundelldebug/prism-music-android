@@ -12,6 +12,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -21,8 +22,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 /**
  * Spotify Web API client using Authorization Code + PKCE (no client secret on device).
@@ -96,8 +100,9 @@ final class Spotify {
 
     static void logout() {
         prefs.edit().remove("access_token").remove("refresh_token").remove("expires_at")
-                .remove("user_name").remove("user_image").remove("user_product").remove("user_country").apply();
+                .remove("user_id").remove("user_name").remove("user_image").remove("user_product").remove("user_country").apply();
         userName = userImage = product = country = null;
+        clearAllCache();
     }
 
     /** Handles prismmusic://callback?code=…&state=… */
@@ -173,23 +178,27 @@ final class Spotify {
 
     private static final Object PACE_LOCK = new Object();
     private static long nextPaceMs;
+    private static volatile long elevatedPaceUntil;
+    /** Caps concurrent non-play HTTP connections to 2 so parallel screen builds never trigger burst 429s. */
+    private static final Semaphore NET_SLOTS = new Semaphore(2, true);
 
     static boolean isRateLimited() { return System.currentTimeMillis() < cooldownUntil; }
 
-    /** Spaces out outgoing non-play requests by 160ms so parallel UI loads never trip Spotify's anti-burst 429 filter. */
+    /** Adaptive pacing: 200ms baseline, automatically widens to 550ms for 90s after any 429 response. */
     private static void paceRequest() throws InterruptedException {
         long wait;
         synchronized (PACE_LOCK) {
             long now = System.currentTimeMillis();
+            long interval = now < elevatedPaceUntil ? 550L : 200L;
             if (nextPaceMs > now) {
                 wait = nextPaceMs - now;
-                nextPaceMs += 160L;
+                nextPaceMs += interval;
             } else {
                 wait = 0;
-                nextPaceMs = now + 160L;
+                nextPaceMs = now + interval;
             }
         }
-        if (wait > 0 && wait <= 4000) Thread.sleep(wait);
+        if (wait > 0 && wait <= 5000) Thread.sleep(wait);
     }
 
     static JSONObject call(String method, String path, String jsonBody) throws Exception {
@@ -201,65 +210,76 @@ final class Spotify {
         // Only explicit playback mutations (PUT/POST/DELETE /me/player/*) bypass browsing cooldown;
         // background GET /me/player polls MUST respect cooldownUntil so polling NEVER extends a 429 penalty window!
         final boolean isPlayCmd = path.startsWith("/me/player") && !"GET".equals(method);
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < 2; attempt++) {
             long until = isPlayCmd ? playCooldownUntil : cooldownUntil;
             long cool = until - System.currentTimeMillis();
             if (cool > 0) {
-                if (cool > 3500) throw new ApiError(429, lastRateReason.isEmpty() ? "rate limited" : lastRateReason, "rate");
+                if (cool > 2500) throw new ApiError(429, lastRateReason.isEmpty() ? "rate limited" : lastRateReason, "rate");
                 Thread.sleep(cool);
             }
-            if (!isPlayCmd) paceRequest();
-            String url = path.startsWith("http") ? path : API + path;
-            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-            c.setRequestMethod(method);
-            c.setConnectTimeout(8000);
-            c.setReadTimeout(12000);
-            c.setRequestProperty("Authorization", "Bearer " + token());
-            c.setRequestProperty("Accept", "application/json");
-            if (jsonBody != null || "PUT".equals(method) || "POST".equals(method)) {
-                c.setDoOutput(true);
-                c.setRequestProperty("Content-Type", "application/json");
-                try (OutputStream o = c.getOutputStream()) {
-                    o.write((jsonBody == null ? "" : jsonBody).getBytes(StandardCharsets.UTF_8));
+            boolean acquired = false;
+            try {
+                if (!isPlayCmd) {
+                    NET_SLOTS.acquire();
+                    acquired = true;
+                    paceRequest();
                 }
+                String url = path.startsWith("http") ? path : API + path;
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setRequestMethod(method);
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(12000);
+                c.setRequestProperty("Authorization", "Bearer " + token());
+                c.setRequestProperty("Accept", "application/json");
+                if (jsonBody != null || "PUT".equals(method) || "POST".equals(method)) {
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Content-Type", "application/json");
+                    try (OutputStream o = c.getOutputStream()) {
+                        o.write((jsonBody == null ? "" : jsonBody).getBytes(StandardCharsets.UTF_8));
+                    }
+                }
+                int code = c.getResponseCode();
+                if (code == 401 && attempt == 0) {
+                    prefs.edit().putLong("expires_at", 0).apply();
+                    continue;
+                }
+                if (code == 429) {
+                    long wait = 3;
+                    try { wait = Math.max(1, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Exception ignored) {}
+                    String errBody = "";
+                    try { errBody = read(c.getErrorStream()); } catch (Exception ignored) {}
+                    String reason = "";
+                    try {
+                        JSONObject eo = new JSONObject(errBody).optJSONObject("error");
+                        if (eo != null) reason = eo.optString("reason", "");
+                    } catch (Exception ignored) {}
+                    lastRateReason = "QUOTA_EXCEEDED".equalsIgnoreCase(reason)
+                            ? ("QUOTA_EXCEEDED (" + wait + "s)")
+                            : ("429 (" + wait + "s)");
+                    long now = System.currentTimeMillis();
+                    elevatedPaceUntil = Math.max(elevatedPaceUntil, now + 90_000L);
+                    long storeWait = isPlayCmd ? Math.min(wait, 3) : Math.min(wait, 30);
+                    if (isPlayCmd) playCooldownUntil = Math.max(playCooldownUntil, now + storeWait * 1000L);
+                    else cooldownUntil = Math.max(cooldownUntil, now + storeWait * 1000L);
+                    if (wait <= 2 && attempt == 0) continue;
+                    throw new ApiError(429, lastRateReason, reason.isEmpty() ? "rate" : reason);
+                }
+                String text = read(code >= 400 ? c.getErrorStream() : c.getInputStream());
+                if (code >= 400) {
+                    String msg = "HTTP " + code, reason = "";
+                    try {
+                        JSONObject e = new JSONObject(text).optJSONObject("error");
+                        if (e != null) { msg = e.optString("message", msg); reason = e.optString("reason", ""); }
+                    } catch (Exception ignored) {}
+                    throw new ApiError(code, msg, reason);
+                }
+                if (text == null || text.trim().isEmpty()) return new JSONObject();
+                String tr = text.trim();
+                if (tr.startsWith("[")) return new JSONObject().put("items", new JSONArray(tr));
+                return new JSONObject(tr);
+            } finally {
+                if (acquired) NET_SLOTS.release();
             }
-            int code = c.getResponseCode();
-            if (code == 401 && attempt == 0) {
-                prefs.edit().putLong("expires_at", 0).apply();
-                continue;
-            }
-            if (code == 429) {
-                long wait = 2;
-                try { wait = Math.max(1, Long.parseLong(c.getHeaderField("Retry-After"))); } catch (Exception ignored) {}
-                String errBody = "";
-                try { errBody = read(c.getErrorStream()); } catch (Exception ignored) {}
-                String reason = "";
-                try {
-                    JSONObject eo = new JSONObject(errBody).optJSONObject("error");
-                    if (eo != null) reason = eo.optString("reason", "");
-                } catch (Exception ignored) {}
-                lastRateReason = "QUOTA_EXCEEDED".equalsIgnoreCase(reason)
-                        ? ("QUOTA_EXCEEDED (" + wait + "s)")
-                        : ("429 (" + wait + "s)");
-                long storeWait = isPlayCmd ? Math.min(wait, 3) : Math.min(wait, 25);
-                if (isPlayCmd) playCooldownUntil = Math.max(playCooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
-                else cooldownUntil = Math.max(cooldownUntil, System.currentTimeMillis() + storeWait * 1000L);
-                if (wait <= 3 && attempt == 0) continue;
-                throw new ApiError(429, lastRateReason, reason.isEmpty() ? "rate" : reason);
-            }
-            String text = read(code >= 400 ? c.getErrorStream() : c.getInputStream());
-            if (code >= 400) {
-                String msg = "HTTP " + code, reason = "";
-                try {
-                    JSONObject e = new JSONObject(text).optJSONObject("error");
-                    if (e != null) { msg = e.optString("message", msg); reason = e.optString("reason", ""); }
-                } catch (Exception ignored) {}
-                throw new ApiError(code, msg, reason);
-            }
-            if (text == null || text.trim().isEmpty()) return new JSONObject();
-            String tr = text.trim();
-            if (tr.startsWith("[")) return new JSONObject().put("items", new JSONArray(tr));
-            return new JSONObject(tr);
         }
         throw new ApiError(401, "unauthorized", "");
     }
@@ -329,13 +349,84 @@ final class Spotify {
     static volatile long playCooldownUntil;
     static volatile String lastRateReason = "";
 
-    // ---- GET cache: re-created screens (fold / unfold / rotation / theme) reuse what was just loaded instead of
-    //      firing every home/library request again at once; a failed request falls back to the last good answer ----
-    private static final long FRESH_MS = 10 * 60 * 1000L;
-    private static final Map<String, Object[]> GET_CACHE = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, Object[]>(96, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Object[]> e) { return size() > 280; }
+    // ---- Persistent RAM + disk GET cache & in-flight deduplication:
+    //      restarts, fold/unfold, tab switches, and revisiting artists/albums reuse cached responses with 0 API calls;
+    //      concurrent identical GETs coalesce onto a single HTTP request; stale cache serves as instant fallback on 429 ----
+    private static final long STALE_MAX_MS = 24L * 60 * 60 * 1000L;
+    private static final Map<String, Object[]> GET_CACHE = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, Object[]>(128, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Object[]> e) { return size() > 360; }
     });
-    private static final Map<String, Boolean> FOLLOW_CACHE = java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+    private static final ConcurrentHashMap<String, CompletableFuture<JSONObject>> IN_FLIGHT = new ConcurrentHashMap<>();
+    static final Map<String, Boolean> FOLLOW_CACHE = java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+
+    static long cacheTtlMs(String path) {
+        if (path == null) return 5 * 60 * 1000L;
+        if (path.startsWith("/me/player/recently-played")) return 2 * 60 * 1000L;
+        if (path.startsWith("/me/") || path.startsWith("/playlists/")) return 5 * 60 * 1000L;
+        // Catalog endpoints (/artists/*, /albums/*, /search*) stay fresh for 30 minutes across restarts
+        return 30 * 60 * 1000L;
+    }
+
+    private static File diskCacheDir() {
+        if (Img.appContext == null) return null;
+        File d = new File(Img.appContext.getCacheDir(), "spotify_http_v1");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    private static File diskCacheFile(String path) {
+        File d = diskCacheDir();
+        if (d == null) return null;
+        try {
+            byte[] dig = MessageDigest.getInstance("SHA-1").digest(path.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(40);
+            for (byte b : dig) sb.append(String.format("%02x", b));
+            return new File(d, sb + ".json");
+        } catch (Exception e) {
+            return new File(d, Integer.toHexString(path.hashCode()) + "_" + path.length() + ".json");
+        }
+    }
+
+    private static Object[] readDiskCache(String path) {
+        try {
+            File f = diskCacheFile(path);
+            if (f == null || !f.exists()) return null;
+            JSONObject env = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
+            if (!path.equals(env.optString("p"))) return null;
+            long ts = env.optLong("ts", 0L);
+            if (System.currentTimeMillis() - ts > STALE_MAX_MS) { f.delete(); return null; }
+            JSONObject data = env.optJSONObject("d");
+            if (data == null) return null;
+            return new Object[]{ts, data};
+        } catch (Exception e) { return null; }
+    }
+
+    private static void writeDiskCache(String path, long ts, JSONObject data) {
+        try {
+            File f = diskCacheFile(path);
+            if (f == null || data == null) return;
+            JSONObject env = new JSONObject().put("p", path).put("ts", ts).put("d", data);
+            java.nio.file.Files.write(f.toPath(), env.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) {}
+    }
+
+    private static Object[] lookupCache(String path) {
+        Object[] hit = GET_CACHE.get(path);
+        if (hit != null) return hit;
+        Object[] disk = readDiskCache(path);
+        if (disk != null) GET_CACHE.put(path, disk);
+        return disk;
+    }
+
+    static void clearAllCache() {
+        GET_CACHE.clear();
+        FOLLOW_CACHE.clear();
+        try {
+            File d = diskCacheDir();
+            File[] fs = d == null ? null : d.listFiles();
+            if (fs != null) for (File f : fs) f.delete();
+        } catch (Exception ignored) {}
+    }
 
     /** Evicts only user-mutable cache entries (/me/* and /playlists/*), keeping catalog metadata cached to avoid 429 bursts. */
     static void invalidateUserCache() {
@@ -343,32 +434,85 @@ final class Spotify {
             java.util.Iterator<String> it = GET_CACHE.keySet().iterator();
             while (it.hasNext()) {
                 String k = it.next();
-                if (k.startsWith("/me/") || k.startsWith("/playlists/")) it.remove();
+                if (k.startsWith("/me/") || k.startsWith("/playlists/")) {
+                    it.remove();
+                    try { File f = diskCacheFile(k); if (f != null && f.exists()) f.delete(); } catch (Exception ignored) {}
+                }
             }
         }
+        // Also prune any user-mutable disk files not currently in RAM
+        try {
+            File d = diskCacheDir();
+            File[] fs = d == null ? null : d.listFiles();
+            if (fs != null) {
+                for (File f : fs) {
+                    try {
+                        String head = new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+                        if (head.contains("\"p\":\"\\/me\\/") || head.contains("\"p\":\"/me/")
+                                || head.contains("\"p\":\"\\/playlists\\/") || head.contains("\"p\":\"/playlists/")) {
+                            f.delete();
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
-    private static boolean cacheable(String method, String path) {
-        return "GET".equals(method) && !path.startsWith("/me/player")
+    static boolean cacheable(String method, String path) {
+        if (!"GET".equals(method) || path == null || fixtures != null) return false;
+        // Allow /me/player/recently-played to cache cleanly (Home & Explore share it!), while excluding live playback endpoints
+        if (path.startsWith("/me/player/recently-played")) return true;
+        return !path.startsWith("/me/player")
                 && !path.startsWith("/me/following/contains")
-                && !path.startsWith("/me/library/contains")
-                && fixtures == null;
+                && !path.startsWith("/me/library/contains");
     }
 
-    /** Synchronous GET backed by GET_CACHE (falls back to stale cache on 429/network error). */
+    /**
+     * Synchronous GET backed by RAM + disk cache AND in-flight request deduplication
+     * (concurrent callers for the same path share 1 HTTP request; stale cache falls back seamlessly on 429).
+     */
     static JSONObject callCached(String path) throws Exception {
         final boolean cache = cacheable("GET", path);
-        final Object[] hit = cache ? GET_CACHE.get(path) : null;
-        if (hit != null && System.currentTimeMillis() - (long) hit[0] < FRESH_MS) {
+        final Object[] hit = cache ? lookupCache(path) : null;
+        if (hit != null && System.currentTimeMillis() - (long) hit[0] < cacheTtlMs(path)) {
             return (JSONObject) hit[1];
+        }
+        if (!cache) {
+            JSONObject o = call("GET", path, null);
+            if (path.startsWith("/me/playlists") || path.startsWith("/search")) filterPlaylists(o, path);
+            return o;
+        }
+        // Coalesce concurrent identical GETs onto a single network flight
+        CompletableFuture<JSONObject> mine = new CompletableFuture<>();
+        CompletableFuture<JSONObject> existing = IN_FLIGHT.putIfAbsent(path, mine);
+        if (existing != null) {
+            try {
+                return existing.get();
+            } catch (java.util.concurrent.ExecutionException ee) {
+                if (hit != null) return (JSONObject) hit[1];
+                Throwable cause = ee.getCause();
+                if (cause instanceof Exception) throw (Exception) cause;
+                throw new RuntimeException(cause);
+            }
         }
         try {
             JSONObject o = call("GET", path, null);
-            if (cache) GET_CACHE.put(path, new Object[]{System.currentTimeMillis(), o});
+            if (path.startsWith("/me/playlists") || path.startsWith("/search")) filterPlaylists(o, path);
+            long now = System.currentTimeMillis();
+            GET_CACHE.put(path, new Object[]{now, o});
+            writeDiskCache(path, now, o);
+            mine.complete(o);
             return o;
         } catch (Exception e) {
-            if (hit != null) return (JSONObject) hit[1];
+            if (hit != null) {
+                JSONObject stale = (JSONObject) hit[1];
+                mine.complete(stale);
+                return stale;
+            }
+            mine.completeExceptionally(e);
             throw e;
+        } finally {
+            IN_FLIGHT.remove(path, mine);
         }
     }
 
@@ -395,9 +539,22 @@ final class Spotify {
 
     static void send(String method, String path, String body, Cb cb) {
         final boolean cache = cacheable(method, path);
-        final Object[] hit = cache ? GET_CACHE.get(path) : null;
-        if (hit != null && System.currentTimeMillis() - (long) hit[0] < FRESH_MS) {
-            if (cb != null) MAIN.post(() -> cb.ok((JSONObject) hit[1]));
+        if (cache) {
+            final Object[] hit = GET_CACHE.get(path);
+            if (hit != null && System.currentTimeMillis() - (long) hit[0] < cacheTtlMs(path)) {
+                if (cb != null) MAIN.post(() -> cb.ok((JSONObject) hit[1]));
+                return;
+            }
+            IO.execute(() -> {
+                try {
+                    JSONObject o = callCached(path);
+                    if (cb != null) MAIN.post(() -> cb.ok(o));
+                } catch (Exception e) {
+                    int code = e instanceof ApiError ? ((ApiError) e).code : 0;
+                    String msg = String.valueOf(e.getMessage());
+                    if (cb != null) MAIN.post(() -> cb.err(code, msg));
+                }
+            });
             return;
         }
         // library changes (likes, saves, follows) invalidate only /me/* and /playlists/*, keeping catalog cached
@@ -406,10 +563,8 @@ final class Spotify {
             try {
                 JSONObject o = call(method, path, body);
                 if ("GET".equals(method) && (path.startsWith("/me/playlists") || path.startsWith("/search"))) filterPlaylists(o, path);
-                if (cache) GET_CACHE.put(path, new Object[]{System.currentTimeMillis(), o});
                 if (cb != null) MAIN.post(() -> cb.ok(o));
             } catch (Exception e) {
-                if (hit != null) { if (cb != null) MAIN.post(() -> cb.ok((JSONObject) hit[1])); return; }
                 int code = e instanceof ApiError ? ((ApiError) e).code : 0;
                 String msg = String.valueOf(e.getMessage());
                 if (cb != null) MAIN.post(() -> cb.err(code, msg));
@@ -417,7 +572,7 @@ final class Spotify {
         });
     }
 
-    /** Tries several endpoints in order (the Web API has been renaming/restricting routes). */
+    /** Tries several endpoints in order (aborts immediately on 429 so rate limits are never amplified). */
     static void getFirst(Cb cb, String... paths) {
         IO.execute(() -> {
             Exception last = null;
@@ -426,6 +581,9 @@ final class Spotify {
                     JSONObject o = call("GET", p, null);
                     MAIN.post(() -> cb.ok(o));
                     return;
+                } catch (ApiError ae) {
+                    last = ae;
+                    if (ae.code == 429) break;
                 } catch (Exception e) { last = e; }
             }
             final Exception fe = last;
@@ -515,7 +673,8 @@ final class Spotify {
                         invalidateUserCache();
                         if (cb != null) MAIN.post(() -> cb.ok(o));
                         return;
-                    } catch (Exception e) { last = e; }
+                    } catch (ApiError ae) { last = ae; if (ae.code == 429) break; }
+                    catch (Exception e) { last = e; }
                 }
             } catch (Exception e) { last = e; }
             int code = last instanceof ApiError ? ((ApiError) last).code : 0;
@@ -543,7 +702,8 @@ final class Spotify {
                         invalidateUserCache();
                         if (cb != null) MAIN.post(() -> cb.ok(o));
                         return;
-                    } catch (Exception e) { last = e; }
+                    } catch (ApiError ae) { last = ae; if (ae.code == 429) break; }
+                    catch (Exception e) { last = e; }
                 }
             } catch (Exception e) { last = e; }
             int code = last instanceof ApiError ? ((ApiError) last).code : 0;
@@ -564,7 +724,8 @@ final class Spotify {
                         invalidateUserCache();
                         if (cb != null) MAIN.post(() -> cb.ok(o));
                         return;
-                    } catch (Exception e) { last = e; }
+                    } catch (ApiError ae) { last = ae; if (ae.code == 429) break; }
+                    catch (Exception e) { last = e; }
                 }
             } catch (Exception e) { last = e; }
             int code = last instanceof ApiError ? ((ApiError) last).code : 0;
@@ -573,22 +734,34 @@ final class Spotify {
         });
     }
 
-    /** Checks whether the signed-in user follows the given artist ID (2026 /me/library first, legacy fallback). */
+    /** Checks whether the signed-in user follows the given artist ID (cached in FOLLOW_CACHE; aborts on 429). */
     static void isFollowingArtist(String artistId, java.util.function.Consumer<Boolean> cb) {
         if (artistId == null || artistId.isEmpty() || !loggedIn()) {
             if (cb != null) MAIN.post(() -> cb.accept(false));
             return;
         }
+        Boolean cached = FOLLOW_CACHE.get(artistId);
+        if (cached != null) {
+            if (cb != null) MAIN.post(() -> cb.accept(cached));
+            return;
+        }
+        if (isRateLimited()) {
+            if (cb != null) MAIN.post(() -> cb.accept(false));
+            return;
+        }
         IO.execute(() -> {
             Boolean res = null;
+            boolean rateHit = false;
             // 1) 2026 Spotify Web API unified endpoint (/me/library/contains?uris=spotify:artist:<id>)
             try {
                 JSONObject o = call("GET", "/me/library/contains?uris=" + enc("spotify:artist:" + artistId), null);
                 JSONArray a = o == null ? null : o.optJSONArray("items");
                 if (a != null && a.length() > 0) res = a.optBoolean(0, false);
+            } catch (ApiError ae) {
+                if (ae.code == 429) rateHit = true;
             } catch (Exception ignored) {}
-            // 2) Legacy fallback (/me/following/contains)
-            if (res == null) {
+            // 2) Legacy fallback (/me/following/contains) — skipped on 429!
+            if (res == null && !rateHit) {
                 try {
                     JSONObject o = call("GET", "/me/following/contains?type=artist&ids=" + enc(artistId), null);
                     JSONArray a = o == null ? null : o.optJSONArray("items");
@@ -602,7 +775,7 @@ final class Spotify {
         });
     }
 
-    /** Follows or unfollows an artist (2026 /me/library first using user-library-modify, legacy /me/following fallback). */
+    /** Follows or unfollows an artist (2026 /me/library first; aborts immediately on 429). */
     static void setFollowArtist(String artistId, boolean follow, Cb cb) {
         if (artistId == null || artistId.isEmpty()) {
             if (cb != null) MAIN.post(() -> cb.err(400, "missing artist id"));
@@ -611,7 +784,6 @@ final class Spotify {
         IO.execute(() -> {
             String method = follow ? "PUT" : "DELETE";
             Exception lastErr = null;
-            // 1) 2026 unified library endpoint: PUT/DELETE /me/library?uris=spotify:artist:<id>
             String artistUri = "spotify:artist:" + artistId;
             try {
                 JSONObject o = call(method, "/me/library?uris=" + enc(artistUri), null);
@@ -619,10 +791,15 @@ final class Spotify {
                 invalidateUserCache();
                 if (cb != null) MAIN.post(() -> cb.ok(o));
                 return;
+            } catch (ApiError ae) {
+                lastErr = ae;
+                if (ae.code == 429) {
+                    if (cb != null) MAIN.post(() -> cb.err(429, String.valueOf(ae.getMessage())));
+                    return;
+                }
             } catch (Exception e) {
                 lastErr = e;
             }
-            // 1b) Retry /me/library with JSON body {"uris":[...]} in case endpoint rejects query-only DELETE/PUT
             try {
                 String body = new JSONObject().put("uris", new JSONArray().put(artistUri)).toString();
                 JSONObject o1b = call(method, "/me/library", body);
@@ -630,8 +807,12 @@ final class Spotify {
                 invalidateUserCache();
                 if (cb != null) MAIN.post(() -> cb.ok(o1b));
                 return;
+            } catch (ApiError ae) {
+                if (ae.code == 429) {
+                    if (cb != null) MAIN.post(() -> cb.err(429, String.valueOf(ae.getMessage())));
+                    return;
+                }
             } catch (Exception ignored) {}
-            // 2) Legacy fallback: PUT/DELETE /me/following?type=artist&ids=<id>
             try {
                 JSONObject o2 = call(method, "/me/following?type=artist&ids=" + enc(artistId), null);
                 FOLLOW_CACHE.put(artistId, follow);

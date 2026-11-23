@@ -269,9 +269,9 @@
     <string name="npu_group">NPU Audio Enhancement</string>
     <string name="npu_title">Spotify NPU Audio Enhancer</string>
     <string name="npu_supported">Supported SoC detected · %1$s</string>
-    <string name="npu_unsupported">Unsupported SoC (%1$s) · Requires Snapdragon 8 Elite / Dimensity 9400 / Exynos 2500 or newer</string>
+    <string name="npu_unsupported">Unsupported SoC (%1$s) · Requires Snapdragon 8 Gen 2 / Dimensity 8400·9300 / Exynos 2400 / Tensor G4 or newer</string>
     <string name="npu_active">Active · %1$s (%2$s)</string>
-    <string name="npu_note">Enhances Spotify clarity with multi-band high-frequency restoration and dynamic range processing on Snapdragon 8 Elite (SM8750), Dimensity 9400 (MT6991), Exynos 2500 (S5E9955) and newer devices.</string>
+    <string name="npu_note">Enhances clarity with multi-band high-frequency restoration and dynamic range processing on Snapdragon 8 Gen 2+, Dimensity 8400/9300+, Exynos 2400+, and Tensor G4+ devices.</string>
     <string name="bpa_title">Bit-Perfect Assist</string>
     <string name="bpa_sub_on">On · %1$s</string>
     <string name="bpa_sub_off">Off</string>
@@ -298,7 +298,7 @@
     <string name="bpa_enable">Enable Bit-Perfect Assist</string>
     <string name="bpa_disable">Disable Bit-Perfect Assist</string>
     <string name="bpa_supported_socs">Supported chipsets</string>
-    <string name="bpa_supported_socs_sub">15 chipsets supported</string>
+    <string name="bpa_supported_socs_sub">25 chipsets supported</string>
     <string name="bpa_current_device">This device</string>
     <string name="bpa_hires_glow">Hi-Res 3-tier glow effects</string>
     <string name="bpa_hires_glow_note">Shows the cover glow aura (Gold / Blue / Rainbow) and luxury Master backdrop during Hi-Res playback.</string>
@@ -337,4 +337,11 @@
     <string name="retry">Retry</string>
     <string name="playback_failed_code">Couldn’t start playback (%1$s)</string>
     <string name="artist_releases_partial">Showing partial releases (%1$s) · Tap to load all</string>
+    <string name="set_app_icon">App icon</string>
+    <string name="app_icon_rainbow">Rainbow Prism</string>
+    <string name="app_icon_classic">Classic Prism</string>
+    <string name="app_icon_note">Switch between the omnidirectional Rainbow Prism icon and the original Classic Prism icon.</string>
+    <string name="app_icon_changed">App icon updated. It may take a moment to refresh on your home screen.</string>
+    <string name="lyrics_namuwiki">Namuwiki real-time Korean translations</string>
+    <string name="lyrics_namuwiki_note">Off by default. When enabled, fetches Korean lyric translations from public Namuwiki articles in real time when no native subtitle track is available.</string>
 </resources>

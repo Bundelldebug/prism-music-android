@@ -18,7 +18,7 @@ final class Icons {
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
             REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
-            BUDS = 51, EARBUDS = 52, DAC = 53;
+            BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -463,36 +463,114 @@ final class Icons {
                 break;
             }
             case BUDS: {
-                // Samsung One UI official Galaxy Buds3 / Buds3 Pro symmetric silhouette:
-                // ergonomic sculpted ear-head + inward eartip nozzle seamlessly flowing into a sleek angled blade stem
+                // Official Samsung One UI Galaxy Buds 3 icon:
+                // outlined mirrored pair, outer ear-tip dome, vertical blade stem with V-point bottom & inner vent dash
+                stroke(1.55f);
+                // Left earbud head arc (from right stem junction counterclockwise around top to left stem junction)
+                R.set(3.95f, 5.15f, 10.85f, 12.05f);
+                c.drawArc(R, 64f, -320f, false, P);
+                // Left earbud vertical blade stem (left crease extends slightly into head, V-point bottom)
+                p.moveTo(6.5f, 9.7f);
+                p.lineTo(6.5f, 19.25f);
+                p.lineTo(7.65f, 20.2f);
+                p.lineTo(8.8f, 19.25f);
+                p.lineTo(8.8f, 11.75f);
+                c.drawPath(p, P);
+                // Left earbud outer ear-tip dome
+                p.reset();
+                p.moveTo(4.05f, 8.2f);
+                p.cubicTo(1.75f, 8.7f, 1.75f, 11.85f, 3.65f, 12.75f);
+                p.cubicTo(4.65f, 13.2f, 5.65f, 12.65f, 6.15f, 11.9f);
+                c.drawPath(p, P);
+                // Left earbud tiny diagonal vent dash
+                c.drawLine(7.85f, 8.05f, 8.75f, 7.25f, P);
+
+                // Right earbud (exact horizontal mirror across x = 12)
+                R.set(13.15f, 5.15f, 20.05f, 12.05f);
+                c.drawArc(R, 116f, 320f, false, P);
+                p.reset();
+                p.moveTo(17.5f, 9.7f);
+                p.lineTo(17.5f, 19.25f);
+                p.lineTo(16.35f, 20.2f);
+                p.lineTo(15.2f, 19.25f);
+                p.lineTo(15.2f, 11.75f);
+                c.drawPath(p, P);
+                p.reset();
+                p.moveTo(19.95f, 8.2f);
+                p.cubicTo(22.25f, 8.7f, 22.25f, 11.85f, 20.35f, 12.75f);
+                p.cubicTo(19.35f, 13.2f, 18.35f, 12.65f, 17.85f, 11.9f);
+                c.drawPath(p, P);
+                c.drawLine(16.15f, 8.05f, 15.25f, 7.25f, P);
+                break;
+            }
+            case BUDS4: {
+                // Official Samsung One UI Galaxy Buds 4 icon:
+                // outlined single tilted earbud with rounded capsule blade stem, top pill slot & left ear-tip dome
+                stroke(1.6f);
+                // Main rounded head contour (open where foreground tilted stem crosses)
+                p.moveTo(9.7f, 12.75f);
+                p.cubicTo(7.45f, 11.35f, 7.35f, 7.35f, 9.45f, 5.45f);
+                p.cubicTo(11.65f, 3.55f, 16.45f, 3.65f, 18.35f, 6.55f);
+                p.cubicTo(19.85f, 8.85f, 18.95f, 12.25f, 16.05f, 13.45f);
+                p.cubicTo(15.25f, 13.8f, 14.35f, 13.95f, 13.65f, 13.9f);
+                c.drawPath(p, P);
+                // Left ear-tip dome hugging the upper-left cheek
+                p.reset();
+                p.moveTo(9.45f, 5.45f);
+                p.cubicTo(6.35f, 5.15f, 4.65f, 7.45f, 4.95f, 10.05f);
+                p.cubicTo(5.2f, 12.0f, 7.15f, 13.15f, 9.55f, 12.75f);
+                c.drawPath(p, P);
+                // Tilted foreground flat capsule stem + upper pill slot
+                c.save();
+                c.rotate(24.5f, 11.4f, 14.0f);
+                R.set(9.4f, 6.25f, 13.4f, 21.15f);
+                c.drawRoundRect(R, 2.0f, 2.0f, P);
+                stroke(1.65f);
+                c.drawLine(11.4f, 8.55f, 11.4f, 9.55f, P);
+                c.restore();
+                break;
+            }
+            case BUDS_ON: {
+                // Official Samsung Galaxy Buds On / Able open-ear icon:
+                // curved arch bridge + twin open-ear pods (bottom-left vertical notch & right crescent cutout)
                 fill();
-                // Left earbud
-                p.moveTo(6.3f, 3.8f);
-                p.cubicTo(4.0f, 3.8f, 2.7f, 5.5f, 2.8f, 7.8f);
-                p.cubicTo(2.9f, 9.7f, 3.8f, 11.1f, 4.9f, 11.9f);
-                p.lineTo(5.6f, 19.3f);
-                p.cubicTo(5.7f, 20.2f, 6.4f, 20.6f, 7.1f, 20.5f);
-                p.cubicTo(7.8f, 20.4f, 8.2f, 19.8f, 8.1f, 19.0f);
-                p.lineTo(7.8f, 11.3f);
-                p.cubicTo(9.0f, 11.0f, 10.1f, 10.2f, 10.5f, 9.2f);
-                p.cubicTo(11.1f, 8.8f, 11.3f, 8.2f, 11.2f, 7.5f);
-                p.cubicTo(11.1f, 6.7f, 10.5f, 6.2f, 9.8f, 6.0f);
-                p.cubicTo(9.2f, 4.6f, 7.9f, 3.8f, 6.3f, 3.8f);
+                // 1) Curved top C-arch bridge
+                p.moveTo(4.7f, 10.35f);
+                p.cubicTo(7.9f, 5.9f, 13.4f, 2.95f, 17.4f, 3.95f);
+                p.cubicTo(20.3f, 4.7f, 21.1f, 8.1f, 20.5f, 11.55f);
+                p.lineTo(17.55f, 10.65f);
+                p.cubicTo(17.9f, 7.85f, 16.85f, 6.7f, 14.8f, 6.6f);
+                p.cubicTo(11.6f, 6.45f, 8.4f, 8.35f, 6.85f, 10.65f);
                 p.close();
                 c.drawPath(p, P);
-                // Right earbud (exact mirror of left across x = 12)
+                // 2) Left open-ear pod with bottom-left vertical notch
                 p.reset();
-                p.moveTo(17.7f, 3.8f);
-                p.cubicTo(20.0f, 3.8f, 21.3f, 5.5f, 21.2f, 7.8f);
-                p.cubicTo(21.1f, 9.7f, 20.2f, 11.1f, 19.1f, 11.9f);
-                p.lineTo(18.4f, 19.3f);
-                p.cubicTo(18.3f, 20.2f, 17.6f, 20.6f, 16.9f, 20.5f);
-                p.cubicTo(16.2f, 20.4f, 15.8f, 19.8f, 15.9f, 19.0f);
-                p.lineTo(16.2f, 11.3f);
-                p.cubicTo(15.0f, 11.0f, 13.9f, 10.2f, 13.5f, 9.2f);
-                p.cubicTo(12.9f, 8.8f, 12.7f, 8.2f, 12.8f, 7.5f);
-                p.cubicTo(12.9f, 6.7f, 13.5f, 6.2f, 14.2f, 6.0f);
-                p.cubicTo(14.8f, 4.6f, 16.1f, 3.8f, 17.7f, 3.8f);
+                p.moveTo(7.25f, 20.35f);
+                p.cubicTo(10.05f, 20.25f, 11.55f, 18.25f, 11.45f, 15.6f);
+                p.cubicTo(11.35f, 13.0f, 9.65f, 11.35f, 7.25f, 11.55f);
+                p.cubicTo(4.75f, 11.75f, 3.35f, 13.45f, 3.85f, 16.05f);
+                p.cubicTo(4.15f, 17.85f, 4.8f, 19.35f, 5.95f, 19.95f);
+                p.lineTo(5.65f, 17.85f);
+                p.cubicTo(5.55f, 17.1f, 6.55f, 17.0f, 6.75f, 17.75f);
+                p.lineTo(7.25f, 20.35f);
+                p.close();
+                c.drawPath(p, P);
+                // 3) Right open-ear pod (main rounded body left of crescent cutout)
+                p.reset();
+                p.moveTo(16.75f, 11.6f);
+                p.cubicTo(14.1f, 11.7f, 12.35f, 13.8f, 12.55f, 16.5f);
+                p.cubicTo(12.75f, 19.0f, 14.45f, 20.7f, 16.85f, 20.8f);
+                p.cubicTo(16.75f, 18.0f, 17.65f, 14.3f, 18.95f, 12.1f);
+                p.cubicTo(18.25f, 11.7f, 17.55f, 11.55f, 16.75f, 11.6f);
+                p.close();
+                c.drawPath(p, P);
+                // 4) Right outer curved crescent rim
+                p.reset();
+                p.moveTo(19.9f, 12.8f);
+                p.cubicTo(18.9f, 14.8f, 18.2f, 17.8f, 18.2f, 20.4f);
+                p.cubicTo(18.2f, 20.9f, 18.75f, 21.0f, 19.05f, 20.5f);
+                p.cubicTo(20.4f, 18.6f, 21.0f, 15.6f, 20.5f, 13.0f);
+                p.cubicTo(20.4f, 12.5f, 20.1f, 12.45f, 19.9f, 12.8f);
                 p.close();
                 c.drawPath(p, P);
                 break;

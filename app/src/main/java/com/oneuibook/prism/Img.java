@@ -194,6 +194,7 @@ final class Img {
         String url;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Paint ph = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final Matrix m = new Matrix();
         float radius;
@@ -205,6 +206,8 @@ final class Img {
             super(c);
             radius = Ui.dpf(radiusDp);
             ph.setColor(Ui.placeholder());
+            rim.setStyle(Paint.Style.STROKE);
+            rim.setStrokeWidth(Math.max(1f, Ui.dpf(0.75f)));
         }
 
         void setUrl(String u) {
@@ -249,6 +252,11 @@ final class Img {
                 paint.setAlpha((int) (255 * a));
                 c.drawRoundRect(r, rad, rad, paint);
             }
+            // Crisp hairline border so light covers on white bg and dark covers on OLED bg keep clean edges
+            float sw = rim.getStrokeWidth() * 0.5f;
+            rim.setColor(Ui.dark ? 0x1EFFFFFF : 0x16000000);
+            r.inset(sw, sw);
+            c.drawRoundRect(r, Math.max(0f, rad - sw), Math.max(0f, rad - sw), rim);
         }
     }
 }

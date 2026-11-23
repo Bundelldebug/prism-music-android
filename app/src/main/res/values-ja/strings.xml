@@ -269,9 +269,9 @@
     <string name="npu_group">NPU 高音質化</string>
     <string name="npu_title">Spotify NPU 高音質化</string>
     <string name="npu_supported">対応チップセット検出 · %1$s</string>
-    <string name="npu_unsupported">非対応チップセット (%1$s) · Snapdragon 8 Elite / Dimensity 9400 / Exynos 2500 以降が必要</string>
+    <string name="npu_unsupported">非対応チップセット (%1$s) · Snapdragon 8 Gen 2 / Dimensity 8400・9300 / Exynos 2400 / Tensor G4 以降が必要</string>
     <string name="npu_active">有効 · %1$s (%2$s)</string>
-    <string name="npu_note">Snapdragon 8 Elite (SM8750)・Dimensity 9400 (MT6991)・Exynos 2500 (S5E9955) 以降の端末で Spotify 再生時にマルチバンド高域補完・ダイナミックレンジ拡張を適用します。</string>
+    <string name="npu_note">Snapdragon 8 Gen 2・Dimensity 8400/9300・Exynos 2400・Tensor G4 以降の端末でマルチバンド高域補完・ダイナミックレンジ拡張を適用します。</string>
     <string name="bpa_title">ビットパーフェクト アシスト</string>
     <string name="bpa_sub_on">オン · %1$s</string>
     <string name="bpa_sub_off">オフ</string>
@@ -298,7 +298,7 @@
     <string name="bpa_enable">ビットパーフェクト アシストをオン</string>
     <string name="bpa_disable">ビットパーフェクト アシストをオフ</string>
     <string name="bpa_supported_socs">対応チップセット一覧</string>
-    <string name="bpa_supported_socs_sub">全15種対応</string>
+    <string name="bpa_supported_socs_sub">全25種対応</string>
     <string name="bpa_current_device">現在の端末</string>
     <string name="bpa_hires_glow">Hi-Res 3段階グローエフェクト</string>
     <string name="bpa_hires_glow_note">Hi-Res 再生時のジャケット周囲グロー（ゴールド・ブルー・レインボー）とマスター背景を表示します。</string>
@@ -337,4 +337,11 @@
     <string name="retry">再試行</string>
     <string name="playback_failed_code">再生を開始できませんでした (%1$s)</string>
     <string name="artist_releases_partial">一部のリリースのみ表示 (%1$s) · タップしてすべて読み込む</string>
+    <string name="set_app_icon">アプリアイコン</string>
+    <string name="app_icon_rainbow">レインボープリズム</string>
+    <string name="app_icon_classic">クラシックプリズム</string>
+    <string name="app_icon_note">中央のプリズムから全方位へ虹色のフレームが広がる新アイコンと、従来のクラシックアイコンを切り替えられます。</string>
+    <string name="app_icon_changed">アプリアイコンを変更しました。ホーム画面の反映まで少し時間がかかる場合があります。</string>
+    <string name="lyrics_namuwiki">ナムウィキ リアルタイム韓国語訳歌詞</string>
+    <string name="lyrics_namuwiki_note">既定はオフです。オンにすると翻訳字幕がない外国語歌詞に対し、ナムウィキの韓国語訳をリアルタイムで照合して表示します。</string>
 </resources>

@@ -269,9 +269,9 @@
     <string name="npu_group">NPU 음질 향상</string>
     <string name="npu_title">Spotify NPU 음질 향상</string>
     <string name="npu_supported">지원 칩셋 감지 · %1$s</string>
-    <string name="npu_unsupported">미지원 칩셋 (%1$s) · Snapdragon 8 Elite / Dimensity 9400 / Exynos 2500 이상 필요</string>
+    <string name="npu_unsupported">미지원 칩셋 (%1$s) · 스냅드래곤 8 2세대 / 디멘시티 8400·9300 / 엑시노스 2400 / 텐서 G4 이상 필요</string>
     <string name="npu_active">활성화됨 · %1$s (%2$s)</string>
-    <string name="npu_note">Snapdragon 8 Elite (SM8750), Dimensity 9400 (MT6991), Exynos 2500 (S5E9955) 이상 기기에서 Spotify 재생 시 다중대역 고역 복원·다이내믹 레인지 확장을 적용해 선명도를 높여요.</string>
+    <string name="npu_note">스냅드래곤 8 2세대(SM8550), 디멘시티 8400·9300, 엑시노스 2400(S5E9945), 구글 텐서 G4 이상 기기에서 다중대역 고역 복원·다이내믹 레인지 확장을 적용해 선명도를 높여요.</string>
     <string name="bpa_title">비트퍼펙트 어시스트</string>
     <string name="bpa_sub_on">켜짐 · %1$s</string>
     <string name="bpa_sub_off">꺼짐</string>
@@ -298,7 +298,7 @@
     <string name="bpa_enable">비트퍼펙트 어시스트 켜기</string>
     <string name="bpa_disable">비트퍼펙트 어시스트 끄기</string>
     <string name="bpa_supported_socs">지원 칩셋 종류</string>
-    <string name="bpa_supported_socs_sub">총 15종 지원</string>
+    <string name="bpa_supported_socs_sub">총 25종 지원</string>
     <string name="bpa_current_device">현재 기기</string>
     <string name="bpa_hires_glow">Hi-Res 3단계 글로우 효과</string>
     <string name="bpa_hires_glow_note">Hi-Res 재생 시 커버 외곽 글로우(골드·블루·무지개)와 마스터 모드 고급 배경 효과를 표시해요.</string>
@@ -337,4 +337,11 @@
     <string name="retry">다시 시도</string>
     <string name="playback_failed_code">재생을 시작하지 못했어요 (%1$s)</string>
     <string name="artist_releases_partial">일부 발매만 표시됨 (%1$s) · 탭하여 전체 불러오기</string>
+    <string name="set_app_icon">앱 아이콘</string>
+    <string name="app_icon_rainbow">레인보우 프리즘</string>
+    <string name="app_icon_classic">클래식 프리즘</string>
+    <string name="app_icon_note">정중앙 프리즘에서 전방향으로 무지개 프레임이 퍼지는 새 아이콘과 기존 클래식 아이콘 중 선택할 수 있어요.</string>
+    <string name="app_icon_changed">앱 아이콘을 바꿨어요. 홈 화면에 반영되기까지 잠시 걸릴 수 있어요.</string>
+    <string name="lyrics_namuwiki">나무위키 실시간 번역 가사</string>
+    <string name="lyrics_namuwiki_note">기본은 꺼짐입니다. 켜면 외국어 가사에 번역 자막이 없을 때 나무위키 문서의 한국어 번역을 실시간으로 매칭해 표시해요(접근이 제한된 경우 건너뜁니다).</string>
 </resources>

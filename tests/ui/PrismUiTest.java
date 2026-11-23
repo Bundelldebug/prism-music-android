@@ -695,17 +695,26 @@ public class PrismUiTest {
         a.np.close(); idle(600);
 
         // [9] 9.5.5 regression checks:
-        // (a) NPU audio enhancer SoC gate: SM8750 / MT6991 / S5E9955 and newer only
+        // (a) NPU audio enhancer SoC gate: Snapdragon 8 Gen 2+ / Dimensity 8400·9300+ / Exynos 2400+ / Tensor G4+
+        assertTrue("SM8550 supported", NpuAudio.isSupportedSoc("SM8550"));
+        assertTrue("SM8650 supported", NpuAudio.isSupportedSoc("SM8650"));
         assertTrue("SM8750 supported", NpuAudio.isSupportedSoc("SM8750"));
         assertTrue("SM8850 supported", NpuAudio.isSupportedSoc("SM8850"));
+        assertTrue("MT6899 supported", NpuAudio.isSupportedSoc("MT6899"));
+        assertTrue("MT6989 supported", NpuAudio.isSupportedSoc("MT6989"));
         assertTrue("MT6991 supported", NpuAudio.isSupportedSoc("MT6991"));
         assertTrue("Dimensity 9400 supported", NpuAudio.isSupportedSoc("MediaTek Dimensity 9400"));
+        assertTrue("S5E9945 supported", NpuAudio.isSupportedSoc("S5E9945"));
+        assertTrue("Exynos 2400 supported", NpuAudio.isSupportedSoc("Exynos 2400"));
         assertTrue("S5E9955 supported", NpuAudio.isSupportedSoc("S5E9955"));
         assertTrue("Exynos 2500 supported", NpuAudio.isSupportedSoc("Samsung Exynos 2500"));
-        assertTrue("SM8650 rejected", !NpuAudio.isSupportedSoc("SM8650"));
-        assertTrue("MT6989 rejected", !NpuAudio.isSupportedSoc("MT6989"));
-        assertTrue("S5E9945 rejected", !NpuAudio.isSupportedSoc("S5E9945"));
-        assertTrue("Exynos 2400 rejected", !NpuAudio.isSupportedSoc("Exynos 2400"));
+        assertTrue("GS401 supported", NpuAudio.isSupportedSoc("GS401"));
+        assertTrue("GS501 supported", NpuAudio.isSupportedSoc("GS501"));
+        assertTrue("SM8450 rejected", !NpuAudio.isSupportedSoc("SM8450"));
+        assertTrue("MT6985 rejected", !NpuAudio.isSupportedSoc("MT6985"));
+        assertTrue("S5E9925 rejected", !NpuAudio.isSupportedSoc("S5E9925"));
+        assertTrue("Exynos 2200 rejected", !NpuAudio.isSupportedSoc("Exynos 2200"));
+        assertTrue("GS301 rejected", !NpuAudio.isSupportedSoc("GS301"));
 
         // (b) Spotify scopes include playlist-modify-public and playlist-modify-private
         assertTrue("playlist-modify-public scope", Spotify.SCOPES.contains("playlist-modify-public"));
@@ -735,26 +744,36 @@ public class PrismUiTest {
         assertEquals("SSC-UHQ", AudioInfo.codecTypeName(7, "Samsung Seamless Codec", 24, 96f));
         assertEquals("SSC-UHQ", AudioInfo.codecTypeName(-1, "SSC-UHQ", 24, 96f));
 
-        // Dedicated device icons
-        assertEquals("Galaxy Buds icon", Icons.BUDS, AudioInfo.deviceIconForName("Galaxy Buds3 Pro", true, false, false));
+        // Dedicated device icons (Buds 3 / Buds 4 / Buds On / Headphones / Third-party Earbuds / USB DAC)
+        assertEquals("Galaxy Buds3 icon", Icons.BUDS, AudioInfo.deviceIconForName("Galaxy Buds3 Pro", true, false, false));
+        assertEquals("Galaxy Buds4 icon", Icons.BUDS4, AudioInfo.deviceIconForName("Galaxy Buds4 Pro", true, false, false));
+        assertEquals("Korean Buds4 icon", Icons.BUDS4, AudioInfo.deviceIconForName("지호의 버즈4", true, false, false));
+        assertEquals("Galaxy Buds On icon", Icons.BUDS_ON, AudioInfo.deviceIconForName("Galaxy Buds On", true, false, false));
+        assertEquals("Galaxy Buds Able icon", Icons.BUDS_ON, AudioInfo.deviceIconForName("Galaxy Buds Able", true, false, false));
+        assertEquals("Korean Buds On icon", Icons.BUDS_ON, AudioInfo.deviceIconForName("갤럭시 버즈 온", true, false, false));
         assertEquals("Headphones icon", Icons.HEADPHONES, AudioInfo.deviceIconForName("Sony WH-1000XM5", true, false, false));
         assertEquals("Third-party earbuds icon", Icons.EARBUDS, AudioInfo.deviceIconForName("AirPods Pro", true, false, false));
         assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA17", false, true, false));
 
-        // Friendly SoC marketing names & exact 15 supported chipsets check
-        assertEquals("15 supported chipsets", 15, NpuAudio.SUPPORTED_CHIPS.length);
+        // Friendly SoC marketing names & exact 25 supported chipsets check (including MT6993M for Dimensity 9600M)
+        assertEquals("25 supported chipsets", 25, NpuAudio.SUPPORTED_CHIPS.length);
         for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
             assertTrue("chip supported: " + cs.id, NpuAudio.isSupportedSoc(cs.id));
         }
+        assertEquals("스냅드래곤 8 2세대", NpuAudio.friendlySocName(app, "SM8550"));
+        assertEquals("스냅드래곤 8 3세대", NpuAudio.friendlySocName(app, "SM8650"));
         assertEquals("스냅드래곤 8 엘리트 5세대", NpuAudio.friendlySocName(app, "SM8850"));
         assertEquals("스냅드래곤 8 엘리트", NpuAudio.friendlySocName(app, "SM8750"));
+        assertEquals("디멘시티 9300", NpuAudio.friendlySocName(app, "MT6989"));
         assertEquals("디멘시티 9400", NpuAudio.friendlySocName(app, "MT6991"));
         assertEquals("디멘시티 9400+", NpuAudio.friendlySocName(app, "MT6991Z"));
         assertEquals("디멘시티 9500", NpuAudio.friendlySocName(app, "MT6993"));
         assertEquals("디멘시티 9500s", NpuAudio.friendlySocName(app, "MT6991W"));
         assertEquals("디멘시티 9600 프로", NpuAudio.friendlySocName(app, "MT6995"));
-        assertEquals("디멘시티 9600M", NpuAudio.friendlySocName(app, "MT6995M"));
+        assertEquals("디멘시티 9600M", NpuAudio.friendlySocName(app, "MT6993M"));
+        assertEquals("엑시노스 2400", NpuAudio.friendlySocName(app, "S5E9945"));
         assertEquals("엑시노스 2500", NpuAudio.friendlySocName(app, "S5E9955"));
+        assertEquals("구글 텐서 G5", NpuAudio.friendlySocName(app, "GS501"));
 
         // [11] 9.5.8 regression checks: artist follow scope, lyrics [offset:] & version filter & ko translation check, real-time NPU A/B & params
         assertTrue("user-follow-modify scope", Spotify.SCOPES.contains("user-follow-modify"));
@@ -806,12 +825,73 @@ public class PrismUiTest {
         chipV.draw(new Canvas(c2));
         assertEquals("ChipArtView 2nd draw pixel matches 1st draw (no alpha fade)", c1.getPixel(64, 64), c2.getPixel(64, 64));
 
-        // (b3) Render enlarged Galaxy Buds icon preview for visual check
-        Bitmap budsPrev = Bitmap.createBitmap(240, 240, Bitmap.Config.ARGB_8888);
+        // (b3) Render enlarged Galaxy Buds 3 / Buds 4 / Buds On icons side-by-side for visual check
+        Bitmap budsPrev = Bitmap.createBitmap(900, 340, Bitmap.Config.ARGB_8888);
         Canvas bcv = new Canvas(budsPrev);
-        bcv.drawColor(0xFF1C1C1E);
-        Icons.draw(bcv, Icons.BUDS, 120f, 120f, 176f, 0xFFFFFFFF);
+        bcv.drawColor(0xFF141418);
+        android.graphics.Paint bp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        int[] bIcons = {Icons.BUDS, Icons.BUDS4, Icons.BUDS_ON};
+        String[] bLabels = {"Galaxy Buds 3", "Galaxy Buds 4", "Galaxy Buds On"};
+        for (int i = 0; i < 3; i++) {
+            float x0 = 28f + i * 290f;
+            bp.setColor(0xFF22232A);
+            bcv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 264f, 316f), 32f, 32f, bp);
+            Icons.draw(bcv, bIcons[i], x0 + 132f, 146f, 168f, 0xFFFFFFFF);
+            bp.setColor(0xFFEAEAF0);
+            bp.setTextSize(26f);
+            bp.setTextAlign(android.graphics.Paint.Align.CENTER);
+            bp.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, 600, false));
+            bcv.drawText(bLabels[i], x0 + 132f, 286f, bp);
+        }
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "83_buds_icon_preview.png"))) { budsPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
+
+        // (b4) Render Rainbow Prism vs Classic Prism app icon preview
+        Bitmap appIcPrev = Bitmap.createBitmap(660, 360, Bitmap.Config.ARGB_8888);
+        Canvas acv = new Canvas(appIcPrev);
+        acv.drawColor(0xFF141418);
+        int[][] icRes = {
+                {R.drawable.ic_launcher_rainbow_bg, R.drawable.ic_launcher_rainbow_fg},
+                {R.drawable.ic_launcher_bg, R.drawable.ic_launcher_fg}
+        };
+        String[] icLabels = {"Rainbow Prism (New)", "Classic Prism"};
+        for (int i = 0; i < 2; i++) {
+            float x0 = 36f + i * 310f;
+            bp.setColor(0xFF22232A);
+            acv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 278f, 336f), 36f, 36f, bp);
+            acv.save();
+            android.graphics.Path clip = new android.graphics.Path();
+            clip.addRoundRect(new android.graphics.RectF(x0 + 49f, 54f, x0 + 229f, 234f), 46f, 46f, android.graphics.Path.Direction.CW);
+            acv.clipPath(clip);
+            android.graphics.drawable.Drawable bgD = a.getDrawable(icRes[i][0]);
+            android.graphics.drawable.Drawable fgD = a.getDrawable(icRes[i][1]);
+            if (bgD != null) { bgD.setBounds((int) (x0 + 25), 30, (int) (x0 + 253), 258); bgD.draw(acv); }
+            if (fgD != null) { fgD.setBounds((int) (x0 + 25), 30, (int) (x0 + 253), 258); fgD.draw(acv); }
+            acv.restore();
+            bp.setColor(0xFFEAEAF0);
+            bp.setTextSize(24f);
+            bp.setTextAlign(android.graphics.Paint.Align.CENTER);
+            acv.drawText(icLabels[i], x0 + 139f, 294f, bp);
+        }
+        try (FileOutputStream o = new FileOutputStream(new File(OUT, "85_app_icons_preview.png"))) { appIcPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
+
+        // (b5) 9.5.14 Namuwiki real-time translation lyrics (default OFF + HTML parser + matcher)
+        assertTrue("Namuwiki translation defaults OFF", !Lyrics.namuwikiEnabled(app));
+        assertTrue("Challenge page rejected", Lyrics.isNamuChallengePage("<html><title>Just a moment...</title></html>"));
+        String namuTableHtml = "<table><tr><td>Hello world<br>Shine so bright</td><td>안녕 세상아<br>눈부시게 빛나</td></tr></table>";
+        java.util.List<String[]> namuPairs = Lyrics.parseNamuwikiHtml(namuTableHtml);
+        assertEquals("Parsed 2 Namuwiki lyric pairs", 2, namuPairs.size());
+        Lyrics.Result namuRes = Lyrics.parse("[00:05.00]Hello world\n[00:10.00]Shine so bright", "");
+        assertEquals("Matched 2 Namuwiki lines", 2, Lyrics.applyNamuwikiPairs(namuRes, namuPairs));
+        assertEquals("안녕 세상아", namuRes.lines.get(0).trans);
+        assertEquals("눈부시게 빛나", namuRes.lines.get(1).trans);
+
+        // (b6) 9.5.14 Spotify 429 cacheability checks (recently-played cacheable; live /me/player excluded)
+        java.util.function.Function<String, org.json.JSONObject> savedFix = Spotify.fixtures;
+        Spotify.fixtures = null;
+        assertTrue("recently-played is cacheable", Spotify.cacheable("GET", "/me/player/recently-played?limit=50"));
+        assertTrue("live /me/player is not cached", !Spotify.cacheable("GET", "/me/player?additional_types=track"));
+        assertEquals("catalog TTL is 30 min", 30L * 60 * 1000L, Spotify.cacheTtlMs("/artists/abc/albums"));
+        Spotify.fixtures = savedFix;
 
         // (c) NowPlaying ticker stays alive immediately after open() even before openP > 0
         a.np.open();
@@ -867,23 +947,61 @@ public class PrismUiTest {
         idle(400);
         shot(a, "75_player_hires_gold");
 
-        // A style check: codec badge sits cleanly below album cover with zero overlap
+        // A style check: codec badge sits cleanly below album cover AND 4-button Liquid Glass actionPill is visible
         Ui.gStyle = false;
         MainActivity.prefs(app).edit().putString("player_style", "prism").commit();
+        Player.shuffle = true;
+        Player.repeat = "context";
         a.np.applyStyle();
         idle(400);
         shot(a, "78_player_a_style_badge");
+        try {
+            java.lang.reflect.Field apF = NowPlaying.class.getDeclaredField("actionPill");
+            apF.setAccessible(true);
+            View ap = (View) apF.get(a.np);
+            assertEquals("A-style Liquid Glass pill visible", View.VISIBLE, ap.getVisibility());
+            assertTrue("A-style wide pill has width (" + ap.getWidth() + ")", ap.getWidth() > Ui.dp(90));
+        } catch (Exception e) { throw new RuntimeException(e); }
 
         a.np.close(); idle(500);
 
-        // Wide foldable 16:10 cover (w412dp-h659dp) & 4:3 inner (w800dp-h600dp) layout check
+        // Wide foldable 16:10 cover (w412dp-h659dp) layout check (both A-style 4-btn glass pill & G-style active circle non-clipping!)
         ActivityController<MainActivity> wc = launch("ko-w412dp-h659dp-xhdpi");
         MainActivity wa = wc.get();
         fakeTrack();
+        Player.shuffle = true;
+        Player.repeat = "context";
         idle(600);
         wa.np.open(); idle(900);
         shot(wa, "80_wide_cover_16_10");
+        try {
+            java.lang.reflect.Field apF = NowPlaying.class.getDeclaredField("actionPill");
+            apF.setAccessible(true);
+            View ap = (View) apF.get(wa.np);
+            assertEquals("Fold8 16:10 A-style 4-btn pill visible", View.VISIBLE, ap.getVisibility());
+            assertTrue("Fold8 16:10 A-style 4-btn pill wide (" + ap.getWidth() + ")", ap.getWidth() > Ui.dp(200));
+            java.lang.reflect.Field shF = NowPlaying.class.getDeclaredField("shuffleBtn");
+            shF.setAccessible(true);
+            View shBtn = (View) shF.get(wa.np);
+            assertTrue("Fold8 16:10 A-style bottom active button not clipped (bottom=" + shBtn.getBottom() + " H=" + wa.np.getHeight() + ")",
+                    shBtn.getBottom() <= wa.np.getHeight() - Ui.navInset - Ui.dp(6));
+        } catch (Exception e) { throw new RuntimeException(e); }
+        // Also check G-style active circle non-clipping on Fold8 16:10 cover!
+        Ui.gStyle = true;
+        MainActivity.prefs(app).edit().putString("player_style", "oneui").commit();
+        wa.np.applyStyle();
+        idle(400);
+        shot(wa, "86_wide_cover_16_10_g");
+        try {
+            java.lang.reflect.Field shF = NowPlaying.class.getDeclaredField("shuffleBtn");
+            shF.setAccessible(true);
+            View shBtn = (View) shF.get(wa.np);
+            assertTrue("Fold8 16:10 G-style bottom active circle not clipped (bottom=" + shBtn.getBottom() + " H=" + wa.np.getHeight() + ")",
+                    shBtn.getBottom() <= wa.np.getHeight() - Ui.navInset - Ui.dp(6));
+        } catch (Exception e) { throw new RuntimeException(e); }
         wa.np.close(); idle(300);
+        Player.shuffle = false;
+        Player.repeat = "off";
 
         ActivityController<MainActivity> innerCtrl = launch("ko-w800dp-h600dp-xhdpi");
         MainActivity ia = innerCtrl.get();

@@ -121,6 +121,15 @@ final class AudioInfo {
 
     static int deviceIconForName(String name, boolean isBt, boolean isUsbDac, boolean isWired) {
         String n = name == null ? "" : name.toLowerCase(Locale.US);
+        if (n.contains("buds on") || n.contains("budson") || n.contains("buds able")
+                || n.contains("budsable") || n.contains("버즈 온") || n.contains("버즈온")
+                || n.contains("버즈 에이블") || n.contains("버즈에이블")) {
+            return Icons.BUDS_ON;
+        }
+        if (n.contains("buds4") || n.contains("buds 4") || n.contains("버즈4") || n.contains("버즈 4")
+                || n.contains("sm-r640") || n.contains("sm-r540")) {
+            return Icons.BUDS4;
+        }
         if (n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds 3")
                 || n.contains("buds2") || n.contains("buds 2") || n.contains("buds pro")
                 || n.contains("buds fe") || n.contains("buds live") || n.contains("buds+")

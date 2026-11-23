@@ -82,9 +82,10 @@ final class Widgets {
     }
 
     static TextView section(Context c, String title) {
-        TextView t = Ui.text(c, title, 22, Ui.bold, Ui.text());
+        TextView t = Ui.text(c, title, 21.5f, Ui.bold, Ui.text());
+        t.setLetterSpacing(-0.02f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(Ui.dp(16), Ui.dp(30), Ui.dp(16), Ui.dp(14));
+        lp.setMargins(Ui.dp(18), Ui.dp(26), Ui.dp(18), Ui.dp(12));
         t.setLayoutParams(lp);
         return t;
     }
@@ -136,20 +137,27 @@ final class Widgets {
     /** Tall poster card with dark bottom gradient and caption (home "greeting" row). */
     static View posterCard(Context c, Item it, View.OnClickListener click) {
         int w = posterW(), h = (int) (w * (Ui.cover() ? 1.08f : 1.33f));
-        float rad = Ui.gStyle ? 26f : 18f;
+        float rad = Ui.gStyle ? 26f : 20f;
         FrameLayout f = new FrameLayout(c);
         Img.ArtView art = new Img.ArtView(c, rad);
         art.setUrl(it.raw != null ? Spotify.image(it.raw, 640) : it.image);
         f.addView(art, new FrameLayout.LayoutParams(w, h));
         View shade = new View(c) {
-            final Paint p = new Paint();
+            final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
             final RectF r = new RectF();
             @Override protected void onDraw(Canvas cv) {
-                // soft, light fade (not a heavy black band)
-                p.setShader(new LinearGradient(0, getHeight() * 0.55f, 0, getHeight(), new int[]{0x00000000, 0x33000000, 0x8C000000},
-                        new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+                float radPx = Ui.dpf(rad);
+                p.setShader(new LinearGradient(0, getHeight() * 0.48f, 0, getHeight(), new int[]{0x00000000, 0x33000000, 0x9E000000},
+                        new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
                 r.set(0, 0, getWidth(), getHeight());
-                cv.drawRoundRect(r, Ui.dpf(Ui.gStyle ? 26f : 14f), Ui.dpf(Ui.gStyle ? 26f : 14f), p);
+                cv.drawRoundRect(r, radPx, radPx, p);
+                rim.setStyle(Paint.Style.STROKE);
+                rim.setStrokeWidth(Math.max(1f, Ui.dpf(0.85f)));
+                rim.setColor(0x28FFFFFF);
+                float half = rim.getStrokeWidth() * 0.5f;
+                r.inset(half, half);
+                cv.drawRoundRect(r, Math.max(0f, radPx - half), Math.max(0f, radPx - half), rim);
             }
         };
         f.addView(shade, new FrameLayout.LayoutParams(w, h));
@@ -158,14 +166,15 @@ final class Widgets {
         txt.setPadding(Ui.dp(16), 0, Ui.dp(14), Ui.dp(16));
         LinearLayout capRow = new LinearLayout(c);
         capRow.setGravity(Gravity.CENTER_VERTICAL);
-        Icons.IconView ic = new Icons.IconView(c, it.icon != 0 ? it.icon : Icons.CLOCK, 12, 0xB3FFFFFF);
+        Icons.IconView ic = new Icons.IconView(c, it.icon != 0 ? it.icon : Icons.CLOCK, 12, 0xCCFFFFFF);
         capRow.addView(ic, new LinearLayout.LayoutParams(Ui.dp(14), Ui.dp(14)));
-        TextView cap = Ui.text(c, it.caption == null ? "" : it.caption, 14, Ui.medium, 0xB3FFFFFF);
+        TextView cap = Ui.text(c, it.caption == null ? "" : it.caption, 13, Ui.medium, 0xCCFFFFFF);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clp.leftMargin = Ui.dp(3);
+        clp.leftMargin = Ui.dp(4);
         capRow.addView(cap, clp);
         txt.addView(capRow);
-        TextView t = Ui.text(c, it.title, 16, Ui.semibold, 0xFFFFFFFF);
+        TextView t = Ui.text(c, it.title, 16.5f, Ui.bold, 0xFFFFFFFF);
+        t.setLetterSpacing(-0.015f);
         t.setSingleLine(false);
         t.setMaxLines(2);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -183,14 +192,15 @@ final class Widgets {
         int s = Ui.dp(sizeDp);
         LinearLayout v = new LinearLayout(c);
         v.setOrientation(LinearLayout.VERTICAL);
-        Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 22 : 9);
+        Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 22 : 12);
         art.circle = "artist".equals(it.type);
         if (art.circle) art.placeholderIcon = Icons.ARTIST;
         art.setUrl(it.image);
         v.addView(art, new LinearLayout.LayoutParams(s, s));
-        TextView t = Ui.text(c, it.title, 12.5f, Ui.medium, Ui.text());
+        TextView t = Ui.text(c, it.title, 13f, Ui.semibold, Ui.text());
+        t.setLetterSpacing(-0.01f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Ui.dp(7);
+        lp.topMargin = Ui.dp(8);
         if (art.circle) t.setGravity(Gravity.CENTER);
         v.addView(t, lp);
         if (it.subtitle != null && it.subtitle.length() > 0) {
@@ -205,7 +215,7 @@ final class Widgets {
             row.addView(new Icons.IconView(c, Icons.HEADPHONES, 10, Ui.text2()), new LinearLayout.LayoutParams(Ui.dp(12), Ui.dp(12)));
             TextView n = Ui.text(c, c.getString(R.string.n_tracks, it.count), 11, Ui.regular, Ui.text2());
             LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            nl.leftMargin = Ui.dp(2);
+            nl.leftMargin = Ui.dp(3);
             row.addView(n, nl);
             LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
             rl.topMargin = Ui.dp(2);
@@ -240,9 +250,11 @@ final class Widgets {
         v.setOrientation(LinearLayout.VERTICAL);
         FrameLayout tile = new FrameLayout(c);
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
-        g.setCornerRadius(Ui.dpf(Ui.gStyle ? 22 : 9));
+        g.setCornerRadius(Ui.dpf(Ui.gStyle ? 22 : 12));
+        g.setStroke(Math.max(1, Ui.dp(0.8f)), 0x26FFFFFF);
         tile.setBackground(g);
         TextView t = Ui.text(c, label, 16, Ui.heavy, 0xFFFFFFFF);
+        t.setLetterSpacing(-0.015f);
         t.setSingleLine(false);
         t.setMaxLines(2);
         t.setGravity(Gravity.CENTER);
@@ -250,9 +262,9 @@ final class Widgets {
         flp.leftMargin = flp.rightMargin = Ui.dp(8);
         tile.addView(t, flp);
         v.addView(tile, new LinearLayout.LayoutParams(s, s));
-        TextView cap = Ui.text(c, caption, 12, Ui.medium, Ui.text());
+        TextView cap = Ui.text(c, caption, 12.5f, Ui.semibold, Ui.text());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Ui.dp(7);
+        lp.topMargin = Ui.dp(8);
         v.addView(cap, lp);
         v.setOnClickListener(click);
         Ui.press(v, 0.96f);
@@ -263,24 +275,25 @@ final class Widgets {
     static View trackRow(Context c, Item it, int index, View.OnClickListener click, View.OnClickListener more) {
         LinearLayout r = new LinearLayout(c);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(16), Ui.dp(6), Ui.dp(6), Ui.dp(6));
+        r.setPadding(Ui.dp(16), Ui.dp(7), Ui.dp(6), Ui.dp(7));
         if (index > 0) {
-            TextView n = Ui.text(c, String.valueOf(index), 14, Ui.medium, Ui.text2());
+            TextView n = Ui.text(c, String.valueOf(index), 14, Ui.semibold, Ui.text2());
             n.setGravity(Gravity.CENTER);
-            r.addView(n, new LinearLayout.LayoutParams(Ui.dp(28), Ui.dp(44)));
+            r.addView(n, new LinearLayout.LayoutParams(Ui.dp(28), Ui.dp(46)));
         } else {
-            Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 12 : 6);
+            Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 13 : 8);
             art.setUrl(it.image);
-            r.addView(art, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
+            r.addView(art, new LinearLayout.LayoutParams(Ui.dp(46), Ui.dp(46)));
         }
         LinearLayout col = new LinearLayout(c);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(Ui.dp(12), 0, Ui.dp(4), 0);
-        TextView t = Ui.text(c, it.title, 15, Ui.regular, Ui.text());
+        col.setPadding(Ui.dp(13), 0, Ui.dp(4), 0);
+        TextView t = Ui.text(c, it.title, 15, Ui.medium, Ui.text());
+        t.setLetterSpacing(-0.01f);
         col.addView(t, MW);
         TextView s = Ui.text(c, it.subtitle, 12.5f, Ui.regular, Ui.text2());
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sl.topMargin = Ui.dp(3);
+        sl.topMargin = Ui.dp(2.5f);
         col.addView(s, sl);
         r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Icons.IconView m = new Icons.IconView(c, Icons.MORE, 18, Ui.text2());
@@ -387,7 +400,9 @@ final class Widgets {
             }
             card = new LinearLayout(c);
             card.setOrientation(VERTICAL);
-            card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
+            GradientDrawable cardBg = Ui.round(Ui.card(), Ui.cardRadius());
+            cardBg.setStroke(Math.max(1, Ui.dp(0.6f)), Ui.dark ? 0x18FFFFFF : 0x0E000000);
+            card.setBackground(cardBg);
             card.setClipToOutline(true);
             LayoutParams lp = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.leftMargin = lp.rightMargin = Ui.dp(16);
@@ -731,16 +746,22 @@ final class Widgets {
         LinearLayout box = new LinearLayout(c);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
-        box.setPadding(Ui.dp(20), Ui.dp(24), Ui.dp(20), Ui.dp(22));
-        box.setBackground(Ui.round(Ui.card(), Ui.gStyle ? 26 : 20));
-        box.setElevation(Ui.dpf(1));
-        Icons.IconView iv = new Icons.IconView(c, icon, 30, Ui.text());
-        box.addView(iv, new LinearLayout.LayoutParams(Ui.dp(34), Ui.dp(34)));
-        TextView t = Ui.text(c, message, 14, Ui.regular, Ui.text());
+        box.setPadding(Ui.dp(22), Ui.dp(26), Ui.dp(22), Ui.dp(24));
+        GradientDrawable boxBg = Ui.round(Ui.card(), Ui.gStyle ? 26 : 22);
+        boxBg.setStroke(Math.max(1, Ui.dp(0.75f)), Ui.dark ? 0x1AFFFFFF : 0x10000000);
+        box.setBackground(boxBg);
+        box.setElevation(Ui.dpf(1.5f));
+        FrameLayout iconBadge = new FrameLayout(c);
+        iconBadge.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, Ui.dark ? 0.18f : 0.10f), 100));
+        Icons.IconView iv = new Icons.IconView(c, icon, 26, Ui.ACCENT);
+        iconBadge.addView(iv, new FrameLayout.LayoutParams(Ui.dp(28), Ui.dp(28), Gravity.CENTER));
+        box.addView(iconBadge, new LinearLayout.LayoutParams(Ui.dp(52), Ui.dp(52)));
+        TextView t = Ui.text(c, message, 14.5f, Ui.medium, Ui.text());
         t.setSingleLine(false);
         t.setGravity(Gravity.CENTER);
+        t.setLineSpacing(Ui.dpf(2), 1f);
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tl.topMargin = Ui.dp(12);
+        tl.topMargin = Ui.dp(14);
         box.addView(t, tl);
         if (button != null) {
             TextView b = Ui.text(c, button, 15, Ui.semibold, 0xFFFFFFFF);

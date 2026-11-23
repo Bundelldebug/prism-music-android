@@ -208,6 +208,11 @@ final class Settings {
             cg.card.addView(buildAccentPicker(m), Widgets.MW);
             content.addView(cg, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.accent_note)));
+            // app launcher icon switcher (new Rainbow Prism default vs Classic Prism)
+            Widgets.Group ig = new Widgets.Group(m, m.getString(R.string.set_app_icon));
+            ig.card.addView(buildIconPicker(m), Widgets.MW);
+            content.addView(ig, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.app_icon_note)));
             if (isFoldable(m)) {
                 // unfolded inner screen: the foldable layout (right-hand tab rail) or the tablet one (top tabs + sidebar)
                 Widgets.Group uf = new Widgets.Group(m, m.getString(R.string.unfold_ui));
@@ -255,6 +260,77 @@ final class Settings {
             toggleRow(fx, Icons.APPEARANCE, m.getString(R.string.glass_effect), "glass", true, () -> { Ui.glass = pref(m, "glass", true); m.invalidateChrome(); });
             content.addView(fx, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.glass_note)));
+        }
+
+        private View buildIconPicker(MainActivity m) {
+            String cur = MainActivity.prefs(m).getString("app_icon", "rainbow");
+            LinearLayout row = new LinearLayout(m);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(Ui.dp(14), Ui.dp(14), Ui.dp(14), Ui.dp(14));
+            String[][] icons = {
+                    {"rainbow", m.getString(R.string.app_icon_rainbow)},
+                    {"classic", m.getString(R.string.app_icon_classic)}
+            };
+            int[] resIds = {R.mipmap.ic_launcher, R.mipmap.ic_launcher_classic};
+            for (int i = 0; i < icons.length; i++) {
+                final String key = icons[i][0];
+                final boolean sel = key.equals(cur);
+                LinearLayout card = new LinearLayout(m);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                card.setPadding(Ui.dp(12), Ui.dp(14), Ui.dp(12), Ui.dp(12));
+                android.graphics.drawable.GradientDrawable bg = Ui.round(sel ? Ui.alpha(Ui.ACCENT, 0.11f) : Ui.chip(), 18);
+                bg.setStroke(Ui.dp(sel ? 2f : 0.8f), sel ? Ui.ACCENT : Ui.separator());
+                card.setBackground(bg);
+
+                android.widget.ImageView iv = new android.widget.ImageView(m);
+                iv.setImageResource(resIds[i]);
+                iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                iv.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                    @Override public void getOutline(View v, android.graphics.Outline o) {
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(18));
+                    }
+                });
+                iv.setClipToOutline(true);
+                iv.setElevation(Ui.dpf(4));
+                card.addView(iv, new LinearLayout.LayoutParams(Ui.dp(62), Ui.dp(62)));
+
+                TextView lbl = Ui.text(m, icons[i][1], 13.5f, sel ? Ui.semibold : Ui.medium, sel ? Ui.ACCENT : Ui.text());
+                lbl.setGravity(android.view.Gravity.CENTER);
+                LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                llp.topMargin = Ui.dp(9);
+                card.addView(lbl, llp);
+
+                card.setOnClickListener(v -> {
+                    if (key.equals(MainActivity.prefs(m).getString("app_icon", "rainbow"))) return;
+                    applyAppIcon(m, key);
+                    rebuild();
+                });
+                Ui.press(card, 0.96f);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                if (i == 0) clp.rightMargin = Ui.dp(10);
+                row.addView(card, clp);
+            }
+            return row;
+        }
+
+        static void applyAppIcon(Context c, String key) {
+            boolean classic = "classic".equals(key);
+            MainActivity.prefs(c).edit().putString("app_icon", classic ? "classic" : "rainbow").apply();
+            try {
+                android.content.pm.PackageManager pm = c.getPackageManager();
+                String pkg = c.getPackageName();
+                android.content.ComponentName rainbowCn = new android.content.ComponentName(pkg, pkg + ".LauncherRainbow");
+                android.content.ComponentName classicCn = new android.content.ComponentName(pkg, pkg + ".LauncherClassic");
+                // Enable target alias FIRST before disabling the old one so Android never briefly sees 0 launcher activities
+                pm.setComponentEnabledSetting(classic ? classicCn : rainbowCn,
+                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP);
+                pm.setComponentEnabledSetting(classic ? rainbowCn : classicCn,
+                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP);
+                Toast.makeText(c, R.string.app_icon_changed, Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {}
         }
 
         private View buildAccentPicker(MainActivity m) {
@@ -624,6 +700,7 @@ final class Settings {
             addVendorGroup(m, "Qualcomm Snapdragon", NpuAudio.VENDOR_QUALCOMM, current);
             addVendorGroup(m, "MediaTek Dimensity", NpuAudio.VENDOR_MEDIATEK, current);
             addVendorGroup(m, "Samsung Exynos", NpuAudio.VENDOR_SAMSUNG, current);
+            addVendorGroup(m, "Google Tensor", NpuAudio.VENDOR_GOOGLE, current);
         }
 
         private void addVendorGroup(MainActivity m, String title, int vendor, NpuAudio.ChipSpec current) {
@@ -643,13 +720,13 @@ final class Settings {
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
                 row.setPadding(Ui.dp(14), Ui.dp(10), Ui.dp(16), Ui.dp(10));
-                boolean hasArt = cs.drawableRes != 0;
-                if (hasArt) {
+                boolean showArt = cs.drawableRes != 0 || !"S5E9975".equals(cs.id);
+                if (showArt) {
                     row.addView(new NpuAudio.ChipArtView(m, cs, cs.id), new LinearLayout.LayoutParams(Ui.dp(50), Ui.dp(50)));
                 }
                 LinearLayout col = new LinearLayout(m);
                 col.setOrientation(LinearLayout.VERTICAL);
-                col.setPadding(hasArt ? Ui.dp(12) : Ui.dp(2), 0, Ui.dp(8), 0);
+                col.setPadding(showArt ? Ui.dp(12) : Ui.dp(2), 0, Ui.dp(8), 0);
                 col.addView(Ui.text(m, cs.displayName(m), 15f, Ui.semibold, Ui.text()), Widgets.MW);
                 TextView sub = Ui.text(m, cs.id + " · " + cs.npu, 12f, Ui.regular, Ui.text2());
                 LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -712,8 +789,10 @@ final class Settings {
             Widgets.Group g = new Widgets.Group(m, null);
             toggleRow(g, Icons.LYRICS, m.getString(R.string.lyrics_online), "lyrics", true, null);
             toggleRow(g, Icons.GLOBE, m.getString(R.string.lyrics_ko_trans), Lyrics.PREF_KO_TRANS, true, () -> Lyrics.clearCache(m));
+            toggleRow(g, Icons.LINK, m.getString(R.string.lyrics_namuwiki), Lyrics.PREF_NAMUWIKI, false, () -> Lyrics.clearCache(m));
             content.addView(g, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.lyrics_ko_trans_note)));
+            content.addView(Widgets.caption(m, m.getString(R.string.lyrics_namuwiki_note)));
 
             Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.lyrics_providers));
             for (int i = 0; i < Lyrics.PROVIDER_IDS.length; i++) {

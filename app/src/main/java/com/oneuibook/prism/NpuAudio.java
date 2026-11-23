@@ -49,7 +49,7 @@ final class NpuAudio {
     static final String PREF_PER_DEVICE = "npu_per_device";
     static final String PREF_HIRES_GLOW = "hires_glow";
 
-    static final int VENDOR_QUALCOMM = 0, VENDOR_MEDIATEK = 1, VENDOR_SAMSUNG = 2;
+    static final int VENDOR_QUALCOMM = 0, VENDOR_MEDIATEK = 1, VENDOR_SAMSUNG = 2, VENDOR_GOOGLE = 3;
 
     static final class ChipSpec {
         final String id;
@@ -73,26 +73,37 @@ final class NpuAudio {
         }
     }
 
-    /** Exact 15 supported flagship chipsets with corrected MediaTek model numbers & official artwork (Exynos 2700 unreleased -> no image). */
+    /** 25 supported flagship / upper-flagship SoCs with NPU/DSP headroom (Dimensity 9600M uses MT6993 silicon family). */
     static final ChipSpec[] SUPPORTED_CHIPS = {
-            // Qualcomm Snapdragon (6)
+            // Qualcomm Snapdragon (10)
+            new ChipSpec("SM8550",  VENDOR_QUALCOMM, "스냅드래곤 8 2세대", "Snapdragon 8 Gen 2", "SNAPDRAGON", "8 Gen 2", "Hexagon NPU", false, 0),
+            new ChipSpec("SM8635",  VENDOR_QUALCOMM, "스냅드래곤 8s 3세대", "Snapdragon 8s Gen 3", "SNAPDRAGON", "8s Gen 3", "Hexagon NPU", false, 0),
+            new ChipSpec("SM8650",  VENDOR_QUALCOMM, "스냅드래곤 8 3세대", "Snapdragon 8 Gen 3", "SNAPDRAGON", "8 Gen 3", "Hexagon NPU", false, 0),
+            new ChipSpec("SM8735",  VENDOR_QUALCOMM, "스냅드래곤 8s 4세대", "Snapdragon 8s Gen 4", "SNAPDRAGON", "8s Gen 4", "Hexagon NPU", false, 0),
             new ChipSpec("SM8750",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트", "Snapdragon 8 Elite", "SNAPDRAGON", "8 Elite", "Hexagon NPU", false, R.drawable.chip_sm8750),
+            new ChipSpec("SM8845",  VENDOR_QUALCOMM, "스냅드래곤 8 5세대", "Snapdragon 8 Gen 5", "SNAPDRAGON", "8 Gen 5", "Hexagon NPU", false, R.drawable.chip_sm8845),
             new ChipSpec("SM8850",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 5세대", "Snapdragon 8 Elite Gen 5", "SNAPDRAGON", "8 Elite G5", "Hexagon NPU", false, R.drawable.chip_sm8850),
             new ChipSpec("SM8850-1",VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 5세대 V 시리즈", "Snapdragon 8 Elite Gen 5 V", "SNAPDRAGON", "8 Elite 5V", "Hexagon NPU", true, R.drawable.chip_sm8850),
-            new ChipSpec("SM8845",  VENDOR_QUALCOMM, "스냅드래곤 8 5세대", "Snapdragon 8 Gen 5", "SNAPDRAGON", "8 Gen 5", "Hexagon NPU", false, R.drawable.chip_sm8845),
             new ChipSpec("SM8950",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 6세대", "Snapdragon 8 Elite Gen 6", "SNAPDRAGON", "8 Elite G6", "Hexagon NPU", false, R.drawable.chip_sm8950),
             new ChipSpec("SM8975",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 익스트림 6세대", "Snapdragon 8 Elite Extreme Gen 6", "SNAPDRAGON", "8 Extreme", "Hexagon NPU", true, R.drawable.chip_sm8975),
-            // MediaTek Dimensity (6) — verified model codes (MT6991 / MT6991Z / MT6993 / MT6991W(9500s) / MT6995 / MT6995M)
+            // MediaTek Dimensity (9) — verified model codes (9600M is MT6993 silicon family with NPU 990)
+            new ChipSpec("MT6899",  VENDOR_MEDIATEK, "디멘시티 8400", "Dimensity 8400", "DIMENSITY", "8400", "MediaTek NPU 880", false, 0),
+            new ChipSpec("MT6989",  VENDOR_MEDIATEK, "디멘시티 9300", "Dimensity 9300", "DIMENSITY", "9300", "MediaTek NPU 790", false, 0),
+            new ChipSpec("MT6989T", VENDOR_MEDIATEK, "디멘시티 9300+", "Dimensity 9300+", "DIMENSITY", "9300+", "MediaTek NPU 790+", true, 0),
             new ChipSpec("MT6991",  VENDOR_MEDIATEK, "디멘시티 9400", "Dimensity 9400", "DIMENSITY", "9400", "MediaTek NPU 890", false, R.drawable.chip_mt6991),
             new ChipSpec("MT6991Z", VENDOR_MEDIATEK, "디멘시티 9400+", "Dimensity 9400+", "DIMENSITY", "9400+", "MediaTek NPU 890+", true, R.drawable.chip_mt6991p),
             new ChipSpec("MT6993",  VENDOR_MEDIATEK, "디멘시티 9500", "Dimensity 9500", "DIMENSITY", "9500", "MediaTek NPU 990", false, R.drawable.chip_mt6993),
             new ChipSpec("MT6991W", VENDOR_MEDIATEK, "디멘시티 9500s", "Dimensity 9500s", "DIMENSITY", "9500s", "MediaTek NPU 890+", false, R.drawable.chip_mt6991s),
+            new ChipSpec("MT6993M", VENDOR_MEDIATEK, "디멘시티 9600M", "Dimensity 9600M", "DIMENSITY", "9600M", "MediaTek NPU 990", false, R.drawable.chip_mt6995m),
             new ChipSpec("MT6995",  VENDOR_MEDIATEK, "디멘시티 9600 프로", "Dimensity 9600 Pro", "DIMENSITY", "9600 Pro", "MediaTek NPU", true, R.drawable.chip_mt6995p),
-            new ChipSpec("MT6995M", VENDOR_MEDIATEK, "디멘시티 9600M", "Dimensity 9600M", "DIMENSITY", "9600M", "MediaTek NPU", false, R.drawable.chip_mt6995m),
-            // Samsung Exynos (3) — Exynos 2700 is unreleased, intentionally no illustration (res = 0)
+            // Samsung Exynos (4) — Exynos 2700 is unreleased, intentionally no illustration (res = 0)
+            new ChipSpec("S5E9945", VENDOR_SAMSUNG, "엑시노스 2400", "Exynos 2400", "EXYNOS", "2400", "Exynos NPU", false, 0),
             new ChipSpec("S5E9955", VENDOR_SAMSUNG, "엑시노스 2500", "Exynos 2500", "EXYNOS", "2500", "Exynos NPU", false, R.drawable.chip_s5e9955),
             new ChipSpec("S5E9965", VENDOR_SAMSUNG, "엑시노스 2600", "Exynos 2600", "EXYNOS", "2600", "Exynos NPU", false, R.drawable.chip_s5e9965),
             new ChipSpec("S5E9975", VENDOR_SAMSUNG, "엑시노스 2700", "Exynos 2700", "EXYNOS", "2700", "Exynos NPU", true, 0),
+            // Google Tensor (2)
+            new ChipSpec("GS401",   VENDOR_GOOGLE,  "구글 텐서 G4", "Google Tensor G4", "TENSOR", "G4", "Google TPU", false, 0),
+            new ChipSpec("GS501",   VENDOR_GOOGLE,  "구글 텐서 G5", "Google Tensor G5", "TENSOR", "G5", "Google TPU", true, 0),
     };
 
     static final String[] PROFILES = {"natural", "studio", "vocal", "air"};
@@ -114,11 +125,12 @@ final class NpuAudio {
 
     static final float[] EQ_CUTOFFS = {45f, 90f, 180f, 360f, 700f, 1400f, 2800f, 4800f, 8000f, 12000f, 16000f, 20000f};
 
-    private static final Pattern QUALCOMM = Pattern.compile("\\bSM(8[7-9]\\d\\d(?:[-A-Z0-9]+)?|9\\d\\d\\d(?:[-A-Z0-9]+)?)\\b");
-    private static final Pattern MEDIATEK = Pattern.compile("\\bMT(699[1-9][A-Z]?|7\\d\\d\\d[A-Z]?)\\b");
-    private static final Pattern EXYNOS = Pattern.compile("\\b(?:S5E|ERD)(99[5-9]\\d)\\b");
-    private static final Pattern DIMENSITY_NAME = Pattern.compile("DIMENSITY\\s+(9[4-9]\\d\\d[A-Z+]*)");
-    private static final Pattern EXYNOS_NAME = Pattern.compile("EXYNOS\\s+(2[5-9]\\d\\d)");
+    private static final Pattern QUALCOMM = Pattern.compile("\\bSM(8[5-9]\\d\\d(?:[-A-Z0-9]+)?|9\\d\\d\\d(?:[-A-Z0-9]+)?)\\b");
+    private static final Pattern MEDIATEK = Pattern.compile("\\bMT(6899[A-Z]?|6989[A-Z]?|699[1-9][A-Z]?|7\\d\\d\\d[A-Z]?)\\b");
+    private static final Pattern EXYNOS = Pattern.compile("\\b(?:S5E|ERD)(99[4-9]\\d)\\b");
+    private static final Pattern TENSOR = Pattern.compile("\\b(GS[4-9]0\\d|ZUMAPRO|LAGUNA|TENSOR\\s+G[4-9])\\b");
+    private static final Pattern DIMENSITY_NAME = Pattern.compile("DIMENSITY\\s+(8[4-9]\\d\\d[A-Z+]*|9[3-9]\\d\\d[A-Z+]*)");
+    private static final Pattern EXYNOS_NAME = Pattern.compile("EXYNOS\\s+(2[4-9]\\d\\d)");
 
     private static DynamicsProcessing dp;
     private static Equalizer eqFx;
@@ -143,31 +155,51 @@ final class NpuAudio {
     static boolean isSupportedSoc(String raw) {
         if (raw == null || raw.trim().isEmpty()) return false;
         String u = raw.toUpperCase(Locale.US);
-        if (QUALCOMM.matcher(u).find() || u.contains("SNAPDRAGON 8 ELITE") || u.contains("8 ELITE") || u.contains("SNAPDRAGON 8 GEN 5")) return true;
-        if (u.equals("SUN") || u.contains(" SUN ") || u.contains("CANOE")) return true;
+        if (QUALCOMM.matcher(u).find() || u.contains("SNAPDRAGON 8") || u.contains("8 ELITE")) return true;
+        if (u.equals("SUN") || u.contains(" SUN ") || u.contains("CANOE") || u.contains("PINEAPPLE") || u.contains("KALAMA")) return true;
         if (MEDIATEK.matcher(u).find() || DIMENSITY_NAME.matcher(u).find()) return true;
         if (EXYNOS.matcher(u).find() || EXYNOS_NAME.matcher(u).find()) return true;
+        if (TENSOR.matcher(u).find()) return true;
         return false;
+    }
+
+    private static ChipSpec findChip(String id) {
+        for (ChipSpec cs : SUPPORTED_CHIPS) if (cs.id.equals(id)) return cs;
+        return null;
     }
 
     static ChipSpec matchChipSpec(String raw) {
         if (raw == null || raw.trim().isEmpty()) return null;
         String u = raw.toUpperCase(Locale.US);
-        if (u.contains("SM8975") || u.contains("SM8950X") || u.contains("EXTREME")) return SUPPORTED_CHIPS[5];
-        if (u.contains("SM8950")) return SUPPORTED_CHIPS[4];
-        if (u.contains("SM8850-1") || u.contains("SM8850V") || u.contains("8 ELITE GEN 5 V")) return SUPPORTED_CHIPS[2];
-        if (u.contains("SM8850") || u.contains("CANOE")) return SUPPORTED_CHIPS[1];
-        if (u.contains("SM8845") || u.contains("8 GEN 5")) return SUPPORTED_CHIPS[3];
-        if (u.contains("SM8750") || u.equals("SUN") || u.contains(" SUN ") || u.contains("8 ELITE")) return SUPPORTED_CHIPS[0];
-        if (u.contains("MT6995M") || u.contains("MT6996M") || u.contains("9600M")) return SUPPORTED_CHIPS[11];
-        if (u.contains("MT6995") || u.contains("9600")) return SUPPORTED_CHIPS[10];
-        if (u.contains("MT6991W") || u.contains("MT6991S") || u.contains("9500S")) return SUPPORTED_CHIPS[9];
-        if (u.contains("MT6993") || u.contains("9500")) return SUPPORTED_CHIPS[8];
-        if (u.contains("MT6991Z") || u.contains("MT6991+") || u.contains("MT6991P") || u.contains("9400+")) return SUPPORTED_CHIPS[7];
-        if (u.contains("MT6991") || u.contains("9400")) return SUPPORTED_CHIPS[6];
-        if (u.contains("S5E9975") || u.contains("ERD9975") || u.contains("2700")) return SUPPORTED_CHIPS[14];
-        if (u.contains("S5E9965") || u.contains("ERD9965") || u.contains("2600")) return SUPPORTED_CHIPS[13];
-        if (u.contains("S5E9955") || u.contains("ERD9955") || u.contains("2500")) return SUPPORTED_CHIPS[12];
+        // Qualcomm Snapdragon
+        if (u.contains("SM8975") || u.contains("SM8950X") || u.contains("EXTREME")) return findChip("SM8975");
+        if (u.contains("SM8950")) return findChip("SM8950");
+        if (u.contains("SM8850-1") || u.contains("SM8850V") || u.contains("8 ELITE GEN 5 V")) return findChip("SM8850-1");
+        if (u.contains("SM8850") || u.contains("CANOE")) return findChip("SM8850");
+        if (u.contains("SM8845") || u.contains("8 GEN 5")) return findChip("SM8845");
+        if (u.contains("SM8750") || u.equals("SUN") || u.contains(" SUN ") || u.contains("8 ELITE")) return findChip("SM8750");
+        if (u.contains("SM8735") || u.contains("8S GEN 4")) return findChip("SM8735");
+        if (u.contains("SM8650") || u.contains("PINEAPPLE") || u.contains("8 GEN 3")) return findChip("SM8650");
+        if (u.contains("SM8635") || u.contains("8S GEN 3")) return findChip("SM8635");
+        if (u.contains("SM8550") || u.contains("KALAMA") || u.contains("8 GEN 2")) return findChip("SM8550");
+        // MediaTek Dimensity (check 9600M MT6993M/W before base MT6993!)
+        if (u.contains("MT6995") || u.contains("9600 PRO")) return findChip("MT6995");
+        if (u.contains("MT6993M") || u.contains("MT6993W") || u.contains("MT6993Z") || u.contains("9600M")) return findChip("MT6993M");
+        if (u.contains("MT6991W") || u.contains("MT6991S") || u.contains("9500S")) return findChip("MT6991W");
+        if (u.contains("MT6993") || u.contains("9500")) return findChip("MT6993");
+        if (u.contains("MT6991Z") || u.contains("MT6991+") || u.contains("MT6991P") || u.contains("9400+")) return findChip("MT6991Z");
+        if (u.contains("MT6991") || u.contains("9400")) return findChip("MT6991");
+        if (u.contains("MT6989T") || u.contains("MT6989+") || u.contains("9300+")) return findChip("MT6989T");
+        if (u.contains("MT6989") || u.contains("9300")) return findChip("MT6989");
+        if (u.contains("MT6899") || u.contains("8400")) return findChip("MT6899");
+        // Samsung Exynos
+        if (u.contains("S5E9975") || u.contains("ERD9975") || u.contains("2700")) return findChip("S5E9975");
+        if (u.contains("S5E9965") || u.contains("ERD9965") || u.contains("2600")) return findChip("S5E9965");
+        if (u.contains("S5E9955") || u.contains("ERD9955") || u.contains("2500")) return findChip("S5E9955");
+        if (u.contains("S5E9945") || u.contains("ERD9945") || u.contains("2400")) return findChip("S5E9945");
+        // Google Tensor
+        if (u.contains("GS501") || u.contains("LAGUNA") || u.contains("TENSOR G5")) return findChip("GS501");
+        if (u.contains("GS401") || u.contains("ZUMAPRO") || u.contains("TENSOR G4")) return findChip("GS401");
         return null;
     }
 
@@ -179,6 +211,7 @@ final class NpuAudio {
         if (QUALCOMM.matcher(u).find() || u.contains("ELITE") || u.contains("SUN") || u.contains("CANOE")) return "Hexagon NPU";
         if (MEDIATEK.matcher(u).find() || DIMENSITY_NAME.matcher(u).find()) return "MediaTek NPU";
         if (EXYNOS.matcher(u).find() || EXYNOS_NAME.matcher(u).find()) return "Exynos NPU";
+        if (TENSOR.matcher(u).find()) return "Google TPU";
         return "NPU DSP";
     }
 
@@ -776,13 +809,29 @@ final class NpuAudio {
             }
             p.setStyle(Paint.Style.FILL);
             p.setAlpha(255);
-            p.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom, 0xFF1F2229, 0xFF2E323D, Shader.TileMode.CLAMP));
+            int c1 = 0xFF1F2229, c2 = 0xFF2E323D, accent = 0xFF94A3B8;
+            if (spec != null) {
+                switch (spec.vendor) {
+                    case VENDOR_QUALCOMM: c1 = 0xFF2C0E17; c2 = 0xFF7A1228; accent = 0xFFFF6B81; break;
+                    case VENDOR_MEDIATEK: c1 = 0xFF14151B; c2 = 0xFF2B2418; accent = 0xFFF5C469; break;
+                    case VENDOR_SAMSUNG:  c1 = 0xFF0C1018; c2 = 0xFF142A52; accent = 0xFF38BDF8; break;
+                    case VENDOR_GOOGLE:   c1 = 0xFF161B26; c2 = 0xFF26334A; accent = 0xFF8AB4F8; break;
+                }
+            }
+            p.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom, c1, c2, Shader.TileMode.CLAMP));
             c.drawRoundRect(r, rad, rad, p);
             p.setShader(null);
+            borderP.setStrokeWidth(Math.max(1f, Ui.dpf(0.8f)));
+            borderP.setColor(Ui.alpha(accent, 0.45f));
+            c.drawRoundRect(r, rad, rad, borderP);
             tp.setTypeface(Ui.semibold);
-            tp.setTextSize(s * 0.14f);
-            tp.setColor(0xFF94A3B8);
-            c.drawText("SoC", ox + s / 2f, oy + s * 0.56f, tp);
+            tp.setTextSize(s * 0.125f);
+            tp.setColor(accent);
+            c.drawText(spec != null ? spec.badgeTop : "NPU", ox + s / 2f, oy + s * 0.40f, tp);
+            tp.setTypeface(Ui.bold);
+            tp.setTextSize(s * 0.19f);
+            tp.setColor(0xFFFFFFFF);
+            c.drawText(spec != null ? spec.badgeMain : "SoC", ox + s / 2f, oy + s * 0.67f, tp);
         }
     }
 }

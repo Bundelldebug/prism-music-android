@@ -63,13 +63,13 @@ final class Player {
     private static final Runnable POLL = new Runnable() {
         @Override public void run() {
             if (!polling) return;
-            // In-app SpotifyWeb SDK already pushes real-time track/position/pause state with 0 Web API calls!
-            // Keep background polling very light (45s in-app, 12-15s remote) and NEVER poll while 429 cooldown is active.
+            // In-app SpotifyWeb SDK pushes real-time track/position/pause/shuffle/repeat with 0 Web API calls!
+            // Keep background polling ultra-light (90s in-app, 15-22s remote) and NEVER poll during 429 cooldown.
             if (!Spotify.isRateLimited()) {
                 boolean sdkHasState = SpotifyWeb.active() && track != null;
-                if (!sdkHasState || SystemClock.elapsedRealtime() - lastRefresh >= 42000) refresh();
+                if (!sdkHasState || SystemClock.elapsedRealtime() - lastRefresh >= 85000) refresh();
             }
-            long nextDelay = (SpotifyWeb.active() && track != null) ? 45000 : (fast ? 12000 : 16000);
+            long nextDelay = (SpotifyWeb.active() && track != null) ? 90000 : (fast ? 15000 : 22000);
             Spotify.MAIN.postDelayed(this, nextDelay);
         }
     };
@@ -606,18 +606,53 @@ final class Player {
         } catch (Exception ignored) {}
     }
 
-    static void queue(Spotify.Cb cb) { Spotify.get("/me/player/queue", cb); }
+    static final java.util.Map<String, Boolean> LIKED_CACHE = java.util.Collections.synchronizedMap(new java.util.HashMap<>());
+    private static String lastQueueKey;
+    private static long lastQueueTime;
+    private static JSONObject lastQueueObj;
+
+    static void queue(Spotify.Cb cb) {
+        String key = (track == null ? "" : track.id) + "|" + shuffle + "|" + repeat;
+        long now = SystemClock.elapsedRealtime();
+        if (lastQueueObj != null && key.equals(lastQueueKey) && (now - lastQueueTime < 12000L || Spotify.isRateLimited())) {
+            if (cb != null) Spotify.MAIN.post(() -> cb.ok(lastQueueObj));
+            return;
+        }
+        Spotify.get("/me/player/queue", new Spotify.Cb() {
+            @Override public void ok(JSONObject o) {
+                lastQueueKey = key;
+                lastQueueTime = SystemClock.elapsedRealtime();
+                lastQueueObj = o;
+                if (cb != null) cb.ok(o);
+            }
+            @Override public void err(int code, String message) {
+                if (lastQueueObj != null) { if (cb != null) cb.ok(lastQueueObj); return; }
+                if (cb != null) cb.err(code, message);
+            }
+        });
+    }
 
     static void checkLiked() {
         if (local()) return;
         if (track == null || track.id == null) return;
         final String id = track.id;
+        Boolean cached = LIKED_CACHE.get(id);
+        if (cached != null) {
+            liked = cached;
+            notifyAll0();
+            return;
+        }
+        if (Spotify.isRateLimited()) return;
         Spotify.getFirst(new Spotify.Cb() {
             @Override public void ok(JSONObject o) {
                 JSONArray a = o.optJSONArray("items");
-                if (track != null && id.equals(track.id) && a != null && a.length() > 0) {
-                    liked = a.optBoolean(0);
-                    notifyAll0();
+                if (a != null && a.length() > 0) {
+                    boolean val = a.optBoolean(0);
+                    LIKED_CACHE.put(id, val);
+                    if (track != null && id.equals(track.id)) {
+                        liked = val;
+                        notifyAll0();
+                    }
                 }
             }
         }, "/me/library/contains?uris=" + Spotify.enc("spotify:track:" + id), "/me/tracks/contains?ids=" + id);
@@ -627,15 +662,32 @@ final class Player {
         if (track == null || local()) return;
         final boolean now = !liked;
         liked = now;
+        if (track.id != null) LIKED_CACHE.put(track.id, now);
         notifyAll0();
         final String id = track.id;
         Spotify.IO.execute(() -> {
             String m = now ? "PUT" : "DELETE";
             try {
                 Spotify.call(m, "/me/library?uris=" + Spotify.enc("spotify:track:" + id), null);
+                Spotify.invalidateUserCache();
+            } catch (Spotify.ApiError ae) {
+                if (ae.code == 429) {
+                    Spotify.MAIN.post(() -> { liked = !now; LIKED_CACHE.put(id, !now); notifyAll0(); toast(R.string.action_failed); });
+                    return;
+                }
+                try {
+                    Spotify.call(m, "/me/tracks?ids=" + id, null);
+                    Spotify.invalidateUserCache();
+                } catch (Exception e2) {
+                    Spotify.MAIN.post(() -> { liked = !now; LIKED_CACHE.put(id, !now); notifyAll0(); toast(R.string.action_failed); });
+                }
             } catch (Exception e) {
-                try { Spotify.call(m, "/me/tracks?ids=" + id, null); }
-                catch (Exception e2) { Spotify.MAIN.post(() -> { liked = !now; notifyAll0(); toast(R.string.action_failed); }); }
+                try {
+                    Spotify.call(m, "/me/tracks?ids=" + id, null);
+                    Spotify.invalidateUserCache();
+                } catch (Exception e2) {
+                    Spotify.MAIN.post(() -> { liked = !now; LIKED_CACHE.put(id, !now); notifyAll0(); toast(R.string.action_failed); });
+                }
             }
         });
     }

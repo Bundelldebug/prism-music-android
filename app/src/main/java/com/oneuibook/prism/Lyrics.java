@@ -36,6 +36,7 @@ final class Lyrics {
     private Lyrics() {}
 
     static final String PREF_KO_TRANS = "lyrics_ko_trans";
+    static final String PREF_NAMUWIKI = "lyrics_namuwiki";
 
     static final String SRC_LRCLIB = "lrclib";
     static final String SRC_NETEASE = "netease";
@@ -55,10 +56,16 @@ final class Lyrics {
         return MainActivity.prefs(c).getBoolean(providerPrefKey(id), true);
     }
 
+    static boolean namuwikiEnabled(Context c) {
+        if (c == null) c = Img.appContext;
+        if (c == null) return false;
+        return MainActivity.prefs(c).getBoolean(PREF_NAMUWIKI, false);
+    }
+
     static boolean showKoreanSubtitles(Context c) {
         if (c == null) c = Img.appContext;
         if (c == null) return false;
-        return isKoreanApp(c) && MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true);
+        return namuwikiEnabled(c) || (isKoreanApp(c) && MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true));
     }
 
     static void clearCache(Context c) {
@@ -154,10 +161,18 @@ final class Lyrics {
         POOL.execute(() -> {
             Result r = readDisk(t.id);
             boolean wantKoSub = showKoreanSubtitles(ctx);
+            boolean useNamu = namuwikiEnabled(ctx);
+            boolean dirty = false;
             if (r == null) {
                 r = lookup(ctx, t, wantKoSub);
-                if (r != null) writeDisk(t.id, r);
+                dirty = r != null;
             }
+            if (r != null && useNamu && needsKoreanTranslation(r) && !hasTranslations(r)) {
+                if (enrichFromNamuwiki(r, primaryArtist(t.artist), t.name == null ? "" : t.name.trim(), cleanTitle(t.name == null ? "" : t.name.trim()))) {
+                    dirty = true;
+                }
+            }
+            if (dirty && r != null) writeDisk(t.id, r);
             if (r != null && !wantKoSub) {
                 for (Line l : r.lines) l.trans = null;
             }
@@ -606,6 +621,214 @@ final class Lyrics {
                 l.trans = best.text;
             }
         }
+    }
+
+    // ---- Optional real-time Namuwiki Korean translation lookup (default OFF; honest app UA, never bypasses challenges) ----
+    private static final Pattern HTML_TR = Pattern.compile("(?is)<tr[^>]*>(.*?)</tr>");
+    private static final Pattern HTML_TD = Pattern.compile("(?is)<td[^>]*>(.*?)</td>");
+    private static final Pattern HTML_BREAK = Pattern.compile("(?i)<(?:br\\s*/?|/p|/div|/li)>");
+    private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
+    private static final Pattern HTML_SCRIPT_STYLE = Pattern.compile("(?is)<(?:script|style|noscript)[^>]*>.*?</(?:script|style|noscript)>");
+    private static final Pattern HTML_ENTITY_NUM = Pattern.compile("&#(x?[0-9a-fA-F]+);");
+
+    private static boolean enrichFromNamuwiki(Result r, String artist, String origTitle, String clean) {
+        if (r == null || r.lines.isEmpty()) return false;
+        String base = !clean.isEmpty() ? clean : origTitle;
+        if (base == null || base.isEmpty()) return false;
+        List<String> candidates = new ArrayList<>(3);
+        candidates.add(base);
+        if (artist != null && !artist.isEmpty()) candidates.add(base + "(" + artist + ")");
+        candidates.add(base + "(노래)");
+        int tried = 0;
+        for (String doc : candidates) {
+            if (tried >= 2) break;
+            tried++;
+            try {
+                String url = "https://namu.wiki/w/" + Spotify.enc(doc).replace("+", "%20");
+                String html = getText(url, 4000);
+                if (html == null || html.isEmpty()) continue;
+                // Respect anti-bot / Cloudflare challenge responses: stop immediately without bypassing.
+                if (isNamuChallengePage(html)) return false;
+                List<String[]> pairs = parseNamuwikiHtml(html);
+                if (!pairs.isEmpty() && applyNamuwikiPairs(r, pairs) >= 2) {
+                    r.source = (r.source == null || r.source.isEmpty()) ? "Namuwiki" : (r.source + " + Namuwiki");
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    static boolean isNamuChallengePage(String html) {
+        if (html == null || html.isEmpty()) return true;
+        String head = html.length() > 4000 ? html.substring(0, 4000).toLowerCase(Locale.ROOT) : html.toLowerCase(Locale.ROOT);
+        if (head.contains("just a moment") || head.contains("cf-browser-verification")
+                || head.contains("challenge-platform") || head.contains("attention required")) return true;
+        return !hasHangul(html);
+    }
+
+    /** Extracts (original, Korean translation) line pairs from a Namuwiki song article's HTML. */
+    static List<String[]> parseNamuwikiHtml(String html) {
+        List<String[]> pairs = new ArrayList<>();
+        if (html == null || html.isEmpty()) return pairs;
+        String body = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
+
+        // 1) 2-column / 3-column lyric tables (most common Namuwiki format: orig cell + Korean translation cell)
+        Matcher trm = HTML_TR.matcher(body);
+        while (trm.find()) {
+            String row = trm.group(1);
+            List<String> cells = new ArrayList<>();
+            Matcher tdm = HTML_TD.matcher(row);
+            while (tdm.find()) cells.add(tdm.group(1));
+            if (cells.size() < 2) continue;
+            // Find first non-Korean original lyric cell and corresponding Korean translation cell
+            List<String> origLines = null, koLines = null;
+            for (String cell : cells) {
+                List<String> lines = splitCellLines(cell);
+                if (lines.isEmpty()) continue;
+                boolean ko = majorityHangul(lines);
+                if (!ko && origLines == null && hasLetters(lines)) origLines = lines;
+                else if (ko && koLines == null && !isMetaCell(lines)) koLines = lines;
+            }
+            if (origLines != null && koLines != null) {
+                int n = Math.min(origLines.size(), koLines.size());
+                if (n > 0 && Math.abs(origLines.size() - koLines.size()) <= Math.max(2, n / 3)) {
+                    for (int i = 0; i < n; i++) {
+                        String o = origLines.get(i), k = koLines.get(i);
+                        if (!hasHangul(o) && hasHangul(k) && !isMetaLine(k)) {
+                            pairs.add(new String[]{o, k});
+                        }
+                    }
+                }
+            }
+        }
+        if (pairs.size() >= 2) return pairs;
+
+        // 2) Interleaved / alternating lines inside a lyric block (only when no lyric table was found)
+        int startIdx = body.indexOf("가사");
+        String slice = startIdx > 0 ? body.substring(startIdx, Math.min(body.length(), startIdx + 60000)) : body;
+        List<String> lines = splitCellLines(slice);
+        for (int i = 0; i + 1 < lines.size(); i++) {
+            String a = lines.get(i), b = lines.get(i + 1);
+            if (a.length() < 2 || b.length() < 2 || a.length() > 160 || b.length() > 160) continue;
+            if (!hasHangul(a) && hasLettersStr(a) && hasHangul(b) && !isMetaLine(b) && !isMetaLine(a)) {
+                pairs.add(new String[]{a, b});
+                i++;
+            }
+        }
+        return pairs;
+    }
+
+    /** Matches extracted Namuwiki (original, Korean) pairs to synced Result lines and returns match count. */
+    static int applyNamuwikiPairs(Result r, List<String[]> pairs) {
+        if (r == null || pairs == null || pairs.isEmpty()) return 0;
+        String[] normPairs = new String[pairs.size()];
+        for (int i = 0; i < pairs.size(); i++) normPairs[i] = norm(pairs.get(i)[0]);
+        int matched = 0;
+        int cursor = 0;
+        for (Line l : r.lines) {
+            if (l.text == null || l.text.isEmpty() || hasHangul(l.text)) continue;
+            String nl = norm(l.text);
+            if (nl.length() < 2) continue;
+            int bestIdx = -1;
+            float bestScore = 0f;
+            for (int i = 0; i < pairs.size(); i++) {
+                String np = normPairs[i];
+                if (np.length() < 2) continue;
+                float sc = lineSimilarity(nl, np);
+                // Small locality boost for sequential lines so repeated choruses align naturally
+                if (i >= cursor && i <= cursor + 6) sc += 0.08f;
+                if (sc > bestScore) { bestScore = sc; bestIdx = i; }
+            }
+            if (bestIdx >= 0 && bestScore >= 0.65f) {
+                l.trans = pairs.get(bestIdx)[1];
+                cursor = bestIdx + 1;
+                matched++;
+            }
+        }
+        return matched;
+    }
+
+    private static float lineSimilarity(String a, String b) {
+        if (a.equals(b)) return 1.0f;
+        int min = Math.min(a.length(), b.length()), max = Math.max(a.length(), b.length());
+        if (min >= 4 && (a.contains(b) || b.contains(a))) return (float) min / max;
+        if (a.length() < 2 || b.length() < 2) return 0f;
+        Map<String, Integer> bg = new HashMap<>();
+        int total = (a.length() - 1) + (b.length() - 1);
+        for (int i = 0; i < a.length() - 1; i++) {
+            String k = a.substring(i, i + 2);
+            Integer c = bg.get(k);
+            bg.put(k, c == null ? 1 : c + 1);
+        }
+        int common = 0;
+        for (int i = 0; i < b.length() - 1; i++) {
+            String k = b.substring(i, i + 2);
+            Integer c = bg.get(k);
+            if (c != null && c > 0) { common++; bg.put(k, c - 1); }
+        }
+        return (2f * common) / total;
+    }
+
+    private static List<String> splitCellLines(String html) {
+        String s = HTML_BREAK.matcher(html).replaceAll("\n");
+        s = HTML_TAG.matcher(s).replaceAll("");
+        s = decodeHtmlEntities(s);
+        List<String> out = new ArrayList<>();
+        for (String raw : s.split("\n")) {
+            String t = raw.replace('\u00A0', ' ').replaceAll("\\[[0-9]+\\]", "").trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
+    private static String decodeHtmlEntities(String s) {
+        if (s == null || s.indexOf('&') < 0) return s == null ? "" : s;
+        String r = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'").replace("&nbsp;", " ");
+        Matcher m = HTML_ENTITY_NUM.matcher(r);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            try {
+                String g = m.group(1);
+                int cp = g.startsWith("x") || g.startsWith("X") ? Integer.parseInt(g.substring(1), 16) : Integer.parseInt(g);
+                m.appendReplacement(sb, Matcher.quoteReplacement(new String(Character.toChars(cp))));
+            } catch (Exception e) {
+                m.appendReplacement(sb, "");
+            }
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static boolean majorityHangul(List<String> lines) {
+        int ko = 0;
+        for (String s : lines) if (hasHangul(s)) ko++;
+        return ko * 2 >= lines.size();
+    }
+
+    private static boolean hasLetters(List<String> lines) {
+        for (String s : lines) if (hasLettersStr(s)) return true;
+        return false;
+    }
+
+    private static boolean hasLettersStr(String s) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (Character.isLetter(s.charAt(i))) n++;
+        return n >= 2;
+    }
+
+    private static boolean isMetaCell(List<String> lines) {
+        return lines.size() == 1 && isMetaLine(lines.get(0));
+    }
+
+    private static boolean isMetaLine(String s) {
+        if (s == null) return true;
+        String t = s.trim();
+        return t.startsWith("작사") || t.startsWith("작곡") || t.startsWith("편곡")
+                || t.startsWith("가수") || t.startsWith("발매") || t.startsWith("수록")
+                || t.startsWith("번역") || t.startsWith("출처") || t.startsWith("원문")
+                || t.startsWith("해석") || t.startsWith("편집") || t.startsWith("분류:");
     }
 
     static String cleanTitle(String s) {
