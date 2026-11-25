@@ -138,12 +138,16 @@ final class AodOverlay extends FrameLayout {
         cluster.addView(timeL);
         cluster.addView(timeR);
 
-        prevBtn = aodBtn(m, Icons.PREV, 26, v -> Player.prev());
-        playBtn = aodBtn(m, Icons.PAUSE, 32, v -> Player.toggle());
-        nextBtn = aodBtn(m, Icons.NEXT, 26, v -> Player.next());
+        prevBtn = aodBtn(m, Icons.PREV, 26, Player::prev);
+        playBtn = aodBtn(m, Icons.PAUSE, 32, Player::toggle);
+        nextBtn = aodBtn(m, Icons.NEXT, 26, Player::next);
         cluster.addView(prevBtn);
         cluster.addView(playBtn);
         cluster.addView(nextBtn);
+
+        // Hide playback timestamps inside Full-Screen AOD for a cleaner minimal clock-and-media look
+        timeL.setVisibility(GONE);
+        timeR.setVisibility(GONE);
 
         hintView = Ui.text(m, m.getString(R.string.aod_hint), 11.5f, Ui.regular, 0x66FFFFFF);
         hintView.setGravity(Gravity.CENTER);
@@ -159,11 +163,48 @@ final class AodOverlay extends FrameLayout {
         t.setSelected(true);
     }
 
-    private Icons.IconView aodBtn(MainActivity m, int ic, float sizeDp, OnClickListener click) {
+    /**
+     * AOD playback buttons respond to double-tap (without exiting AOD) and consume all touches so tapping/double-tapping
+     * a playback button never bubbles to AodOverlay.onTouchEvent and never dismisses AOD.
+     */
+    private Icons.IconView aodBtn(MainActivity m, int ic, float sizeDp, Runnable action) {
         Icons.IconView v = new Icons.IconView(m, ic, sizeDp, 0xCCFFFFFF);
         v.setBackground(Ui.round(0x18FFFFFF, 100));
-        v.setOnClickListener(click);
-        Ui.press(v, 0.88f);
+        final long[] lastBtnTap = {0L};
+        final float[] downPos = {0f, 0f};
+        v.setOnTouchListener((view, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    lastTap = 0L; // never combine with background tap
+                    downPos[0] = e.getX();
+                    downPos[1] = e.getY();
+                    view.animate().scaleX(0.88f).scaleY(0.88f).setDuration(90).start();
+                    return true;
+                case MotionEvent.ACTION_UP: {
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(Ui.ONEUI_RECOIL_RELEASE).start();
+                    boolean inside = e.getX() >= -Ui.dpf(12) && e.getX() <= view.getWidth() + Ui.dpf(12)
+                            && e.getY() >= -Ui.dpf(12) && e.getY() <= view.getHeight() + Ui.dpf(12);
+                    if (inside && Math.hypot(e.getX() - downPos[0], e.getY() - downPos[1]) < Ui.dpf(24)) {
+                        long now = android.os.SystemClock.uptimeMillis();
+                        if (now - lastBtnTap[0] < 450L) {
+                            lastBtnTap[0] = 0L;
+                            lastTap = 0L;
+                            if (action != null) action.run();
+                            view.animate().scaleX(1.08f).scaleY(1.08f).setDuration(100)
+                                    .withEndAction(() -> view.animate().scaleX(1f).scaleY(1f).setDuration(180).start()).start();
+                        } else {
+                            lastBtnTap[0] = now;
+                        }
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL:
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(180).start();
+                    return true;
+                default:
+                    return true;
+            }
+        });
         return v;
     }
 
@@ -336,8 +377,10 @@ final class AodOverlay extends FrameLayout {
         if (enter) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else w.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WindowManager.LayoutParams lp = w.getAttributes();
+        boolean autoBright = Settings.pref(main, "aod_auto_bright", false);
         boolean dim = Settings.pref(main, "aod_dim", true);
-        lp.screenBrightness = (enter && dim) ? 0.14f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        // When auto-brightness is enabled, let Android's ambient brightness control screen brightness naturally
+        lp.screenBrightness = (enter && !autoBright && dim) ? 0.14f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
         w.setAttributes(lp);
         WindowInsetsController c = w.getInsetsController();
         if (c != null) {
@@ -410,9 +453,6 @@ final class AodOverlay extends FrameLayout {
         long pos = Player.position();
         bar.frac = Ui.clamp(pos / (float) t.duration, 0f, 1f);
         bar.invalidate();
-        timeL.setText(Ui.time(pos));
-        boolean showTotal = Settings.pref(main, "show_total", false);
-        timeR.setText(showTotal ? Ui.time(t.duration) : "-" + Ui.time(Math.max(0, t.duration - pos)));
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {

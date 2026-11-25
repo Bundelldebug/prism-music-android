@@ -76,10 +76,10 @@ final class NpuAudio {
     /** 25 supported flagship / upper-flagship SoCs with NPU/DSP headroom (Dimensity 9600M uses MT6993 silicon family). */
     static final ChipSpec[] SUPPORTED_CHIPS = {
             // Qualcomm Snapdragon (10)
-            new ChipSpec("SM8550",  VENDOR_QUALCOMM, "스냅드래곤 8 2세대", "Snapdragon 8 Gen 2", "SNAPDRAGON", "8 Gen 2", "Hexagon NPU", false, 0),
-            new ChipSpec("SM8635",  VENDOR_QUALCOMM, "스냅드래곤 8s 3세대", "Snapdragon 8s Gen 3", "SNAPDRAGON", "8s Gen 3", "Hexagon NPU", false, 0),
-            new ChipSpec("SM8650",  VENDOR_QUALCOMM, "스냅드래곤 8 3세대", "Snapdragon 8 Gen 3", "SNAPDRAGON", "8 Gen 3", "Hexagon NPU", false, 0),
-            new ChipSpec("SM8735",  VENDOR_QUALCOMM, "스냅드래곤 8s 4세대", "Snapdragon 8s Gen 4", "SNAPDRAGON", "8s Gen 4", "Hexagon NPU", false, 0),
+            new ChipSpec("SM8550",  VENDOR_QUALCOMM, "스냅드래곤 8 2세대", "Snapdragon 8 Gen 2", "SNAPDRAGON", "8 Gen 2", "Hexagon NPU", false, R.drawable.chip_sm8550),
+            new ChipSpec("SM8635",  VENDOR_QUALCOMM, "스냅드래곤 8s 3세대", "Snapdragon 8s Gen 3", "SNAPDRAGON", "8s Gen 3", "Hexagon NPU", false, R.drawable.chip_sm8635),
+            new ChipSpec("SM8650",  VENDOR_QUALCOMM, "스냅드래곤 8 3세대", "Snapdragon 8 Gen 3", "SNAPDRAGON", "8 Gen 3", "Hexagon NPU", false, R.drawable.chip_sm8650),
+            new ChipSpec("SM8735",  VENDOR_QUALCOMM, "스냅드래곤 8s 4세대", "Snapdragon 8s Gen 4", "SNAPDRAGON", "8s Gen 4", "Hexagon NPU", false, R.drawable.chip_sm8735),
             new ChipSpec("SM8750",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트", "Snapdragon 8 Elite", "SNAPDRAGON", "8 Elite", "Hexagon NPU", false, R.drawable.chip_sm8750),
             new ChipSpec("SM8845",  VENDOR_QUALCOMM, "스냅드래곤 8 5세대", "Snapdragon 8 Gen 5", "SNAPDRAGON", "8 Gen 5", "Hexagon NPU", false, R.drawable.chip_sm8845),
             new ChipSpec("SM8850",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 5세대", "Snapdragon 8 Elite Gen 5", "SNAPDRAGON", "8 Elite G5", "Hexagon NPU", false, R.drawable.chip_sm8850),
@@ -87,9 +87,9 @@ final class NpuAudio {
             new ChipSpec("SM8950",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 6세대", "Snapdragon 8 Elite Gen 6", "SNAPDRAGON", "8 Elite G6", "Hexagon NPU", false, R.drawable.chip_sm8950),
             new ChipSpec("SM8975",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 익스트림 6세대", "Snapdragon 8 Elite Extreme Gen 6", "SNAPDRAGON", "8 Extreme", "Hexagon NPU", true, R.drawable.chip_sm8975),
             // MediaTek Dimensity (9) — verified model codes (9600M is MT6993 silicon family with NPU 990)
-            new ChipSpec("MT6899",  VENDOR_MEDIATEK, "디멘시티 8400", "Dimensity 8400", "DIMENSITY", "8400", "MediaTek NPU 880", false, 0),
-            new ChipSpec("MT6989",  VENDOR_MEDIATEK, "디멘시티 9300", "Dimensity 9300", "DIMENSITY", "9300", "MediaTek NPU 790", false, 0),
-            new ChipSpec("MT6989T", VENDOR_MEDIATEK, "디멘시티 9300+", "Dimensity 9300+", "DIMENSITY", "9300+", "MediaTek NPU 790+", true, 0),
+            new ChipSpec("MT6899",  VENDOR_MEDIATEK, "디멘시티 8400", "Dimensity 8400", "DIMENSITY", "8400", "MediaTek NPU 880", false, R.drawable.chip_mt6899),
+            new ChipSpec("MT6989",  VENDOR_MEDIATEK, "디멘시티 9300", "Dimensity 9300", "DIMENSITY", "9300", "MediaTek NPU 790", false, R.drawable.chip_mt6989),
+            new ChipSpec("MT6989T", VENDOR_MEDIATEK, "디멘시티 9300+", "Dimensity 9300+", "DIMENSITY", "9300+", "MediaTek NPU 790+", true, R.drawable.chip_mt6989t),
             new ChipSpec("MT6991",  VENDOR_MEDIATEK, "디멘시티 9400", "Dimensity 9400", "DIMENSITY", "9400", "MediaTek NPU 890", false, R.drawable.chip_mt6991),
             new ChipSpec("MT6991Z", VENDOR_MEDIATEK, "디멘시티 9400+", "Dimensity 9400+", "DIMENSITY", "9400+", "MediaTek NPU 890+", true, R.drawable.chip_mt6991p),
             new ChipSpec("MT6993",  VENDOR_MEDIATEK, "디멘시티 9500", "Dimensity 9500", "DIMENSITY", "9500", "MediaTek NPU 990", false, R.drawable.chip_mt6993),
@@ -97,13 +97,13 @@ final class NpuAudio {
             new ChipSpec("MT6993M", VENDOR_MEDIATEK, "디멘시티 9600M", "Dimensity 9600M", "DIMENSITY", "9600M", "MediaTek NPU 990", false, R.drawable.chip_mt6995m),
             new ChipSpec("MT6995",  VENDOR_MEDIATEK, "디멘시티 9600 프로", "Dimensity 9600 Pro", "DIMENSITY", "9600 Pro", "MediaTek NPU", true, R.drawable.chip_mt6995p),
             // Samsung Exynos (4) — Exynos 2700 is unreleased, intentionally no illustration (res = 0)
-            new ChipSpec("S5E9945", VENDOR_SAMSUNG, "엑시노스 2400", "Exynos 2400", "EXYNOS", "2400", "Exynos NPU", false, 0),
+            new ChipSpec("S5E9945", VENDOR_SAMSUNG, "엑시노스 2400", "Exynos 2400", "EXYNOS", "2400", "Exynos NPU", false, R.drawable.chip_s5e9945),
             new ChipSpec("S5E9955", VENDOR_SAMSUNG, "엑시노스 2500", "Exynos 2500", "EXYNOS", "2500", "Exynos NPU", false, R.drawable.chip_s5e9955),
             new ChipSpec("S5E9965", VENDOR_SAMSUNG, "엑시노스 2600", "Exynos 2600", "EXYNOS", "2600", "Exynos NPU", false, R.drawable.chip_s5e9965),
             new ChipSpec("S5E9975", VENDOR_SAMSUNG, "엑시노스 2700", "Exynos 2700", "EXYNOS", "2700", "Exynos NPU", true, 0),
             // Google Tensor (2)
-            new ChipSpec("GS401",   VENDOR_GOOGLE,  "구글 텐서 G4", "Google Tensor G4", "TENSOR", "G4", "Google TPU", false, 0),
-            new ChipSpec("GS501",   VENDOR_GOOGLE,  "구글 텐서 G5", "Google Tensor G5", "TENSOR", "G5", "Google TPU", true, 0),
+            new ChipSpec("GS401",   VENDOR_GOOGLE,  "구글 텐서 G4", "Google Tensor G4", "TENSOR", "G4", "Google TPU", false, R.drawable.chip_gs401),
+            new ChipSpec("GS501",   VENDOR_GOOGLE,  "구글 텐서 G5", "Google Tensor G5", "TENSOR", "G5", "Google TPU", true, R.drawable.chip_gs501),
     };
 
     static final String[] PROFILES = {"natural", "studio", "vocal", "air"};

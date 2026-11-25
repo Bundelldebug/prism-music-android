@@ -744,7 +744,14 @@ public class PrismUiTest {
         assertEquals("SSC-UHQ", AudioInfo.codecTypeName(7, "Samsung Seamless Codec", 24, 96f));
         assertEquals("SSC-UHQ", AudioInfo.codecTypeName(-1, "SSC-UHQ", 24, 96f));
 
-        // Dedicated device icons (Buds 3 / Buds 4 / Buds On / Headphones / Third-party Earbuds / USB DAC)
+        // Dedicated device icons (Buds 2 / Buds Live / Buds 3 / Buds 4 / Buds On / Headphones / Third-party Earbuds / USB DAC)
+        assertEquals("Galaxy Buds2 Pro icon", Icons.BUDS2, AudioInfo.deviceIconForName("Galaxy Buds2 Pro", true, false, false));
+        assertEquals("Galaxy Buds 2 icon", Icons.BUDS2, AudioInfo.deviceIconForName("Galaxy Buds 2", true, false, false));
+        assertEquals("Korean Buds2 Pro icon", Icons.BUDS2, AudioInfo.deviceIconForName("지호의 버즈2 프로", true, false, false));
+        assertEquals("Galaxy Buds+ icon", Icons.BUDS2, AudioInfo.deviceIconForName("Galaxy Buds+", true, false, false));
+        assertEquals("Galaxy Buds FE icon", Icons.BUDS2, AudioInfo.deviceIconForName("Galaxy Buds FE", true, false, false));
+        assertEquals("Galaxy Buds Live icon", Icons.BUDS_LIVE, AudioInfo.deviceIconForName("Galaxy Buds Live", true, false, false));
+        assertEquals("Korean Buds Live icon", Icons.BUDS_LIVE, AudioInfo.deviceIconForName("갤럭시 버즈 라이브", true, false, false));
         assertEquals("Galaxy Buds3 icon", Icons.BUDS, AudioInfo.deviceIconForName("Galaxy Buds3 Pro", true, false, false));
         assertEquals("Galaxy Buds4 icon", Icons.BUDS4, AudioInfo.deviceIconForName("Galaxy Buds4 Pro", true, false, false));
         assertEquals("Korean Buds4 icon", Icons.BUDS4, AudioInfo.deviceIconForName("지호의 버즈4", true, false, false));
@@ -753,7 +760,7 @@ public class PrismUiTest {
         assertEquals("Korean Buds On icon", Icons.BUDS_ON, AudioInfo.deviceIconForName("갤럭시 버즈 온", true, false, false));
         assertEquals("Headphones icon", Icons.HEADPHONES, AudioInfo.deviceIconForName("Sony WH-1000XM5", true, false, false));
         assertEquals("Third-party earbuds icon", Icons.EARBUDS, AudioInfo.deviceIconForName("AirPods Pro", true, false, false));
-        assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA17", false, true, false));
+        assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA13", false, true, false));
 
         // Friendly SoC marketing names & exact 25 supported chipsets check (including MT6993M for Dimensity 9600M)
         assertEquals("25 supported chipsets", 25, NpuAudio.SUPPORTED_CHIPS.length);
@@ -825,23 +832,23 @@ public class PrismUiTest {
         chipV.draw(new Canvas(c2));
         assertEquals("ChipArtView 2nd draw pixel matches 1st draw (no alpha fade)", c1.getPixel(64, 64), c2.getPixel(64, 64));
 
-        // (b3) Render enlarged Galaxy Buds 3 / Buds 4 / Buds On icons side-by-side for visual check
-        Bitmap budsPrev = Bitmap.createBitmap(900, 340, Bitmap.Config.ARGB_8888);
+        // (b3) Render enlarged Galaxy Buds 2 / Buds Live / Buds 3 / Buds 4 / Buds On icons side-by-side for visual check
+        Bitmap budsPrev = Bitmap.createBitmap(1480, 340, Bitmap.Config.ARGB_8888);
         Canvas bcv = new Canvas(budsPrev);
         bcv.drawColor(0xFF141418);
         android.graphics.Paint bp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        int[] bIcons = {Icons.BUDS, Icons.BUDS4, Icons.BUDS_ON};
-        String[] bLabels = {"Galaxy Buds 3", "Galaxy Buds 4", "Galaxy Buds On"};
-        for (int i = 0; i < 3; i++) {
-            float x0 = 28f + i * 290f;
+        int[] bIcons = {Icons.BUDS2, Icons.BUDS_LIVE, Icons.BUDS, Icons.BUDS4, Icons.BUDS_ON};
+        String[] bLabels = {"Buds 2 / Pro / +", "Buds Live", "Galaxy Buds 3", "Galaxy Buds 4", "Galaxy Buds On"};
+        for (int i = 0; i < 5; i++) {
+            float x0 = 24f + i * 290f;
             bp.setColor(0xFF22232A);
-            bcv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 264f, 316f), 32f, 32f, bp);
-            Icons.draw(bcv, bIcons[i], x0 + 132f, 146f, 168f, 0xFFFFFFFF);
+            bcv.drawRoundRect(new android.graphics.RectF(x0, 24f, x0 + 266f, 316f), 32f, 32f, bp);
+            Icons.draw(bcv, bIcons[i], x0 + 133f, 146f, 168f, 0xFFFFFFFF);
             bp.setColor(0xFFEAEAF0);
-            bp.setTextSize(26f);
+            bp.setTextSize(24f);
             bp.setTextAlign(android.graphics.Paint.Align.CENTER);
             bp.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, 600, false));
-            bcv.drawText(bLabels[i], x0 + 132f, 286f, bp);
+            bcv.drawText(bLabels[i], x0 + 133f, 286f, bp);
         }
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "83_buds_icon_preview.png"))) { budsPrev.compress(Bitmap.CompressFormat.PNG, 100, o); }
 
@@ -1149,6 +1156,129 @@ public class PrismUiTest {
             throw new RuntimeException(e);
         } finally {
             Spotify.fixtures = prevFix;
+        }
+
+        // [15] 9.5.16 regression checks (all 10 update items):
+        // (1) Playlist cover upload scope & square JPEG compression under Spotify's 256 KB Base64 limit
+        assertTrue("ugc-image-upload scope included", Spotify.SCOPES.contains("ugc-image-upload"));
+        Bitmap wideSrc = Bitmap.createBitmap(1000, 600, Bitmap.Config.ARGB_8888);
+        wideSrc.eraseColor(0xFF387AFF);
+        byte[] coverJpeg = Spotify.encodePlaylistCoverJpeg(wideSrc);
+        wideSrc.recycle();
+        assertTrue("Playlist cover JPEG valid and <= 185KB", coverJpeg != null && coverJpeg.length > 500 && coverJpeg.length <= 185_000);
+
+        // (3) Bit-Perfect scoring: exact BP > integer-multiple BP > Direct Hi-Res USB fallback (FiiO KA13)
+        int sExact = BitPerfect.scoreCandidate(true, 44100, 24, 2, 44100, 16);
+        int sMult = BitPerfect.scoreCandidate(true, 88200, 24, 2, 44100, 16);
+        int sDirect = BitPerfect.scoreCandidate(false, 44100, 32, 2, 44100, 16);
+        assertTrue("Exact bit-perfect beats integer-multiple", sExact > sMult);
+        assertTrue("Integer-multiple bit-perfect beats direct USB", sMult > sDirect);
+        assertTrue("Direct Hi-Res USB fallback has positive score", sDirect > 0);
+
+        // (6) Updater release notes Markdown formatter strips raw syntax cleanly
+        CharSequence fmtNotes = Updater.formatReleaseNotes("### What's New\n- **Bold** item with `code` and [Link](https://example.com)\n---\n* Second item");
+        String fmtStr = fmtNotes.toString();
+        assertTrue("No raw ###", !fmtStr.contains("###"));
+        assertTrue("No raw **", !fmtStr.contains("**"));
+        assertTrue("No raw backticks", !fmtStr.contains("`"));
+        assertTrue("No raw markdown link syntax", !fmtStr.contains("]("));
+        assertTrue("Bullet converted cleanly", fmtStr.contains("•  Bold item with code and Link"));
+
+        // (8) Multi-device Spotify Connect naming
+        assertEquals("Prism (Galaxy S25 Ultra)", SpotifyWeb.formatConnectName("Galaxy S25 Ultra"));
+        assertEquals("Prism", SpotifyWeb.formatConnectName(""));
+        String builtHtml = SpotifyWeb.buildHtml("Prism (Galaxy Z Fold8)");
+        assertTrue("HTML carries device name", builtHtml.contains("name: 'Prism (Galaxy Z Fold8)'"));
+        assertTrue("HTML disables WebView MediaSession", builtHtml.contains("enableMediaSession: false"));
+
+        // (9) Full-Screen AOD: timestamps GONE, auto-brightness option works, double-tap button controls playback WITHOUT closing AOD!
+        a.openAod(); idle(500);
+        assertTrue("AOD open", a.aod.isOpen());
+        try {
+            java.lang.reflect.Field tlF = AodOverlay.class.getDeclaredField("timeL");
+            java.lang.reflect.Field trF = AodOverlay.class.getDeclaredField("timeR");
+            java.lang.reflect.Field pbF = AodOverlay.class.getDeclaredField("playBtn");
+            tlF.setAccessible(true); trF.setAccessible(true); pbF.setAccessible(true);
+            assertEquals("AOD timeL hidden", View.GONE, ((View) tlF.get(a.aod)).getVisibility());
+            assertEquals("AOD timeR hidden", View.GONE, ((View) trF.get(a.aod)).getVisibility());
+            View pBtn = (View) pbF.get(a.aod);
+            // Set local mock track so Player.toggle() flips Player.playing cleanly without network
+            Player.Track savedTr = Player.track;
+            Player.playing = true;
+            long tNow = android.os.SystemClock.uptimeMillis();
+            for (int tap = 0; tap < 2; tap++) {
+                long ts = tNow + tap * 120L;
+                android.view.MotionEvent dn = android.view.MotionEvent.obtain(ts, ts, android.view.MotionEvent.ACTION_DOWN, pBtn.getWidth() / 2f, pBtn.getHeight() / 2f, 0);
+                android.view.MotionEvent up = android.view.MotionEvent.obtain(ts, ts + 25, android.view.MotionEvent.ACTION_UP, pBtn.getWidth() / 2f, pBtn.getHeight() / 2f, 0);
+                pBtn.dispatchTouchEvent(dn);
+                pBtn.dispatchTouchEvent(up);
+                dn.recycle(); up.recycle();
+            }
+            idle(200);
+            assertTrue("Double-tapping AOD play button keeps AOD open", a.aod.isOpen());
+            assertTrue("Double-tapping AOD play button toggled playing state", !Player.playing);
+            Player.track = savedTr;
+            Player.playing = true;
+        } catch (Exception e) { throw new RuntimeException(e); }
+        // Auto-brightness check
+        MainActivity.prefs(app).edit().putBoolean("aod_auto_bright", true).commit();
+        a.aod.closeImmediate();
+        a.openAod(); idle(300);
+        assertEquals("AOD auto-brightness delegates to system (-1)", android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, a.getWindow().getAttributes().screenBrightness, 0.01f);
+        MainActivity.prefs(app).edit().putBoolean("aod_auto_bright", false).commit();
+        a.aod.closeImmediate();
+
+        // (10) All 24 released chipsets (13 existing + 10 newly added; Exynos 2700 unreleased) have official front drawable resources
+        int withArt = 0;
+        for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
+            if ("S5E9975".equals(cs.id)) continue;
+            assertTrue("Official chip drawable present for " + cs.id, cs.drawableRes != 0);
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeResource(app.getResources(), cs.drawableRes);
+            assertNotNull("Decoded bitmap for " + cs.id, bmp);
+            bmp.recycle();
+            withArt++;
+        }
+        assertEquals("24 released chipsets have official front artwork", 24, withArt);
+
+        // (2)(4)(5) Visual verification shots: G-style Home (logged in), G-style Player with Hi-Res badge (verify zero overlap!), G-style Tablet with sidebar
+        Ui.gStyle = true;
+        MainActivity.prefs(app).edit().putString("player_style", "oneui").putString("source", "spotify")
+                .putString("refresh_token", "test").putString("client_id", "abc").commit();
+        Spotify.fixtures = PrismUiTest::fixture;
+        try {
+            ActivityController<MainActivity> gHomeC = launch("ko-w393dp-h852dp-xxhdpi");
+            MainActivity gha = gHomeC.get();
+            fakeTrack();
+            for (int i = 0; i < 30; i++) { idle(50); Thread.sleep(15); }
+            shot(gha, "87_home_g_style");
+            gha.np.open(); idle(1000);
+            // Assert zero overlap between elapsed / audioBadge / remain and between chip / aodBtn in G-style!
+            try {
+                java.lang.reflect.Field elF = NowPlaying.class.getDeclaredField("elapsed");
+                java.lang.reflect.Field rmF = NowPlaying.class.getDeclaredField("remain");
+                java.lang.reflect.Field abF = NowPlaying.class.getDeclaredField("audioBadge");
+                java.lang.reflect.Field chF = NowPlaying.class.getDeclaredField("chip");
+                java.lang.reflect.Field aoF = NowPlaying.class.getDeclaredField("aodBtn");
+                elF.setAccessible(true); rmF.setAccessible(true); abF.setAccessible(true); chF.setAccessible(true); aoF.setAccessible(true);
+                View elV = (View) elF.get(gha.np), rmV = (View) rmF.get(gha.np), abV = (View) abF.get(gha.np), chV = (View) chF.get(gha.np), aoV = (View) aoF.get(gha.np);
+                assertTrue("G-style audioBadge left >= elapsed right", abV.getLeft() >= elV.getRight() - 2);
+                assertTrue("G-style audioBadge right <= remain left", abV.getRight() <= rmV.getLeft() + 2);
+                assertTrue("G-style chip right <= aodBtn left", chV.getRight() <= aoV.getLeft() + 2);
+            } catch (Exception e) { throw new RuntimeException(e); }
+            shot(gha, "89_g_player_hires_fixed");
+            gha.np.close(); idle(400);
+
+            // Tablet PC-like G-style with sidebar open (and close afterwards so static sidebarWanted doesn't affect other tests!)
+            ActivityController<MainActivity> gTabC = launch("ko-w1280dp-h800dp-mdpi");
+            MainActivity gta = gTabC.get();
+            fakeTrack();
+            for (int i = 0; i < 30; i++) { idle(50); Thread.sleep(15); }
+            gta.openSidebar(false); idle(600);
+            shot(gta, "88_tablet_pc_g_style");
+            gta.closeSidebar(); idle(500);
+        } finally {
+            Spotify.fixtures = null;
+            MainActivity.prefs(app).edit().remove("refresh_token").remove("client_id").commit();
         }
 
         AudioInfo.testSpec = null;

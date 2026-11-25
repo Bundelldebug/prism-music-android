@@ -64,7 +64,7 @@ final class SpotifyWeb {
             + "<script src='" + SDK_URL + "'></script></head><body><script>\n"
             + "window.onSpotifyWebPlaybackSDKReady = function() {\n"
             // disable SDK's own MediaSession so Android never routes background volume keys to a remote Spotify session
-            + "  var player = new Spotify.Player({ name: 'Prism', volume: 1.0, enableMediaSession: false,\n"
+            + "  var player = new Spotify.Player({ name: '__PRISM_DEVICE_NAME__', volume: 1.0, enableMediaSession: false,\n"
             + "    getOAuthToken: function(cb) { cb(Prism.token()); } });\n"
             + "  window.prismPlayer = player;\n"
             + "  player.addListener('ready', function(e) { Prism.onReady(e.device_id); });\n"
@@ -192,7 +192,53 @@ final class SpotifyWeb {
         // 1px, invisible, but attached so the page keeps running
         root.addView(web, 0, new FrameLayout.LayoutParams(1, 1));
         web.setAlpha(0f);
-        web.loadDataWithBaseURL("https://prism.local/", HTML, "text/html", "utf-8", null);
+        web.loadDataWithBaseURL("https://prism.local/", buildHtml(playerDeviceName(a)), "text/html", "utf-8", null);
+    }
+
+    /** Builds a distinct Spotify Connect device name ("Prism (<device>)") so multiple Prism devices are distinguishable. */
+    static String playerDeviceName(android.content.Context c) {
+        String label = null;
+        if (c != null) {
+            try {
+                label = android.provider.Settings.Global.getString(c.getContentResolver(), android.provider.Settings.Global.DEVICE_NAME);
+            } catch (Throwable ignored) {}
+            if (label == null || label.trim().isEmpty()) {
+                try {
+                    label = android.provider.Settings.Secure.getString(c.getContentResolver(), "bluetooth_name");
+                } catch (Throwable ignored) {}
+            }
+        }
+        if (label == null || label.trim().isEmpty() || "unknown".equalsIgnoreCase(label.trim())) {
+            String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL.trim();
+            String mfr = android.os.Build.MANUFACTURER == null ? "" : android.os.Build.MANUFACTURER.trim();
+            if (!model.isEmpty() && !"robolectric".equalsIgnoreCase(model)) {
+                if (!mfr.isEmpty() && !model.toLowerCase(java.util.Locale.US).startsWith(mfr.toLowerCase(java.util.Locale.US))) {
+                    label = mfr.substring(0, 1).toUpperCase(java.util.Locale.US) + mfr.substring(1) + " " + model;
+                } else {
+                    label = model;
+                }
+            }
+        }
+        return formatConnectName(label);
+    }
+
+    static String formatConnectName(String deviceLabel) {
+        if (deviceLabel == null) return "Prism";
+        String clean = deviceLabel.replaceAll("[\\r\\n\\t]+", " ").trim();
+        if (clean.isEmpty() || "unknown".equalsIgnoreCase(clean)) return "Prism";
+        if (clean.length() > 36) clean = clean.substring(0, 36).trim();
+        return "Prism (" + clean + ")";
+    }
+
+    static String buildHtml(String deviceName) {
+        String safe = (deviceName == null || deviceName.trim().isEmpty() ? "Prism" : deviceName.trim())
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replace("<", "")
+                .replace(">", "");
+        return HTML.replace("__PRISM_DEVICE_NAME__", safe);
     }
 
     static void stop() {

@@ -130,11 +130,22 @@ final class AudioInfo {
                 || n.contains("sm-r640") || n.contains("sm-r540")) {
             return Icons.BUDS4;
         }
-        if (n.contains("galaxy buds") || n.contains("buds3") || n.contains("buds 3")
-                || n.contains("buds2") || n.contains("buds 2") || n.contains("buds pro")
-                || n.contains("buds fe") || n.contains("buds live") || n.contains("buds+")
-                || n.contains("sm-r") || n.contains("갤럭시 버즈") || n.contains("버즈")) {
+        if (n.contains("buds3") || n.contains("buds 3") || n.contains("버즈3") || n.contains("버즈 3")
+                || n.contains("sm-r630") || n.contains("sm-r530")) {
             return Icons.BUDS;
+        }
+        if (n.contains("buds live") || n.contains("budslive") || n.contains("버즈 라이브") || n.contains("버즈라이브")
+                || n.contains("sm-r180")) {
+            return Icons.BUDS_LIVE;
+        }
+        if (n.contains("buds2") || n.contains("buds 2") || n.contains("버즈2") || n.contains("버즈 2")
+                || n.contains("buds pro") || n.contains("버즈 프로") || n.contains("buds fe") || n.contains("버즈 fe")
+                || n.contains("buds+") || n.contains("buds plus") || n.contains("버즈+") || n.contains("버즈 플러스")
+                || n.contains("buds core") || n.contains("버즈 코어")
+                || n.contains("sm-r170") || n.contains("sm-r175") || n.contains("sm-r177")
+                || n.contains("sm-r190") || n.contains("sm-r400") || n.contains("sm-r510")
+                || n.contains("galaxy buds") || n.contains("갤럭시 버즈") || n.contains("sm-r") || n.contains("버즈")) {
+            return Icons.BUDS2;
         }
         if (n.contains("headphone") || n.contains("wh-1000") || n.contains("wh-")
                 || n.contains("quietcomfort") || n.contains("airpods max")
@@ -207,14 +218,29 @@ final class AudioInfo {
         s.deviceName = (pn == null || pn.length() == 0) ? "USB DAC" : pn.toString();
         if (BitPerfect.activeRate > 0 && BitPerfect.activeBits > 0) {
             s.isBitPerfect = true;
-            s.codec = "USB Bit-Perfect";
+            s.codec = BitPerfect.activeBitPerfect ? "USB Bit-Perfect" : "USB Direct";
             s.bits = BitPerfect.activeBits;
             s.khz = BitPerfect.activeRate / 1000f;
             return;
         }
         s.codec = "USB PCM";
-        s.bits = maxBitsFromEncodings(d.getEncodings(), 24);
-        s.khz = maxKhzFromRates(d.getSampleRates(), 48f);
+        s.bits = maxBitsFromEncodings(d.getEncodings(), 0);
+        s.khz = maxKhzFromRates(d.getSampleRates(), 0f);
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                List<AudioProfile> profs = d.getAudioProfiles();
+                if (profs != null) {
+                    for (AudioProfile ap : profs) {
+                        int b = bitsFromEncoding(ap.getFormat());
+                        if (b > s.bits) s.bits = b;
+                        float r = maxKhzFromRates(ap.getSampleRates(), 0f);
+                        if (r > s.khz) s.khz = r;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (s.bits <= 0) s.bits = 24;
+        if (s.khz <= 0f) s.khz = 48f;
     }
 
     private static void fillBluetooth(Context c, OutputSpec s, AudioDeviceInfo d, AudioManager am) {

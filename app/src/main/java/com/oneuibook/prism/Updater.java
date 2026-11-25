@@ -105,13 +105,180 @@ final class Updater {
         try { return Integer.parseInt(s.replaceAll("\\D", "")); } catch (Exception e) { return 0; }
     }
 
-    /** "New version" dialog: update now (download + install) or later. */
+    /** Converts GitHub release Markdown into clean, styled Android text without raw #, **, `, or [link](url) syntax. */
+    static CharSequence formatReleaseNotes(String raw) {
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+        if (raw == null || raw.trim().isEmpty()) return sb;
+        String text = raw.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (text.length() > 4000) text = text.substring(0, 4000) + "…";
+        String[] lines = text.split("\n");
+        boolean lastBlank = true;
+        for (String line : lines) {
+            String t = line.trim();
+            if (t.isEmpty()) {
+                if (!lastBlank && sb.length() > 0) { sb.append('\n'); lastBlank = true; }
+                continue;
+            }
+            // Skip horizontal rules (---, ***, ___)
+            if (t.matches("^[-*_]{3,}$")) continue;
+            if (sb.length() > 0) sb.append('\n');
+            lastBlank = false;
+
+            // Heading: # / ## / ### / ####
+            int hLevel = 0;
+            while (hLevel < t.length() && t.charAt(hLevel) == '#') hLevel++;
+            if (hLevel > 0 && hLevel < t.length() && t.charAt(hLevel) == ' ') {
+                String heading = t.substring(hLevel + 1).trim();
+                if (sb.length() > 1 && sb.charAt(sb.length() - 2) != '\n') sb.append('\n');
+                int start = sb.length();
+                appendInlineMarkdown(sb, heading);
+                int end = sb.length();
+                if (end > start) {
+                    sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    sb.setSpan(new android.text.style.RelativeSizeSpan(hLevel <= 2 ? 1.12f : 1.05f), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                continue;
+            }
+
+            // Bullet list item: "- ", "* ", "+ " (supports nested indentation)
+            int indent = 0;
+            while (indent < line.length() && (line.charAt(indent) == ' ' || line.charAt(indent) == '\t')) indent++;
+            String afterIndent = line.substring(indent);
+            if (afterIndent.length() >= 2
+                    && (afterIndent.charAt(0) == '-' || afterIndent.charAt(0) == '*' || afterIndent.charAt(0) == '+')
+                    && afterIndent.charAt(1) == ' ') {
+                boolean nested = indent >= 2;
+                int start = sb.length();
+                sb.append(nested ? "◦  " : "•  ");
+                appendInlineMarkdown(sb, afterIndent.substring(2).trim());
+                int end = sb.length();
+                int lead = Ui.dp(nested ? 18 : 6);
+                int rest = Ui.dp(nested ? 28 : 16);
+                sb.setSpan(new android.text.style.LeadingMarginSpan.Standard(lead, rest), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                continue;
+            }
+
+            // Numbered list item: "1. ..."
+            java.util.regex.Matcher numM = java.util.regex.Pattern.compile("^(\\d+)[.)]\\s+(.*)$").matcher(afterIndent);
+            if (numM.matches()) {
+                int start = sb.length();
+                sb.append(numM.group(1)).append(". ");
+                appendInlineMarkdown(sb, numM.group(2).trim());
+                int end = sb.length();
+                sb.setSpan(new android.text.style.LeadingMarginSpan.Standard(Ui.dp(4), Ui.dp(18)), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                continue;
+            }
+
+            // Blockquote: "> ..."
+            if (t.startsWith("> ")) {
+                int start = sb.length();
+                appendInlineMarkdown(sb, t.substring(2).trim());
+                int end = sb.length();
+                sb.setSpan(new android.text.style.LeadingMarginSpan.Standard(Ui.dp(12)), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.ITALIC), start, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                continue;
+            }
+
+            appendInlineMarkdown(sb, t);
+        }
+        return sb;
+    }
+
+    /** Parses inline Markdown (**bold**, __bold__, *italic*, `code`, ~~strike~~, [label](url)) into spans. */
+    private static void appendInlineMarkdown(android.text.SpannableStringBuilder sb, String s) {
+        int i = 0, n = s.length();
+        while (i < n) {
+            char ch = s.charAt(i);
+            // Escaped punctuation \* \_ \` etc.
+            if (ch == '\\' && i + 1 < n) {
+                sb.append(s.charAt(i + 1));
+                i += 2;
+                continue;
+            }
+            // Link [label](url) -> label
+            if (ch == '[') {
+                int closeBr = s.indexOf(']', i + 1);
+                if (closeBr > i + 1 && closeBr + 1 < n && s.charAt(closeBr + 1) == '(') {
+                    int closePar = s.indexOf(')', closeBr + 2);
+                    if (closePar > closeBr + 2) {
+                        int st = sb.length();
+                        appendInlineMarkdown(sb, s.substring(i + 1, closeBr));
+                        int en = sb.length();
+                        if (en > st) sb.setSpan(new android.text.style.UnderlineSpan(), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        i = closePar + 1;
+                        continue;
+                    }
+                }
+            }
+            // Inline code `...`
+            if (ch == '`') {
+                int end = s.indexOf('`', i + 1);
+                if (end > i + 1) {
+                    int st = sb.length();
+                    sb.append(s, i + 1, end);
+                    int en = sb.length();
+                    sb.setSpan(new android.text.style.TypefaceSpan("monospace"), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    sb.setSpan(new android.text.style.RelativeSizeSpan(0.92f), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 1;
+                    continue;
+                }
+            }
+            // Bold **...** or __...__
+            if ((ch == '*' || ch == '_') && i + 1 < n && s.charAt(i + 1) == ch) {
+                String delim = ch == '*' ? "**" : "__";
+                int end = s.indexOf(delim, i + 2);
+                if (end > i + 2) {
+                    int st = sb.length();
+                    appendInlineMarkdown(sb, s.substring(i + 2, end));
+                    int en = sb.length();
+                    if (en > st) sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // Strikethrough ~~...~~
+            if (ch == '~' && i + 1 < n && s.charAt(i + 1) == '~') {
+                int end = s.indexOf("~~", i + 2);
+                if (end > i + 2) {
+                    int st = sb.length();
+                    appendInlineMarkdown(sb, s.substring(i + 2, end));
+                    int en = sb.length();
+                    if (en > st) sb.setSpan(new android.text.style.StrikethroughSpan(), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // Italic *...* (only when not surrounded by spaces)
+            if (ch == '*' && i + 1 < n && s.charAt(i + 1) != ' ') {
+                int end = s.indexOf('*', i + 1);
+                if (end > i + 1 && s.charAt(end - 1) != ' ') {
+                    int st = sb.length();
+                    appendInlineMarkdown(sb, s.substring(i + 1, end));
+                    int en = sb.length();
+                    if (en > st) sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.ITALIC), st, en, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    i = end + 1;
+                    continue;
+                }
+            }
+            sb.append(ch);
+            i++;
+        }
+    }
+
+    /** "New version" dialog: update now (download + install) or later, with formatted release notes. */
     static void offer(Activity a, Release r) {
-        String notes = r.notes == null ? "" : r.notes.replaceAll("(?m)^#+\\s*", "").trim();
-        if (notes.length() > 600) notes = notes.substring(0, 600) + "…";
+        CharSequence notes = formatReleaseNotes(r.notes);
+        android.widget.ScrollView sv = new android.widget.ScrollView(a);
+        android.widget.TextView tv = new android.widget.TextView(a);
+        tv.setText(notes);
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f);
+        tv.setLineSpacing(0f, 1.32f);
+        tv.setTextColor(Ui.dark ? 0xFFEAEAF0 : 0xFF1C1C1E);
+        tv.setPadding(Ui.dp(24), Ui.dp(12), Ui.dp(24), Ui.dp(8));
+        sv.addView(tv);
         new AlertDialog.Builder(a, Ui.dark ? android.R.style.Theme_DeviceDefault_Dialog_Alert : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
                 .setTitle(a.getString(R.string.upd_available, r.version))
-                .setMessage(notes)
+                .setView(sv)
                 .setPositiveButton(R.string.upd_now, (d, w) -> install(a, r))
                 .setNegativeButton(R.string.upd_later, null)
                 .show();

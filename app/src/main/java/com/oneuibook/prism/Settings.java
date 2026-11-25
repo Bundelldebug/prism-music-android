@@ -496,6 +496,7 @@ final class Settings {
             content.addView(fx, Widgets.MW);
             Widgets.Group aodG = new Widgets.Group(m, m.getString(R.string.aod_title));
             aodG.row(Icons.AOD, Ui.ACCENT, m.getString(R.string.aod_open), null, true, v -> m.openAod());
+            toggleRow(aodG, Icons.APPEARANCE, m.getString(R.string.aod_auto_bright), "aod_auto_bright", false, null);
             toggleRow(aodG, Icons.APPEARANCE, m.getString(R.string.aod_dim), "aod_dim", true, null);
             content.addView(aodG, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.aod_note)));

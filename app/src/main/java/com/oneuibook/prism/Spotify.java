@@ -39,7 +39,7 @@ final class Spotify {
     static final String SCOPES = "user-read-private user-read-email user-read-playback-state user-modify-playback-state "
             + "user-read-currently-playing user-read-recently-played user-top-read user-library-read user-library-modify "
             + "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private "
-            + "user-follow-read user-follow-modify streaming";
+            + "ugc-image-upload user-follow-read user-follow-modify streaming";
     static final String API = "https://api.spotify.com/v1";
 
     static final ExecutorService IO = Executors.newFixedThreadPool(10);
@@ -653,10 +653,122 @@ final class Spotify {
             JSONObject body = new JSONObject()
                     .put("name", name)
                     .put("description", description == null ? "" : description);
-            send("PUT", "/playlists/" + enc(playlistId), body.toString(), cb);
+            send("PUT", "/playlists/" + enc(playlistId), body.toString(), new Cb() {
+                @Override public void ok(JSONObject o) {
+                    invalidateUserCache();
+                    if (cb != null) cb.ok(o);
+                }
+                @Override public void err(int c, String m) {
+                    if (cb != null) cb.err(c, m);
+                }
+            });
         } catch (Exception e) {
             if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
         }
+    }
+
+    /** Center-crops a bitmap to <= 640px square and compresses JPEG so its Base64 stays strictly under Spotify's 256 KB cap. */
+    static byte[] encodePlaylistCoverJpeg(android.graphics.Bitmap src) {
+        if (src == null) return null;
+        int w = src.getWidth(), h = src.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        int side = Math.min(w, h);
+        int sx = (w - side) / 2, sy = (h - side) / 2;
+        android.graphics.Bitmap sq = (w == h && side <= 640) ? src
+                : android.graphics.Bitmap.createBitmap(src, sx, sy, side, side);
+        int target = Math.min(640, side);
+        android.graphics.Bitmap scaled = (sq.getWidth() == target) ? sq
+                : android.graphics.Bitmap.createScaledBitmap(sq, target, target, true);
+        if (sq != src && sq != scaled) sq.recycle();
+        byte[] best = null;
+        int[] quals = {90, 82, 74, 64, 52, 42, 32};
+        for (int q : quals) {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, bos);
+            byte[] data = bos.toByteArray();
+            best = data;
+            if (data.length <= 185_000) break;
+        }
+        // If even q=32 exceeds 185 KB, downscale to 400x400
+        if (best != null && best.length > 185_000 && scaled.getWidth() > 400) {
+            android.graphics.Bitmap small = android.graphics.Bitmap.createScaledBitmap(scaled, 400, 400, true);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 76, bos);
+            best = bos.toByteArray();
+            small.recycle();
+        }
+        if (scaled != src) scaled.recycle();
+        return best;
+    }
+
+    /** Uploads a custom JPEG cover image to a Spotify playlist (PUT /v1/playlists/{id}/images, raw Base64 body). */
+    static void uploadPlaylistImage(android.content.Context ctx, String playlistId, Uri imageUri, Cb cb) {
+        if (ctx == null || playlistId == null || playlistId.isEmpty() || imageUri == null) {
+            if (cb != null) MAIN.post(() -> cb.err(0, "invalid"));
+            return;
+        }
+        IO.execute(() -> {
+            try {
+                // 1) Safely decode with subsampling to avoid OOM on large camera images
+                android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                try (InputStream in1 = ctx.getContentResolver().openInputStream(imageUri)) {
+                    if (in1 == null) throw new Exception("cannot open image");
+                    android.graphics.BitmapFactory.decodeStream(in1, null, bounds);
+                }
+                int maxDim = Math.max(bounds.outWidth, bounds.outHeight);
+                int sample = 1;
+                while (maxDim / sample > 1280) sample *= 2;
+                android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                opts.inSampleSize = sample;
+                android.graphics.Bitmap bmp;
+                try (InputStream in2 = ctx.getContentResolver().openInputStream(imageUri)) {
+                    if (in2 == null) throw new Exception("cannot open image");
+                    bmp = android.graphics.BitmapFactory.decodeStream(in2, null, opts);
+                }
+                byte[] jpeg = encodePlaylistCoverJpeg(bmp);
+                if (bmp != null) bmp.recycle();
+                if (jpeg == null || jpeg.length == 0) throw new Exception("encode failed");
+                byte[] b64 = Base64.encode(jpeg, Base64.NO_WRAP);
+
+                // 2) Send PUT /v1/playlists/{id}/images with Content-Type: image/jpeg and raw Base64 payload
+                if (fixtures != null) {
+                    JSONObject f = fixtures.apply("PUT /playlists/" + playlistId + "/images");
+                    if (f != null) { invalidateUserCache(); if (cb != null) MAIN.post(() -> cb.ok(f)); return; }
+                }
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    String tok = token();
+                    if (tok == null) throw new ApiError(401, "not logged in", "");
+                    paceRequest();
+                    HttpURLConnection c = (HttpURLConnection) new URL(API + "/playlists/" + enc(playlistId) + "/images").openConnection();
+                    c.setRequestMethod("PUT");
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(20000);
+                    c.setRequestProperty("Authorization", "Bearer " + tok);
+                    c.setRequestProperty("Content-Type", "image/jpeg");
+                    c.setDoOutput(true);
+                    c.setFixedLengthStreamingMode(b64.length);
+                    try (OutputStream out = c.getOutputStream()) { out.write(b64); }
+                    int code = c.getResponseCode();
+                    if (code == 401 && attempt == 0) {
+                        prefs.edit().putLong("expires_at", 0).apply();
+                        continue;
+                    }
+                    if (code >= 200 && code < 300) {
+                        invalidateUserCache();
+                        if (cb != null) MAIN.post(() -> cb.ok(new JSONObject()));
+                        return;
+                    }
+                    String errText = "";
+                    try { errText = read(c.getErrorStream()); } catch (Exception ignored) {}
+                    throw new ApiError(code, errText.isEmpty() ? ("HTTP " + code) : errText, "");
+                }
+            } catch (ApiError ae) {
+                if (cb != null) MAIN.post(() -> cb.err(ae.code, ae.getMessage()));
+            } catch (Exception e) {
+                if (cb != null) MAIN.post(() -> cb.err(0, String.valueOf(e.getMessage())));
+            }
+        });
     }
 
     /** Adds one or more track URIs to a Spotify playlist (2026 /items first, legacy /tracks fallback). */

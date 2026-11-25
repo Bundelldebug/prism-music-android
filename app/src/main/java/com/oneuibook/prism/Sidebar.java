@@ -24,51 +24,58 @@ final class Sidebar extends FrameLayout {
     private final Icons.IconView libChevron;
     private boolean libOpen = true;
 
-    static float widthFor(int W) { return Ui.clamp(W * 0.27f, Ui.dpf(240), Ui.dpf(320)); }
+    static float widthFor(int W) { return Ui.clamp(W * 0.23f, Ui.dpf(232), Ui.dpf(276)); }
 
     Sidebar(MainActivity m) {
         super(m);
         this.m = m;
-        setBackgroundColor(Ui.gStyle ? Ui.groupedBg() : (Ui.dark ? 0xFF161618 : 0xFFF2F2F5));
+        setBackgroundColor(Ui.gStyle ? Ui.groupedBg() : (Ui.dark ? 0xFF151517 : 0xFFF3F3F7));
         setClickable(true);   // touches never fall through to the page beneath
 
         ScrollView sv = new ScrollView(m);
         sv.setVerticalScrollBarEnabled(false);
         sv.setOverScrollMode(OVER_SCROLL_NEVER);
         addView(sv, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Desktop-style hairline right divider separating sidebar from the main content stage
+        View divider = new View(m);
+        divider.setBackgroundColor(Ui.separator());
+        addView(divider, new LayoutParams(Math.max(1, Ui.dp(1)), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
+
         LinearLayout col = new LinearLayout(m);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(Ui.dp(12), Ui.statusInset + Ui.dp(12), Ui.dp(12), m.bottomPadding());
+        col.setPadding(Ui.dp(11), Ui.statusInset + Ui.dp(12), Ui.dp(11), m.bottomPadding());
         sv.addView(col, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // title row: app name + the same sidebar button that opened it (closes it)
+        // title row: app name + compact desktop sidebar toggle button
         LinearLayout top = new LinearLayout(m);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(Ui.dp(8), 0, 0, Ui.dp(14));
-        top.addView(Ui.text(m, m.getString(R.string.app_name), 21, Ui.bold, Ui.text()), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Icons.IconView close = new Icons.IconView(m, Icons.SIDEBAR, 22, Ui.text());
+        top.setPadding(Ui.dp(8), 0, Ui.dp(2), Ui.dp(12));
+        top.addView(Ui.text(m, m.getString(R.string.app_name), 19, Ui.bold, Ui.text()), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Icons.IconView close = new Icons.IconView(m, Icons.SIDEBAR, 19, Ui.text());
         android.graphics.drawable.GradientDrawable cb = Ui.round(Ui.card(), 100);
-        cb.setStroke(Ui.dp(1), Ui.dark ? 0x33FFFFFF : 0x1F000000);
+        cb.setStroke(Math.max(1, Ui.dp(0.8f)), Ui.dark ? 0x2BFFFFFF : 0x1A000000);
         close.setBackground(cb);
-        close.setElevation(Ui.dpf(2));
+        close.setElevation(Ui.dpf(1.5f));
         close.setOnClickListener(v -> m.closeSidebar());
         Ui.press(close, 0.9f);
-        top.addView(close, new LinearLayout.LayoutParams(Ui.dp(46), Ui.dp(46)));
+        top.addView(close, new LinearLayout.LayoutParams(Ui.dp(38), Ui.dp(38)));
         col.addView(top, Widgets.MW);
 
-        // search field: opens the search page
+        // search field: compact PC-style search pill
         LinearLayout search = new LinearLayout(m);
         search.setGravity(Gravity.CENTER_VERTICAL);
-        search.setPadding(Ui.dp(14), 0, Ui.dp(14), 0);
-        search.setBackground(Ui.round(Ui.dark ? 0xFF2C2C2E : 0xFFE3E3E8, 100));
-        search.addView(new Icons.IconView(m, Icons.SEARCH, 18, Ui.text2()), new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22)));
-        TextView hint = Ui.text(m, m.getString(R.string.search), 16, Ui.regular, Ui.text2());
+        search.setPadding(Ui.dp(12), 0, Ui.dp(12), 0);
+        android.graphics.drawable.GradientDrawable sbg = Ui.round(Ui.dark ? 0xFF262629 : 0xFFE6E6EC, 100);
+        sbg.setStroke(Math.max(1, Ui.dp(0.6f)), Ui.dark ? 0x1EFFFFFF : 0x10000000);
+        search.setBackground(sbg);
+        search.addView(new Icons.IconView(m, Icons.SEARCH, 16, Ui.text2()), new LinearLayout.LayoutParams(Ui.dp(20), Ui.dp(20)));
+        TextView hint = Ui.text(m, m.getString(R.string.search), 14.5f, Ui.regular, Ui.text2());
         hint.setPadding(Ui.dp(8), 0, 0, 0);
         search.addView(hint);
         search.setOnClickListener(v -> m.sidebarSearch());
         Ui.press(search, 0.97f);
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(44));
-        slp.bottomMargin = Ui.dp(16);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(38));
+        slp.bottomMargin = Ui.dp(14);
         col.addView(search, slp);
 
         // the four tabs
@@ -127,7 +134,7 @@ final class Sidebar extends FrameLayout {
     }
 
     private static LinearLayout.LayoutParams rowLp() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(46));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(40));
         lp.bottomMargin = Ui.dp(2);
         return lp;
     }
@@ -135,10 +142,10 @@ final class Sidebar extends FrameLayout {
     private LinearLayout row(int icon, String title, View.OnClickListener click) {
         LinearLayout r = new LinearLayout(getContext());
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(12), 0, Ui.dp(12), 0);
-        r.addView(new Icons.IconView(getContext(), icon, 21, Ui.ACCENT), new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26)));
-        TextView t = Ui.text(getContext(), title, 17, Ui.regular, Ui.text());
-        t.setPadding(Ui.dp(14), 0, 0, 0);
+        r.setPadding(Ui.dp(11), 0, Ui.dp(11), 0);
+        r.addView(new Icons.IconView(getContext(), icon, 19, Ui.ACCENT), new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22)));
+        TextView t = Ui.text(getContext(), title, 15, Ui.regular, Ui.text());
+        t.setPadding(Ui.dp(12), 0, 0, 0);
         r.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         r.setOnClickListener(click);
         r.setBackground(new android.graphics.drawable.RippleDrawable(

@@ -362,12 +362,20 @@ final class LocalMusic {
     private static void start(long seekTo) {
         Player.Track t = queue.get(index);
         release();
-        // bit-perfect USB output must be set before the player opens its stream
+        // bit-perfect / direct USB output must be set before the player opens its stream
         try { BitPerfect.prepare(app, Uri.parse(t.uri)); } catch (Exception ignored) {}
         mp = new MediaPlayer();
-        // 10-band equalizer rides on this player's audio session
-        try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
-        try { NpuAudio.attachLocalSession(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
+        boolean bpBypass = BitPerfect.enabled(app) && BitPerfect.isActive();
+        if (bpBypass) {
+            // Attaching AudioEffect (EQ/NPU) forces AudioFlinger out of BIT_PERFECT / direct USB into 48kHz mixer!
+            try { Eq.release(); } catch (Throwable ignored) {}
+            try { NpuAudio.release(); } catch (Throwable ignored) {}
+            try { mp.setPreferredDevice(BitPerfect.activeDevice); } catch (Throwable ignored) {}
+        } else {
+            // 10-band equalizer & Bit-Perfect Assist ride on this player's audio session
+            try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
+            try { NpuAudio.attachLocalSession(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
+        }
         mp.setWakeMode(app, android.os.PowerManager.PARTIAL_WAKE_LOCK);
         mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());

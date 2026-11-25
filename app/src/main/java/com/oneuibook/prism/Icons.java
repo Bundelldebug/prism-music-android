@@ -18,7 +18,7 @@ final class Icons {
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
             REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
-            BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55;
+            BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55, BUDS2 = 56, BUDS_LIVE = 57;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -573,6 +573,69 @@ final class Icons {
                 p.cubicTo(20.4f, 12.5f, 20.1f, 12.45f, 19.9f, 12.8f);
                 p.close();
                 c.drawPath(p, P);
+                break;
+            }
+            case BUDS2: {
+                // Samsung One UI Galaxy Buds2 / Buds2 Pro / Buds Pro / Buds FE / Buds+ / Buds silhouette:
+                // mirrored stemless rounded pebble housings tilted slightly inward + outer silicone ear-tip domes + subtle vent slot
+                stroke(1.55f);
+                // Left pebble housing
+                c.save();
+                c.rotate(-14f, 7.6f, 12.1f);
+                R.set(4.15f, 7.25f, 10.65f, 16.75f);
+                c.drawRoundRect(R, 3.25f, 3.85f, P);
+                // Subtle outer acoustic vent dash on upper pebble body
+                c.drawLine(7.65f, 10.15f, 7.65f, 11.35f, P);
+                c.restore();
+                // Left outward silicone ear-tip dome
+                p.reset();
+                p.moveTo(4.35f, 11.05f);
+                p.cubicTo(1.75f, 11.55f, 1.75f, 15.15f, 4.15f, 15.85f);
+                p.cubicTo(4.95f, 16.08f, 5.75f, 15.75f, 6.2f, 15.25f);
+                c.drawPath(p, P);
+
+                // Right pebble housing (horizontal mirror across x = 12)
+                c.save();
+                c.rotate(14f, 16.4f, 12.1f);
+                R.set(13.35f, 7.25f, 19.85f, 16.75f);
+                c.drawRoundRect(R, 3.25f, 3.85f, P);
+                c.drawLine(16.35f, 10.15f, 16.35f, 11.35f, P);
+                c.restore();
+                // Right outward silicone ear-tip dome
+                p.reset();
+                p.moveTo(19.65f, 11.05f);
+                p.cubicTo(22.25f, 11.55f, 22.25f, 15.15f, 19.85f, 15.85f);
+                p.cubicTo(19.05f, 16.08f, 18.25f, 15.75f, 17.8f, 15.25f);
+                c.drawPath(p, P);
+                break;
+            }
+            case BUDS_LIVE: {
+                // Samsung One UI Galaxy Buds Live ("Galaxy Beans") silhouette:
+                // mirrored pair of ergonomic vertical kidney-bean bodies with inward concave waist & upper mic dot
+                stroke(1.55f);
+                // Left bean
+                p.moveTo(7.15f, 5.2f);
+                p.cubicTo(4.15f, 5.2f, 2.75f, 8.15f, 3.05f, 11.9f);
+                p.cubicTo(3.35f, 15.8f, 5.25f, 18.85f, 7.95f, 18.75f);
+                p.cubicTo(10.05f, 18.65f, 10.85f, 16.55f, 9.75f, 14.55f);
+                p.cubicTo(8.95f, 13.15f, 8.95f, 10.95f, 9.85f, 9.55f);
+                p.cubicTo(10.9f, 7.85f, 9.65f, 5.2f, 7.15f, 5.2f);
+                p.close();
+                c.drawPath(p, P);
+                // Right bean (horizontal mirror across x = 12)
+                p.reset();
+                p.moveTo(16.85f, 5.2f);
+                p.cubicTo(19.85f, 5.2f, 21.25f, 8.15f, 20.95f, 11.9f);
+                p.cubicTo(20.65f, 15.8f, 18.75f, 18.85f, 16.05f, 18.75f);
+                p.cubicTo(13.95f, 18.65f, 13.15f, 16.55f, 14.25f, 14.55f);
+                p.cubicTo(15.05f, 13.15f, 15.05f, 10.95f, 14.15f, 9.55f);
+                p.cubicTo(13.1f, 7.85f, 14.35f, 5.2f, 16.85f, 5.2f);
+                p.close();
+                c.drawPath(p, P);
+                // Upper acoustic sensor / mic dot on each bean
+                fill();
+                c.drawCircle(6.55f, 8.35f, 0.9f, P);
+                c.drawCircle(17.45f, 8.35f, 0.9f, P);
                 break;
             }
             case EARBUDS: {

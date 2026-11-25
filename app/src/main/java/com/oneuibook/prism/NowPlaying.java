@@ -366,20 +366,20 @@ final class NowPlaying extends FrameLayout {
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
         if (wide) {
             bottomY = H - Ui.navInset - Ui.dpf(34);
-            colW = Math.min(W * 0.43f, H * (oneui ? 0.43f : 0.45f));
+            colW = Math.min(W * 0.42f, H * (oneui ? 0.39f : 0.45f));
             colX = Math.max(Ui.dpf(32), W * 0.045f);
-            float extraH = Ui.dpf(280);
+            float extraH = Ui.dpf(oneui ? 302 : 280);
             float block = colW + extraH;
             float y0 = Math.max(top + Ui.dpf(12), (H - block) / 2f);
             artBig.set(colX, y0, colX + colW, y0 + colW);
             artSmall.set(artBig);
             if (oneui) {
-                float devY = artBig.bottom + Ui.dpf(22);
-                titleBigY = devY + Ui.dpf(26);
+                float devY = artBig.bottom + Ui.dpf(18);
+                titleBigY = devY + Ui.dpf(22);
                 titleSmallY = titleBigY;
-                seekY = titleBigY + Ui.dpf(86);
-                timesY = seekY + Ui.dpf(20);
-                ctrlY = timesY + Ui.dpf(64);
+                seekY = titleBigY + Ui.dpf(78);
+                timesY = seekY + Ui.dpf(17);
+                ctrlY = timesY + Ui.dpf(50);
             } else {
                 titleBigY = artBig.bottom + Ui.dpf(40);
                 titleSmallY = titleBigY;
@@ -389,7 +389,7 @@ final class NowPlaying extends FrameLayout {
                 ctrlY = timesY + Ui.dpf(74);
             }
             float px = colX + colW + Math.max(Ui.dpf(28), W * 0.04f);
-            panelRect.set(px, top + Ui.dpf(24), W - Ui.dpf(28), bottomY - Ui.dpf(34));
+            panelRect.set(px, top + Ui.dpf(30), W - Ui.dpf(28), bottomY - Ui.dpf(34));
             return;
         }
         float side = Ui.dpf(28);
@@ -447,10 +447,12 @@ final class NowPlaying extends FrameLayout {
             exact(artist, titleW, Ui.dp(24));
             for (View v : new View[]{star, more, aodBtn}) exact(v, Ui.dp(38), Ui.dp(38));
             exact(seek, colWi + Ui.dp(16), Ui.dp(26));
-            exact(elapsed, Ui.dp(70), Ui.dp(16));
-            exact(remain, Ui.dp(70), Ui.dp(16));
+            int timeW = oneui ? Ui.dp(52) : Ui.dp(70);
+            exact(elapsed, timeW, Ui.dp(16));
+            exact(remain, timeW, Ui.dp(16));
             chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(200), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
-            audioBadge.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(140), colWi - Ui.dp(80)), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(22), MeasureSpec.EXACTLY));
+            int badgeMaxW = oneui ? Math.max(Ui.dp(72), colWi - timeW * 2 - Ui.dp(12)) : Math.max(Ui.dp(140), colWi - Ui.dp(80));
+            audioBadge.measure(MeasureSpec.makeMeasureSpec(badgeMaxW, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(22), MeasureSpec.EXACTLY));
             if (oneui) {
                 // round translucent buttons; scale down smoothly on narrower unfolded foldable columns so 5 buttons never collide
                 int btnS = wide ? Math.min(Ui.dp(54), Math.max(Ui.dp(40), (int) (colWi * 0.20f))) : Ui.dp(60);
@@ -460,7 +462,8 @@ final class NowPlaying extends FrameLayout {
                 exact(next, btnS, btnS);
                 // the wave needs height above the line
                 exact(seek, colWi + Ui.dp(16), Ui.dp(40));
-                chip.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(96), colWi - Ui.dp(124)), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
+                int rightBtnsW = Ui.dp(38) * (Player.local() ? 2 : 3) + Ui.dp(12);
+                chip.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(84), colWi - rightBtnsW), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
             } else {
                 int btnS = wide ? Math.min(Ui.dp(64), Math.max(Ui.dp(44), (int) (colWi * 0.22f))) : Ui.dp(72);
                 int playS = wide ? Math.min(Ui.dp(74), Math.max(Ui.dp(52), (int) (colWi * 0.26f))) : Ui.dp(84);
@@ -561,7 +564,7 @@ final class NowPlaying extends FrameLayout {
             place(artist, side, (int) titleBigY + Ui.dp(32));
             place(seek, side - Ui.dp(8), (int) seekY - seek.getMeasuredHeight() + Ui.dp(10));
             place(elapsed, side, (int) timesY);
-            place(remain, W - side - Ui.dp(70), (int) timesY);
+            place(remain, W - side - remain.getMeasuredWidth(), (int) timesY);
             place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(3));
             int cy = (int) ctrlY, mid = W / 2;
             int step = Math.min(Ui.dp(86), (W - side * 2) / 4);
@@ -610,7 +613,7 @@ final class NowPlaying extends FrameLayout {
                 place(chip, x + (cw - chip.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(2));
             }
             place(elapsed, x, (int) timesY);
-            place(remain, x + cw - Ui.dp(70), (int) timesY);
+            place(remain, x + cw - remain.getMeasuredWidth(), (int) timesY);
             if (oneui) place(audioBadge, x + (cw - audioBadge.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(3));
             else place(audioBadge, x + (cw - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(7)));
             int cy = (int) ctrlY, mid = x + cw / 2;
@@ -694,7 +697,12 @@ final class NowPlaying extends FrameLayout {
         float ty = Ui.lerp(0, titleSmallY - titleBigY, k);
         title.setPivotX(oneui && k < 0.35f ? title.getWidth() / 2f : 0); title.setPivotY(0);
         artist.setPivotX(oneui && k < 0.35f ? artist.getWidth() / 2f : 0); artist.setPivotY(0);
-        float s = Ui.lerp(1f, 0.82f, k);
+        float maxPanelScale = 0.82f;
+        if (oneui && title.getWidth() > 0 && getWidth() > 0) {
+            float availPanelW = Math.max(Ui.dpf(100), getWidth() - (artSmall.right + Ui.dpf(14)) - Ui.dpf(20));
+            maxPanelScale = Math.min(0.84f, availPanelW / (float) title.getWidth());
+        }
+        float s = Ui.lerp(1f, maxPanelScale, k);
         title.setScaleX(s); title.setScaleY(s);
         artist.setScaleX(s); artist.setScaleY(s);
         title.setTranslationX(tx); title.setTranslationY(ty);

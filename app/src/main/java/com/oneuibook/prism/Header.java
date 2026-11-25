@@ -164,7 +164,8 @@ final class Header extends View {
         if (vertical) pill.set(right - h, top, right, top + len);
         else pill.set(right - len, top, right, top + h);
         if (icons.length == 0) pill.setEmpty();
-        backRect.set(Ui.dpf(16), top + Ui.dpf(2), Ui.dpf(16) + Ui.dpf(44), top + Ui.dpf(46));
+        // Align backRect vertically dead-centre with the 46dp header pill row
+        backRect.set(Ui.dpf(16), top + Ui.dpf(1), Ui.dpf(16) + Ui.dpf(44), top + Ui.dpf(45));
     }
 
     @Override protected void onDraw(Canvas c) {
@@ -223,25 +224,33 @@ final class Header extends View {
         // small title (20sp Bold in G style, matching One UI 9.x collapsed header / sub-page bar)
         if (titleAlpha > 0.01f && title.length() > 0) {
             titlePaint.setColor(Ui.alpha(fg, titleAlpha * contentAlpha));
-            float avail = (pill.isEmpty() ? w - Ui.dpf(16) : pill.left - Ui.dpf(12)) - titleX;
-            float rowCy = vertical ? pill.top + Ui.dpf(23) : pill.centerY();
+            int rw = getRootView().getWidth() > 0 ? getRootView().getWidth() : Ui.screenW;
+            int rh = getRootView().getHeight() > 0 ? getRootView().getHeight() : Ui.screenH;
+            boolean onTablet = Dock.tabletFor(rw, rh);
+            float rightBound = pill.isEmpty() ? w - Ui.dpf(16) : pill.left - Ui.dpf(12);
+            if (onTablet) {
+                // Keep header title cleanly to the left of the centred tablet top tab pill (zero overlap!)
+                float maxTabLeft = Math.max(titleX + Ui.dpf(80), (w - Math.min(rw * 0.42f, Ui.dpf(440)) - Ui.dpf(92)) / 2f - Ui.dpf(10));
+                rightBound = Math.min(rightBound, maxTabLeft);
+            }
+            float avail = Math.max(Ui.dpf(40), rightBound - titleX);
+            float rowCy = vertical ? pill.top + Ui.dpf(23) : (pill.isEmpty() ? backRect.centerY() : pill.centerY());
             // long names get smaller before anything is cut off
-            float ts = Ui.gStyle ? 20f : 17f;
+            float ts = Ui.gStyle ? (onTablet ? 18f : 20f) : 17f;
             titlePaint.setTextSize(Ui.sp(ts));
             while (ts > 13f && titlePaint.measureText(title) > avail) { ts -= 1f; titlePaint.setTextSize(Ui.sp(ts)); }
             CharSequence t = TextUtils.ellipsize(title, titlePaint, avail, TextUtils.TruncateAt.END);
-            float baseline = pill.isEmpty() ? backRect.centerY() + titlePaint.getTextSize() * 0.36f
-                    : rowCy + titlePaint.getTextSize() * 0.36f;
+            float baseline = rowCy + titlePaint.getTextSize() * 0.36f;
             c.drawText(t, 0, t.length(), titleX, baseline - Ui.dpf(3) * (1f - titleAlpha), titlePaint);
         }
-        // pill action buttons: in G style, float subtly when scrolled and stay minimal at top like One UI 9.x
+        // pill action buttons: in G style, keep a crisp frosted pill surface even at top so icons always pop cleanly
         float k = morph.value;
         RectF from = fromPill.isEmpty() ? pointAt(pill.isEmpty() ? fromPill : pill) : fromPill;
         RectF to = pill.isEmpty() ? pointAt(fromPill) : pill;
         drawn.set(Ui.lerp(from.left, to.left, k), Ui.lerp(from.top, to.top, k), Ui.lerp(from.right, to.right, k), Ui.lerp(from.bottom, to.bottom, k));
         float pillA = pill.isEmpty() ? 1f - Ui.clamp(k, 0f, 1f) : (fromPill.isEmpty() ? Ui.clamp(k * 1.5f, 0f, 1f) : 1f);
         if (drawn.width() > 1 && pillA > 0.01f && !pillHidden) {
-            float surfaceA = Ui.gStyle ? Ui.clamp(0.18f + blurAlpha * 0.82f, 0f, 1f) : 1f;
+            float surfaceA = Ui.gStyle ? Ui.clamp(0.68f + blurAlpha * 0.32f, 0f, 1f) : 1f;
             pillGlass.shapes(drawn, Math.min(drawn.width(), drawn.height()) / 2f, null, 0, null, 0);
             pillGlass.alpha = contentAlpha * pillA * surfaceA;
             pillGlass.tint = Ui.barTint();

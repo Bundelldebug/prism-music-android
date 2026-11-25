@@ -249,7 +249,7 @@
     <string name="aod_title">Full-screen AOD</string>
     <string name="aod_open">Open full-screen AOD</string>
     <string name="aod_dim">Dim screen in AOD</string>
-    <string name="aod_hint">Double-tap or swipe up to exit</string>
+    <string name="aod_hint">Double-tap buttons to control · Double-tap background or swipe up to exit</string>
     <string name="aod_note">Freezes and gently dims the expanded player backdrop in place while subtly shifting the UI to prevent burn-in. Press power, double-tap, or swipe up to exit.</string>
     <string name="pl_create">New playlist</string>
     <string name="pl_edit">Edit playlist</string>
@@ -345,4 +345,14 @@
     <string name="app_icon_changed">App icon updated. It may take a moment to refresh on your home screen.</string>
     <string name="lyrics_namuwiki">Namuwiki real-time Korean translations</string>
     <string name="lyrics_namuwiki_note">Off by default. When enabled, fetches Korean lyric translations from public Namuwiki articles in real time when no native subtitle track is available.</string>
+    <string name="bp_ready_direct">%1$s · USB Direct ready</string>
+    <string name="bp_active_direct">USB Direct · %1$s / %2$s</string>
+    <string name="aod_auto_bright">Auto brightness in AOD</string>
+    <string name="pl_cover_pick">Choose cover image</string>
+    <string name="pl_cover_change">Change cover image</string>
+    <string name="pl_cover_hint">Square JPEG uploaded to Spotify (auto-resized under 256 KB)</string>
+    <string name="pl_cover_selected">Cover image selected</string>
+    <string name="pl_cover_updated">Playlist cover updated</string>
+    <string name="pl_cover_failed">Couldn’t upload playlist cover</string>
+    <string name="pl_cover_relogin">Cover upload requires image permission. Please reconnect Spotify in Settings.</string>
 </resources>

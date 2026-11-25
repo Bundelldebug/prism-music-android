@@ -249,7 +249,7 @@
     <string name="aod_title">フルスクリーン AOD</string>
     <string name="aod_open">フルスクリーン AOD を開く</string>
     <string name="aod_dim">AOD で画面を暗くする</string>
-    <string name="aod_hint">ダブルタップまたは上にスワイプして終了</string>
+    <string name="aod_hint">ボタンをダブルタップして操作 · 背景ダブルタップまたは上スワイプで終了</string>
     <string name="aod_note">展開したプレーヤーの背景をそのまま静止させて落ち着いて暗くし、焼き付き防止のため UI 全体を少しずつ動かします。電源ボタン・ダブルタップ・上スワイプで終了します。</string>
     <string name="pl_create">新しいプレイリスト</string>
     <string name="pl_edit">プレイリストを編集</string>
@@ -345,4 +345,14 @@
     <string name="app_icon_changed">アプリアイコンを変更しました。ホーム画面の反映まで少し時間がかかる場合があります。</string>
     <string name="lyrics_namuwiki">ナムウィキ リアルタイム韓国語訳歌詞</string>
     <string name="lyrics_namuwiki_note">既定はオフです。オンにすると翻訳字幕がない外国語歌詞に対し、ナムウィキの韓国語訳をリアルタイムで照合して表示します。</string>
+    <string name="bp_ready_direct">%1$s · USB ダイレクト出力対応</string>
+    <string name="bp_active_direct">USB ダイレクト · %1$s / %2$s</string>
+    <string name="aod_auto_bright">AOD 自動明るさ調整</string>
+    <string name="pl_cover_pick">カバー画像を選択</string>
+    <string name="pl_cover_change">カバー画像を変更</string>
+    <string name="pl_cover_hint">正方形 JPEG に自動最適化して Spotify にアップロードします</string>
+    <string name="pl_cover_selected">カバー画像を選択しました</string>
+    <string name="pl_cover_updated">プレイリストのカバーを変更しました</string>
+    <string name="pl_cover_failed">カバー画像をアップロードできませんでした</string>
+    <string name="pl_cover_relogin">カバー画像のアップロード権限が必要です。設定から Spotify に再連携してください。</string>
 </resources>

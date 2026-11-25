@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.15";
+    static final String VERSION = "9.5.16";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -683,8 +683,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     boolean isLocalSource() { return isLocalSource(this); }
 
-    // ------------------------------------------------------------------ custom album covers (device music)
+    // ------------------------------------------------------------------ custom album & playlist covers
     private String coverAlbum;
+    private java.util.function.Consumer<Uri> playlistCoverCb;
 
     void pickCover(String albumKey) {
         coverAlbum = albumKey;
@@ -692,10 +693,23 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         try { startActivityForResult(i, 77); } catch (Exception e) { Toast.makeText(this, R.string.action_failed, Toast.LENGTH_SHORT).show(); }
     }
 
+    void pickPlaylistCover(java.util.function.Consumer<Uri> cb) {
+        playlistCoverCb = cb;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+        try { startActivityForResult(i, 78); } catch (Exception e) { Toast.makeText(this, R.string.action_failed, Toast.LENGTH_SHORT).show(); }
+    }
+
     @SuppressWarnings("deprecation")
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
-        if (code != 77 || result != RESULT_OK || data == null || data.getData() == null || coverAlbum == null) return;
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        if (code == 78 && playlistCoverCb != null) {
+            java.util.function.Consumer<Uri> cb = playlistCoverCb;
+            playlistCoverCb = null;
+            cb.accept(data.getData());
+            return;
+        }
+        if (code != 77 || coverAlbum == null) return;
         String album = coverAlbum;
         Uri img = data.getData();
         Spotify.IO.execute(() -> {
@@ -946,12 +960,62 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         GlassMenu.show(this, a, e);
     }
 
-    /** Creates a new Spotify playlist via an alert dialog, then calls {@code onCreated} on success. */
+    /** Builds the clickable cover-image picker row shared by createPlaylistDialog & editPlaylistDialog. */
+    private android.widget.LinearLayout playlistCoverRow(String existingUrl, Uri[] pickedOut) {
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, Ui.dp(4), 0, Ui.dp(12));
+
+        android.widget.FrameLayout thumbBox = new android.widget.FrameLayout(this);
+        thumbBox.setBackground(Ui.round(Ui.chip(), 14));
+        thumbBox.setClipToOutline(true);
+        Img.ArtView artPrev = new Img.ArtView(this, 14);
+        artPrev.placeholderIcon = Icons.ALBUM;
+        if (existingUrl != null && !existingUrl.isEmpty()) artPrev.setUrl(existingUrl);
+        android.widget.ImageView localPrev = new android.widget.ImageView(this);
+        localPrev.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+        localPrev.setVisibility(View.GONE);
+        thumbBox.addView(artPrev, new FrameLayout.LayoutParams(Ui.dp(68), Ui.dp(68)));
+        thumbBox.addView(localPrev, new FrameLayout.LayoutParams(Ui.dp(68), Ui.dp(68)));
+        row.addView(thumbBox, new android.widget.LinearLayout.LayoutParams(Ui.dp(68), Ui.dp(68)));
+
+        android.widget.LinearLayout col = new android.widget.LinearLayout(this);
+        col.setOrientation(android.widget.LinearLayout.VERTICAL);
+        col.setPadding(Ui.dp(14), 0, 0, 0);
+        android.widget.TextView btn = Ui.text(this, getString(existingUrl != null && !existingUrl.isEmpty()
+                ? R.string.pl_cover_change : R.string.pl_cover_pick), 14, Ui.semibold, Ui.ACCENT);
+        btn.setPadding(Ui.dp(14), Ui.dp(8), Ui.dp(14), Ui.dp(8));
+        btn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.12f), 100));
+        col.addView(btn, new android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        android.widget.TextView sub = Ui.text(this, getString(R.string.pl_cover_hint), 12, Ui.regular, Ui.text2());
+        sub.setSingleLine(false);
+        android.widget.LinearLayout.LayoutParams sl = new android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sl.topMargin = Ui.dp(5);
+        col.addView(sub, sl);
+        row.addView(col, new android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        View.OnClickListener pickClick = v -> pickPlaylistCover(uri -> {
+            pickedOut[0] = uri;
+            localPrev.setImageURI(uri);
+            localPrev.setVisibility(View.VISIBLE);
+            sub.setText(getString(R.string.pl_cover_selected));
+            btn.setText(getString(R.string.pl_cover_change));
+        });
+        thumbBox.setOnClickListener(pickClick);
+        btn.setOnClickListener(pickClick);
+        return row;
+    }
+
+    /** Creates a new Spotify playlist (with optional custom cover image upload), then calls {@code onCreated}. */
     void createPlaylistDialog(Runnable onCreated) {
         if (!Spotify.loggedIn()) { Player.toast(R.string.login_needed); return; }
+        final Uri[] pickedCover = {null};
         android.widget.LinearLayout form = new android.widget.LinearLayout(this);
         form.setOrientation(android.widget.LinearLayout.VERTICAL);
         form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        form.addView(playlistCoverRow(null, pickedCover), Widgets.MW);
         android.widget.EditText nameIn = new android.widget.EditText(this);
         nameIn.setHint(R.string.pl_name_hint);
         nameIn.setSingleLine(true);
@@ -973,8 +1037,22 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                     String desc = descIn.getText().toString().trim();
                     Spotify.createPlaylist(name, desc, pub.isChecked(), new Spotify.Cb() {
                         @Override public void ok(JSONObject o) {
-                            Player.toast(R.string.pl_created);
-                            if (onCreated != null) onCreated.run();
+                            String newId = o == null ? "" : o.optString("id", "");
+                            if (pickedCover[0] != null && !newId.isEmpty()) {
+                                Spotify.uploadPlaylistImage(MainActivity.this, newId, pickedCover[0], new Spotify.Cb() {
+                                    @Override public void ok(JSONObject r) {
+                                        Player.toast(R.string.pl_created);
+                                        if (onCreated != null) onCreated.run();
+                                    }
+                                    @Override public void err(int c, String m) {
+                                        Player.toast(c == 401 || c == 403 ? R.string.pl_cover_relogin : R.string.pl_cover_failed);
+                                        if (onCreated != null) onCreated.run();
+                                    }
+                                });
+                            } else {
+                                Player.toast(R.string.pl_created);
+                                if (onCreated != null) onCreated.run();
+                            }
                         }
                         @Override public void err(int c, String m) {
                             Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);
@@ -983,12 +1061,14 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                 }).show();
     }
 
-    /** Edits an existing Spotify playlist's name and description. */
-    void editPlaylistDialog(String playlistId, String curName, String curDesc, java.util.function.BiConsumer<String, String> onUpdated) {
+    /** Edits an existing Spotify playlist's name, description, and optional custom cover image. */
+    void editPlaylistDialog(String playlistId, String curName, String curDesc, String curImage, java.util.function.BiConsumer<String, String> onUpdated) {
         if (!Spotify.loggedIn()) { Player.toast(R.string.login_needed); return; }
+        final Uri[] pickedCover = {null};
         android.widget.LinearLayout form = new android.widget.LinearLayout(this);
         form.setOrientation(android.widget.LinearLayout.VERTICAL);
         form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        form.addView(playlistCoverRow(curImage, pickedCover), Widgets.MW);
         android.widget.EditText nameIn = new android.widget.EditText(this);
         nameIn.setHint(R.string.pl_name_hint);
         nameIn.setSingleLine(true);
@@ -1008,8 +1088,21 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                     String desc = descIn.getText().toString().trim();
                     Spotify.editPlaylist(playlistId, name, desc, new Spotify.Cb() {
                         @Override public void ok(JSONObject o) {
-                            Player.toast(R.string.pl_updated);
-                            if (onUpdated != null) onUpdated.accept(name, desc);
+                            if (pickedCover[0] != null) {
+                                Spotify.uploadPlaylistImage(MainActivity.this, playlistId, pickedCover[0], new Spotify.Cb() {
+                                    @Override public void ok(JSONObject r) {
+                                        Player.toast(R.string.pl_updated);
+                                        if (onUpdated != null) onUpdated.accept(name, desc);
+                                    }
+                                    @Override public void err(int c, String m) {
+                                        Player.toast(c == 401 || c == 403 ? R.string.pl_cover_relogin : R.string.pl_cover_failed);
+                                        if (onUpdated != null) onUpdated.accept(name, desc);
+                                    }
+                                });
+                            } else {
+                                Player.toast(R.string.pl_updated);
+                                if (onUpdated != null) onUpdated.accept(name, desc);
+                            }
                         }
                         @Override public void err(int c, String m) {
                             Player.toast(c == 403 ? R.string.pl_relogin_scope : R.string.action_failed);

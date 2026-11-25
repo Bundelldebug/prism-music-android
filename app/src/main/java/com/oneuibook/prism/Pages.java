@@ -2080,20 +2080,44 @@ final class Pages {
             } else if ("playlist".equals(item.type)) {
                 e.add(new GlassMenu.Entry(main.getString(R.string.pl_edit), Icons.APPEARANCE, false, () -> {
                     String curDesc = item.raw == null ? "" : item.raw.optString("description", "");
-                    main.editPlaylistDialog(item.id, item.title, curDesc, (newName, newDesc) -> {
+                    main.editPlaylistDialog(item.id, item.title, curDesc, item.image, (newName, newDesc) -> {
                         item.title = newName;
                         title = newName;
                         if (item.raw != null) {
                             try { item.raw.put("name", newName).put("description", newDesc); } catch (Exception ignored) {}
                         }
                         main.syncHeader();
-                        rebuild();
+                        refreshPlaylistHeader();
                     });
                 }));
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_cover_change), Icons.ALBUM, false, () ->
+                        main.pickPlaylistCover(uri -> Spotify.uploadPlaylistImage(main, item.id, uri, new Spotify.Cb() {
+                            @Override public void ok(JSONObject r) {
+                                Player.toast(R.string.pl_cover_updated);
+                                refreshPlaylistHeader();
+                            }
+                            @Override public void err(int c, String m) {
+                                Player.toast(c == 401 || c == 403 ? R.string.pl_cover_relogin : R.string.pl_cover_failed);
+                            }
+                        }))));
             }
             e.add(new GlassMenu.Entry(main.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(item.uri)));
             e.add(new GlassMenu.Entry(main.getString(R.string.shuffle), Icons.SHUFFLE, false, () -> playAt(0, true)));
             GlassMenu.show(main, anchor, e);
+        }
+
+        private void refreshPlaylistHeader() {
+            Spotify.get("/playlists/" + item.id, new Spotify.Cb() {
+                @Override public void ok(JSONObject o) {
+                    if (o != null) {
+                        item.raw = o;
+                        String newImg = Spotify.image(o, 640);
+                        if (newImg != null && !newImg.isEmpty()) item.image = newImg;
+                    }
+                    rebuild();
+                }
+                @Override public void err(int c, String m) { rebuild(); }
+            });
         }
     }
 

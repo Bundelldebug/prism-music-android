@@ -82,10 +82,10 @@ final class Widgets {
     }
 
     static TextView section(Context c, String title) {
-        TextView t = Ui.text(c, title, 21.5f, Ui.bold, Ui.text());
-        t.setLetterSpacing(-0.02f);
+        TextView t = Ui.text(c, title, 20.5f, Ui.bold, Ui.text());
+        t.setLetterSpacing(-0.022f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(Ui.dp(18), Ui.dp(26), Ui.dp(18), Ui.dp(12));
+        lp.setMargins(Ui.dp(18), Ui.dp(24), Ui.dp(18), Ui.dp(11));
         t.setLayoutParams(lp);
         return t;
     }
@@ -126,19 +126,30 @@ final class Widgets {
 
     /** Never taller than ~40% of the screen: on short-and-wide screens (unfolded foldable, landscape tablet) the rows below stay in view. */
     static int posterW() {
-        float ratioW = Ui.cover() ? 0.54f : 0.585f;
-        return Math.min((int) (Ui.screenH * 0.40f / 1.33f), Math.min(Ui.dp(300), (int) (Math.min(Ui.screenW, Ui.dp(700)) * ratioW)));
+        boolean desktopTablet = Ui.screenW / Ui.density >= 840f;
+        float ratioW = Ui.cover() ? 0.54f : (desktopTablet ? 0.34f : 0.585f);
+        int capW = desktopTablet ? Ui.dp(248) : Ui.dp(300);
+        return Math.min((int) (Ui.screenH * 0.40f / 1.33f), Math.min(capW, (int) (Math.min(Ui.screenW, Ui.dp(760)) * ratioW)));
     }
     static int squareDp() {
-        float ratioW = Ui.cover() ? 0.36f : 0.38f;
-        return (int) (Math.min(Ui.screenH * 0.25f, Math.min(Ui.dp(184), Math.min(Ui.screenW, Ui.dp(700)) * ratioW)) / Ui.density);
+        boolean desktopTablet = Ui.screenW / Ui.density >= 840f;
+        float ratioW = Ui.cover() ? 0.36f : (desktopTablet ? 0.22f : 0.38f);
+        int capDp = desktopTablet ? 156 : 184;
+        return (int) (Math.min(Ui.screenH * 0.25f, Math.min(Ui.dp(capDp), Math.min(Ui.screenW, Ui.dp(760)) * ratioW)) / Ui.density);
     }
 
-    /** Tall poster card with dark bottom gradient and caption (home "greeting" row). */
+    /** Tall poster card with cinematic multi-stop bottom gradient, translucent date pill, and crisp rim (home "greeting" row). */
     static View posterCard(Context c, Item it, View.OnClickListener click) {
-        int w = posterW(), h = (int) (w * (Ui.cover() ? 1.08f : 1.33f));
-        float rad = Ui.gStyle ? 26f : 20f;
+        int w = posterW(), h = (int) (w * (Ui.cover() ? 1.08f : 1.30f));
+        float rad = Ui.gStyle ? 24f : 20f;
         FrameLayout f = new FrameLayout(c);
+        f.setElevation(Ui.dpf(Ui.dark ? 2f : 4f));
+        f.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(rad));
+            }
+        });
+        f.setClipToOutline(true);
         Img.ArtView art = new Img.ArtView(c, rad);
         art.setUrl(it.raw != null ? Spotify.image(it.raw, 640) : it.image);
         f.addView(art, new FrameLayout.LayoutParams(w, h));
@@ -148,13 +159,14 @@ final class Widgets {
             final RectF r = new RectF();
             @Override protected void onDraw(Canvas cv) {
                 float radPx = Ui.dpf(rad);
-                p.setShader(new LinearGradient(0, getHeight() * 0.48f, 0, getHeight(), new int[]{0x00000000, 0x33000000, 0x9E000000},
-                        new float[]{0f, 0.48f, 1f}, Shader.TileMode.CLAMP));
+                p.setShader(new LinearGradient(0, getHeight() * 0.38f, 0, getHeight(),
+                        new int[]{0x00000000, 0x1A000000, 0x70000000, 0xBF000000},
+                        new float[]{0f, 0.36f, 0.72f, 1f}, Shader.TileMode.CLAMP));
                 r.set(0, 0, getWidth(), getHeight());
                 cv.drawRoundRect(r, radPx, radPx, p);
                 rim.setStyle(Paint.Style.STROKE);
                 rim.setStrokeWidth(Math.max(1f, Ui.dpf(0.85f)));
-                rim.setColor(0x28FFFFFF);
+                rim.setColor(0x2EFFFFFF);
                 float half = rim.getStrokeWidth() * 0.5f;
                 r.inset(half, half);
                 cv.drawRoundRect(r, Math.max(0f, radPx - half), Math.max(0f, radPx - half), rim);
@@ -163,22 +175,27 @@ final class Widgets {
         f.addView(shade, new FrameLayout.LayoutParams(w, h));
         LinearLayout txt = new LinearLayout(c);
         txt.setOrientation(LinearLayout.VERTICAL);
-        txt.setPadding(Ui.dp(16), 0, Ui.dp(14), Ui.dp(16));
-        LinearLayout capRow = new LinearLayout(c);
-        capRow.setGravity(Gravity.CENTER_VERTICAL);
-        Icons.IconView ic = new Icons.IconView(c, it.icon != 0 ? it.icon : Icons.CLOCK, 12, 0xCCFFFFFF);
-        capRow.addView(ic, new LinearLayout.LayoutParams(Ui.dp(14), Ui.dp(14)));
-        TextView cap = Ui.text(c, it.caption == null ? "" : it.caption, 13, Ui.medium, 0xCCFFFFFF);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clp.leftMargin = Ui.dp(4);
-        capRow.addView(cap, clp);
-        txt.addView(capRow);
-        TextView t = Ui.text(c, it.title, 16.5f, Ui.bold, 0xFFFFFFFF);
-        t.setLetterSpacing(-0.015f);
+        txt.setPadding(Ui.dp(15), 0, Ui.dp(14), Ui.dp(15));
+        if (it.caption != null && !it.caption.isEmpty()) {
+            LinearLayout capRow = new LinearLayout(c);
+            capRow.setGravity(Gravity.CENTER_VERTICAL);
+            capRow.setPadding(Ui.dp(8), Ui.dp(3.5f), Ui.dp(9), Ui.dp(3.5f));
+            capRow.setBackground(Ui.round(0x40000000, 100));
+            Icons.IconView ic = new Icons.IconView(c, it.icon != 0 ? it.icon : Icons.CLOCK, 11, 0xE6FFFFFF);
+            capRow.addView(ic, new LinearLayout.LayoutParams(Ui.dp(13), Ui.dp(13)));
+            TextView cap = Ui.text(c, it.caption, 11.5f, Ui.semibold, 0xEBFFFFFF);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.leftMargin = Ui.dp(4);
+            capRow.addView(cap, clp);
+            txt.addView(capRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        TextView t = Ui.text(c, it.title, 17f, Ui.bold, 0xFFFFFFFF);
+        t.setLetterSpacing(-0.018f);
         t.setSingleLine(false);
         t.setMaxLines(2);
+        t.setLineSpacing(0f, 1.08f);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.topMargin = Ui.dp(4);
+        tlp.topMargin = Ui.dp(6);
         txt.addView(t, tlp);
         f.addView(txt, new FrameLayout.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         f.setLayoutParams(new LinearLayout.LayoutParams(w, h));
@@ -187,18 +204,28 @@ final class Widgets {
         return f;
     }
 
-    /** Square artwork with title / subtitle / count (playlist rails). */
+    /** Square artwork with subtle framed border & refined title / subtitle / count (playlist & album rails). */
     static View squareCard(Context c, Item it, int sizeDp, View.OnClickListener click) {
         int s = Ui.dp(sizeDp);
+        float rad = Ui.gStyle ? 20f : 13f;
         LinearLayout v = new LinearLayout(c);
         v.setOrientation(LinearLayout.VERTICAL);
-        Img.ArtView art = new Img.ArtView(c, Ui.gStyle ? 22 : 12);
+        FrameLayout frame = new FrameLayout(c);
+        Img.ArtView art = new Img.ArtView(c, rad);
         art.circle = "artist".equals(it.type);
         if (art.circle) art.placeholderIcon = Icons.ARTIST;
         art.setUrl(it.image);
-        v.addView(art, new LinearLayout.LayoutParams(s, s));
-        TextView t = Ui.text(c, it.title, 13f, Ui.semibold, Ui.text());
-        t.setLetterSpacing(-0.01f);
+        frame.addView(art, new FrameLayout.LayoutParams(s, s));
+        if (!art.circle) {
+            View border = new View(c);
+            GradientDrawable bd = Ui.round(0x00000000, rad);
+            bd.setStroke(Math.max(1, Ui.dp(0.7f)), Ui.dark ? 0x1EFFFFFF : 0x12000000);
+            border.setBackground(bd);
+            frame.addView(border, new FrameLayout.LayoutParams(s, s));
+        }
+        v.addView(frame, new LinearLayout.LayoutParams(s, s));
+        TextView t = Ui.text(c, it.title, 13.5f, Ui.semibold, Ui.text());
+        t.setLetterSpacing(-0.012f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = Ui.dp(8);
         if (art.circle) t.setGravity(Gravity.CENTER);
@@ -243,26 +270,32 @@ final class Widgets {
         }
     }
 
-    /** Colourful gradient tile with a centred label (charts row). */
+    /** Colourful gradient tile with subtle corner watermark & refined label (charts row). */
     static View gradientTile(Context c, String label, String caption, int c1, int c2, int sizeDp, View.OnClickListener click) {
         int s = Ui.dp(sizeDp);
+        float rad = Ui.gStyle ? 20f : 13f;
         LinearLayout v = new LinearLayout(c);
         v.setOrientation(LinearLayout.VERTICAL);
         FrameLayout tile = new FrameLayout(c);
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
-        g.setCornerRadius(Ui.dpf(Ui.gStyle ? 22 : 12));
-        g.setStroke(Math.max(1, Ui.dp(0.8f)), 0x26FFFFFF);
+        g.setCornerRadius(Ui.dpf(rad));
+        g.setStroke(Math.max(1, Ui.dp(0.8f)), 0x2EFFFFFF);
         tile.setBackground(g);
+        tile.setClipToOutline(true);
+        Icons.IconView wm = new Icons.IconView(c, Icons.WAVE, 44, 0x24FFFFFF);
+        FrameLayout.LayoutParams wlp = new FrameLayout.LayoutParams(Ui.dp(52), Ui.dp(52), Gravity.TOP | Gravity.END);
+        wlp.setMargins(0, Ui.dp(6), Ui.dp(6), 0);
+        tile.addView(wm, wlp);
         TextView t = Ui.text(c, label, 16, Ui.heavy, 0xFFFFFFFF);
         t.setLetterSpacing(-0.015f);
         t.setSingleLine(false);
         t.setMaxLines(2);
-        t.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        flp.leftMargin = flp.rightMargin = Ui.dp(8);
+        t.setGravity(Gravity.START | Gravity.BOTTOM);
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        flp.setMargins(Ui.dp(12), 0, Ui.dp(12), Ui.dp(12));
         tile.addView(t, flp);
         v.addView(tile, new LinearLayout.LayoutParams(s, s));
-        TextView cap = Ui.text(c, caption, 12.5f, Ui.semibold, Ui.text());
+        TextView cap = Ui.text(c, caption, 13f, Ui.semibold, Ui.text());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = Ui.dp(8);
         v.addView(cap, lp);
@@ -305,20 +338,34 @@ final class Widgets {
         return r;
     }
 
-    /** Paged columns of three track rows ("made for you" list). */
+    /** Card-framed columns of three track rows ("made for you" list; denser PC-like columns on wide tablets). */
     static void trackColumns(LinearLayout parent, List<Item> items, java.util.function.Consumer<Integer> play) {
-        LinearLayout row = rail(parent, 0);
-        row.setPadding(0, 0, Ui.dp(16), 0);
-        // song columns: most of a phone's width, but capped so unfolded screens show several side by side
-        int colW = Math.min((int) (Ui.screenW * 0.88f), Ui.dp(460));
+        LinearLayout row = rail(parent, 10);
+        boolean desktopTablet = Ui.screenW / Ui.density >= 840f;
+        int colW = desktopTablet ? Ui.dp(344) : Math.min((int) (Ui.screenW * 0.85f), Ui.dp(420));
         LinearLayout col = null;
         for (int i = 0; i < items.size(); i++) {
             if (i % 3 == 0) {
                 col = new LinearLayout(parent.getContext());
                 col.setOrientation(LinearLayout.VERTICAL);
-                row.addView(col, new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT));
+                col.setPadding(0, Ui.dp(4), 0, Ui.dp(4));
+                GradientDrawable bg = Ui.round(Ui.card(), Ui.gStyle ? 22f : 15f);
+                bg.setStroke(Math.max(1, Ui.dp(0.6f)), Ui.dark ? 0x18FFFFFF : 0x0E000000);
+                col.setBackground(bg);
+                col.setClipToOutline(true);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.rightMargin = Ui.dp(10);
+                row.addView(col, clp);
             }
             final int idx = i;
+            if (i % 3 != 0) {
+                View sep = new View(parent.getContext());
+                sep.setBackgroundColor(Ui.separator());
+                LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(0.5f)));
+                sl.leftMargin = Ui.dp(74);
+                sl.rightMargin = Ui.dp(14);
+                col.addView(sep, sl);
+            }
             col.addView(trackRow(parent.getContext(), items.get(i), 0, v -> play.accept(idx), null), MW);
         }
     }

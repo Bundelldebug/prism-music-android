@@ -249,7 +249,7 @@
     <string name="aod_title">전체화면 AOD</string>
     <string name="aod_open">전체화면 AOD 열기</string>
     <string name="aod_dim">AOD 저휘도 모드</string>
-    <string name="aod_hint">두 번 탭하거나 위로 스와이프하여 종료</string>
+    <string name="aod_hint">버튼 두 번 탭으로 조작 · 빈 화면 두 번 탭 또는 위로 스와이프하여 종료</string>
     <string name="aod_note">펼쳐진 미디어 플레이어 배경이 그 자리에서 멈춘 채 차분하게 어두워지며, 번인 방지를 위해 UI 전체가 티 나지 않게 미세 이동해요. 전원 버튼·두 번 탭·위로 스와이프로 바로 종료돼요.</string>
     <string name="pl_create">새 플레이리스트</string>
     <string name="pl_edit">플레이리스트 편집</string>
@@ -345,4 +345,14 @@
     <string name="app_icon_changed">앱 아이콘을 바꿨어요. 홈 화면에 반영되기까지 잠시 걸릴 수 있어요.</string>
     <string name="lyrics_namuwiki">나무위키 실시간 번역 가사</string>
     <string name="lyrics_namuwiki_note">기본은 꺼짐입니다. 켜면 외국어 가사에 번역 자막이 없을 때 나무위키 문서의 한국어 번역을 실시간으로 매칭해 표시해요(접근이 제한된 경우 건너뜁니다).</string>
+    <string name="bp_ready_direct">%1$s · USB 다이렉트 출력 가능</string>
+    <string name="bp_active_direct">USB 다이렉트 · %1$s / %2$s</string>
+    <string name="aod_auto_bright">AOD 자동 밝기 사용</string>
+    <string name="pl_cover_pick">커버 이미지 선택</string>
+    <string name="pl_cover_change">커버 이미지 변경</string>
+    <string name="pl_cover_hint">정사각형 JPEG로 자동 최적화해 Spotify에 업로드해요</string>
+    <string name="pl_cover_selected">커버 이미지가 선택됐어요</string>
+    <string name="pl_cover_updated">플레이리스트 커버를 바꿨어요</string>
+    <string name="pl_cover_failed">커버 이미지를 업로드하지 못했어요</string>
+    <string name="pl_cover_relogin">커버 업로드 권한이 필요해요. 설정에서 Spotify를 다시 연결해 주세요.</string>
 </resources>
