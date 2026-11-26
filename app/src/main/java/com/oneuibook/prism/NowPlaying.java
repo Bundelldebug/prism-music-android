@@ -83,6 +83,17 @@ final class NowPlaying extends FrameLayout {
     private final GlassChip chip;
     private final GlassChip actionPill;
     private final AudioBadge audioBadge;
+    // Music Video ("Switch to video") floating pill + rounded video viewport over artBig
+    private final LinearLayout mvPill;
+    private final Icons.IconView mvIcon;
+    private final TextView mvLabel;
+    private final FrameLayout mvBox;
+    private final android.view.TextureView mvTexture;
+    private android.media.MediaPlayer mvPlayer;
+    private android.view.Surface mvSurface;
+    private boolean mvActive, mvLoading;
+    private String mvResolvedUrl, mvForTrackId;
+    private long lastMvSyncMs;
     private int hiResTier;
     private float masterBgP;
     private ValueAnimator masterBgAnim;
@@ -180,6 +191,50 @@ final class NowPlaying extends FrameLayout {
         audioBadge.setVisibility(GONE);
         content.addView(audioBadge);
 
+        // Music Video viewport (clipped to album art frame) + floating "Switch to video" pill
+        mvBox = new FrameLayout(m);
+        mvBox.setBackgroundColor(0xFF0A0A0C);
+        mvBox.setVisibility(GONE);
+        mvBox.setClipToOutline(true);
+        mvBox.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(oneui && !wide ? 30 : 12));
+            }
+        });
+        mvTexture = new android.view.TextureView(m);
+        mvTexture.setSurfaceTextureListener(new android.view.TextureView.SurfaceTextureListener() {
+            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
+                mvSurface = new android.view.Surface(st);
+                if (mvPlayer != null) { try { mvPlayer.setSurface(mvSurface); } catch (Throwable ignored) {} }
+            }
+            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {}
+            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
+                if (mvPlayer != null) { try { mvPlayer.setSurface(null); } catch (Throwable ignored) {} }
+                if (mvSurface != null) { mvSurface.release(); mvSurface = null; }
+                return true;
+            }
+            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
+        });
+        mvBox.addView(mvTexture, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        content.addView(mvBox);
+
+        mvPill = new LinearLayout(m);
+        mvPill.setOrientation(LinearLayout.HORIZONTAL);
+        mvPill.setGravity(Gravity.CENTER);
+        mvPill.setPadding(Ui.dp(13), Ui.dp(6), Ui.dp(14), Ui.dp(6));
+        android.graphics.drawable.GradientDrawable mvBg = Ui.round(0x521C1C1E, 100);
+        mvBg.setStroke(Math.max(1, Ui.dp(0.8f)), 0x38FFFFFF);
+        mvPill.setBackground(mvBg);
+        mvIcon = new Icons.IconView(m, Icons.VIDEO, 15, 0xF5FFFFFF);
+        mvPill.addView(mvIcon, new LinearLayout.LayoutParams(Ui.dp(17), Ui.dp(17)));
+        mvLabel = Ui.text(m, m.getString(R.string.switch_to_video), 12.5f, Ui.semibold, 0xF5FFFFFF);
+        LinearLayout.LayoutParams mvl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mvl.leftMargin = Ui.dp(6);
+        mvPill.addView(mvLabel, mvl);
+        mvPill.setOnClickListener(v -> toggleMusicVideo());
+        Ui.press(mvPill, 0.94f);
+        content.addView(mvPill);
+
         prev = icon(Icons.PREV, 40, 0xFFFFFFFF, v -> Player.prev());
         play = icon(Icons.PAUSE, 46, 0xFFFFFFFF, v -> Player.toggle());
         next = icon(Icons.NEXT, 40, 0xFFFFFFFF, v -> Player.next());
@@ -250,13 +305,13 @@ final class NowPlaying extends FrameLayout {
         return v;
     }
 
-    /** Springy pop-bounce feedback on tapping any bottom action button. */
+    /** Smooth critically-damped (non-bouncy) tactile Liquid Glass press feedback on bottom pill icons. */
     private void popButton(View v) {
         if (v == null || !isAttachedToWindow()) return;
         v.animate().cancel();
-        v.setScaleX(0.84f);
-        v.setScaleY(0.84f);
-        v.animate().scaleX(1f).scaleY(1f).setDuration(340).setInterpolator(Ui.ONEUI_POPUP_ENTER).start();
+        v.setScaleX(0.92f);
+        v.setScaleY(0.92f);
+        v.animate().scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(Ui.EMPHASIZED).start();
     }
 
     boolean isOpen() { return getVisibility() == VISIBLE && (openAnim == null || !openAnim.isRunning() || openTarget > 0.5f); }
@@ -324,6 +379,7 @@ final class NowPlaying extends FrameLayout {
 
     void close() {
         if (getVisibility() != VISIBLE) return;
+        if (mvPlayer != null) { try { if (mvPlayer.isPlaying()) mvPlayer.pause(); } catch (Throwable ignored) {} }
         miniR.set(dock.miniRect());
         miniArt.set(dock.miniArtRect());
         Player.setFast(false);
@@ -453,6 +509,8 @@ final class NowPlaying extends FrameLayout {
             chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(200), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
             int badgeMaxW = oneui ? Math.max(Ui.dp(72), colWi - timeW * 2 - Ui.dp(12)) : Math.max(Ui.dp(140), colWi - Ui.dp(80));
             audioBadge.measure(MeasureSpec.makeMeasureSpec(badgeMaxW, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(22), MeasureSpec.EXACTLY));
+            mvPill.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(120), colWi), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
+            exact(mvBox, Math.max(1, (int) artBig.width()), Math.max(1, (int) artBig.height()));
             if (oneui) {
                 // round translucent buttons; scale down smoothly on narrower unfolded foldable columns so 5 buttons never collide
                 int btnS = wide ? Math.min(Ui.dp(54), Math.max(Ui.dp(40), (int) (colWi * 0.20f))) : Ui.dp(60);
@@ -476,8 +534,8 @@ final class NowPlaying extends FrameLayout {
             int smallBtn = wide ? Math.min(Ui.dp(44), Math.max(Ui.dp(36), (int) (colWi * 0.16f))) : Ui.dp(oneui ? 44 : 42);
             for (View v : new View[]{lyricsBtn, shuffleBtn, repeatBtn, queueBtn}) exact(v, smallBtn, smallBtn);
             if (!oneui) {
-                int pillH = Ui.dp(54);
-                int pillW = wide ? (smallBtn * 2 + Ui.dp(24)) : Math.min(Ui.dp(320), W - Ui.dp(44));
+                int pillH = Ui.dp(50);
+                int pillW = wide ? (smallBtn * 2 + Ui.dp(28)) : Math.min(Ui.dp(324), W - Ui.dp(40));
                 exact(actionPill, pillW, pillH);
             } else {
                 exact(actionPill, 0, 0);
@@ -506,8 +564,17 @@ final class NowPlaying extends FrameLayout {
             place(elapsed, side, (int) timesY);
             place(remain, W - side - Ui.dp(70), (int) timesY);
             place(chip, (W - chip.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(2));
-            // A style: place codec / Hi-Res badge cleanly centred right below the album cover (zero overlap)
-            place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(9)));
+            // A style: place Switch-to-Video pill cleanly centred between cover and title (matching reference layout),
+            // and place Hi-Res badge neatly below the cover when visible without overlapping mvPill.
+            place(mvBox, (int) artBig.left, (int) artBig.top);
+            boolean hasBadge = audioBadge.hasText() && audioBadge.getVisibility() == VISIBLE;
+            int mvTop = hasBadge ? (int) (artBig.bottom + Ui.dpf(10)) : (int) ((artBig.bottom + titleBigY - mvPill.getMeasuredHeight()) * 0.5f);
+            place(mvPill, (W - mvPill.getMeasuredWidth()) / 2, Math.max((int) artBig.bottom + Ui.dp(6), Math.min(mvTop, (int) titleBigY - mvPill.getMeasuredHeight() - Ui.dp(6))));
+            if (hasBadge) {
+                place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.top + Ui.dpf(10)));
+            } else {
+                place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(9)));
+            }
             int cy = (int) ctrlY;
             int gap = Math.min(Ui.dp(108), W / 4);
             place(prev, W / 2 - gap - Ui.dp(36), cy - Ui.dp(36));
@@ -546,6 +613,8 @@ final class NowPlaying extends FrameLayout {
         private void layoutOneUi(int W) {
             int side = Ui.dp(28);
             place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 7 : 14));
+            place(mvBox, (int) artBig.left, (int) artBig.top);
+            place(mvPill, (W - mvPill.getMeasuredWidth()) / 2, (int) (artBig.bottom - mvPill.getMeasuredHeight() - Ui.dp(12)));
             // output-device pill on left, AOD / like / more on right
             int devY = (int) (artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26));
             place(chip, side, devY - chip.getMeasuredHeight() / 2);
@@ -588,6 +657,8 @@ final class NowPlaying extends FrameLayout {
         private void layoutWide(int W) {
             int x = (int) colX, cw = (int) colW;
             place(handle, (int) (panelRect.centerX() - handle.getMeasuredWidth() / 2f), Ui.statusInset + Ui.dp(14));
+            place(mvBox, (int) artBig.left, (int) artBig.top);
+            place(mvPill, (int) (artBig.centerX() - mvPill.getMeasuredWidth() / 2f), (int) (artBig.bottom - mvPill.getMeasuredHeight() - Ui.dp(10)));
             if (oneui) {
                 int devY = (int) (artBig.bottom + Ui.dpf(22));
                 place(chip, x, devY - chip.getMeasuredHeight() / 2);
@@ -669,12 +740,25 @@ final class NowPlaying extends FrameLayout {
             }
             if (!GlassMenu.isSourceHidden(chip)) { chip.setAlpha(1f); chip.setVisibility(VISIBLE); }
             if (!GlassMenu.isSourceHidden(aodBtn)) aodBtn.setAlpha(1f);
+            mvPill.setAlpha(1f);
+            mvPill.setVisibility(VISIBLE);
+            mvBox.setAlpha(mvActive ? 1f : 0f);
+            mvBox.setVisibility(mvActive ? VISIBLE : GONE);
             panelHost.setTranslationY(0);
             panelHost.setAlpha(panel == 0 ? 0f : 1f);
             invalidate();
             return;
         }
         float k = mode;
+        float mvA = 1f - Ui.clamp(k * 1.8f, 0f, 1f);
+        mvPill.setAlpha(mvA);
+        mvPill.setVisibility(mvA < 0.02f ? INVISIBLE : VISIBLE);
+        if (mvActive) {
+            mvBox.setAlpha(mvA);
+            mvBox.setVisibility(mvA < 0.02f ? GONE : VISIBLE);
+        } else {
+            mvBox.setVisibility(GONE);
+        }
         // G style: the device/action row under the cover steps aside while lyrics / the queue are open
         float rowA = oneui ? 1f - Ui.clamp(k * 1.6f, 0f, 1f) : 1f;
         if (!GlassMenu.isSourceHidden(chip)) {
@@ -1101,10 +1185,125 @@ final class NowPlaying extends FrameLayout {
         prismPaint.setBlendMode(null);
     }
 
+    // ---------------------------------------------------------------- Music Video ("Switch to video")
+    private void toggleMusicVideo() {
+        if (mvLoading) return;
+        if (mvActive) {
+            stopMusicVideo();
+            return;
+        }
+        Player.Track t = Player.track;
+        if (t == null) return;
+        if (mvResolvedUrl != null && t.id != null && t.id.equals(mvForTrackId)) {
+            startMusicVideo(mvResolvedUrl);
+            return;
+        }
+        mvLoading = true;
+        mvLabel.setText(R.string.mv_loading);
+        content.requestLayout();
+        final String tid = t.id;
+        YouTubeMusic.findMusicVideo(t, ms -> {
+            mvLoading = false;
+            if (Player.track == null || (tid != null && !tid.equals(Player.track.id))) {
+                updateMvPillUi();
+                return;
+            }
+            if (ms == null || ms.videoUrl == null || ms.videoUrl.isEmpty()) {
+                updateMvPillUi();
+                Player.toast(R.string.mv_unavailable);
+                return;
+            }
+            mvForTrackId = tid;
+            mvResolvedUrl = ms.videoUrl;
+            startMusicVideo(ms.videoUrl);
+        });
+    }
+
+    private void startMusicVideo(String url) {
+        releaseMvPlayer();
+        mvActive = true;
+        updateMvPillUi();
+        mvBox.setVisibility(VISIBLE);
+        mvBox.setAlpha(0f);
+        mvBox.animate().alpha(1f).setDuration(260).setInterpolator(Ui.EMPHASIZED).start();
+        mvPlayer = new android.media.MediaPlayer();
+        mvPlayer.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE).build());
+        mvPlayer.setVolume(0f, 0f); // Audio stays owned by Spotify / Local / YTM audio engine for zero double-audio!
+        if (mvSurface != null) {
+            try { mvPlayer.setSurface(mvSurface); } catch (Throwable ignored) {}
+        }
+        try {
+            mvPlayer.setDataSource(url);
+            mvPlayer.setOnPreparedListener(mp -> {
+                if (!mvActive) { releaseMvPlayer(); return; }
+                long pos = Player.position();
+                if (pos > 0 && mp.getDuration() > pos) { try { mp.seekTo((int) pos); } catch (Throwable ignored) {} }
+                if (Player.playing && getVisibility() == VISIBLE) { try { mp.start(); } catch (Throwable ignored) {} }
+            });
+            mvPlayer.setOnErrorListener((mp, w, e) -> { stopMusicVideo(); return true; });
+            mvPlayer.prepareAsync();
+        } catch (Exception e) {
+            stopMusicVideo();
+        }
+    }
+
+    private void stopMusicVideo() {
+        mvActive = false;
+        mvLoading = false;
+        releaseMvPlayer();
+        mvBox.setVisibility(GONE);
+        updateMvPillUi();
+    }
+
+    private void releaseMvPlayer() {
+        if (mvPlayer != null) {
+            try { mvPlayer.setSurface(null); } catch (Throwable ignored) {}
+            try { mvPlayer.release(); } catch (Throwable ignored) {}
+            mvPlayer = null;
+        }
+    }
+
+    private void updateMvPillUi() {
+        mvIcon.set(mvActive ? Icons.ALBUM : Icons.VIDEO, false);
+        mvLabel.setText(mvActive ? R.string.switch_to_audio : R.string.switch_to_video);
+        android.graphics.drawable.GradientDrawable bg = Ui.round(mvActive ? Ui.alpha(Ui.ACCENT, 0.72f) : 0x521C1C1E, 100);
+        bg.setStroke(Math.max(1, Ui.dp(0.8f)), mvActive ? 0x66FFFFFF : 0x38FFFFFF);
+        mvPill.setBackground(bg);
+        content.requestLayout();
+    }
+
+    private void syncMusicVideo(long pos) {
+        if (!mvActive || mvPlayer == null) return;
+        try {
+            if (Player.playing && getVisibility() == VISIBLE && !mvPlayer.isPlaying()) mvPlayer.start();
+            else if ((!Player.playing || getVisibility() != VISIBLE) && mvPlayer.isPlaying()) mvPlayer.pause();
+            long now = SystemClock.uptimeMillis();
+            if (now - lastMvSyncMs > 1600L) {
+                lastMvSyncMs = now;
+                int vPos = mvPlayer.getCurrentPosition();
+                int vDur = mvPlayer.getDuration();
+                if (vDur > 0 && pos < vDur && Math.abs(vPos - pos) > 750L) {
+                    mvPlayer.seekTo((int) pos);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     // ---------------------------------------------------------------- state
     private void onTrack() {
         Player.Track t = Player.track;
         if (t == null) return;
+        if (mvForTrackId == null || !mvForTrackId.equals(t.id)) {
+            boolean wasMv = mvActive;
+            stopMusicVideo();
+            mvResolvedUrl = null;
+            mvForTrackId = t.id;
+            if ((wasMv || Settings.pref(getContext(), "auto_mv", false)) && getVisibility() == VISIBLE) {
+                postDelayed(this::toggleMusicVideo, 280);
+            }
+        }
         if (Settings.pref(getContext(), "lyrics", true)) Lyrics.prefetch(t);
         crossfade(title, t.name);
         crossfade(artist, t.artist);
@@ -1320,6 +1519,7 @@ final class NowPlaying extends FrameLayout {
             }
         }
         if (panel == 1) lyrics.setPosition(pos);
+        syncMusicVideo(pos);
         if ((SystemClock.uptimeMillis() / 100) % 20 == 0) refreshAudioBadge();
     }
 
@@ -1517,11 +1717,64 @@ final class NowPlaying extends FrameLayout {
             toggles.addView(b, bl);
         }
         queueList.addView(toggles, Widgets.MW);
+
+        // Currently playing track card (highlighted selected UI) + direct jump to current playlist/album!
+        Player.Track cur = Player.track;
+        if (cur != null) {
+            LinearLayout curHead = new LinearLayout(c);
+            curHead.setOrientation(LinearLayout.HORIZONTAL);
+            curHead.setGravity(Gravity.CENTER_VERTICAL);
+            curHead.setPadding(Ui.dp(24), Ui.dp(2), Ui.dp(24), Ui.dp(8));
+            TextView npLbl = Ui.text(c, c.getString(R.string.now_playing_label), 13.5f, Ui.bold, 0xCCFFFFFF);
+            curHead.addView(npLbl, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            // Direct button: jump straight into the currently playing playlist / album!
+            boolean isPl = (Player.playingSourceUri != null && Player.playingSourceUri.contains(":playlist:"))
+                    || (Player.contextUri != null && Player.contextUri.contains(":playlist:"));
+            LinearLayout goBtn = new LinearLayout(c);
+            goBtn.setOrientation(LinearLayout.HORIZONTAL);
+            goBtn.setGravity(Gravity.CENTER_VERTICAL);
+            goBtn.setPadding(Ui.dp(11), Ui.dp(5), Ui.dp(12), Ui.dp(5));
+            android.graphics.drawable.GradientDrawable gbg = Ui.round(0x33FFFFFF, 100);
+            gbg.setStroke(Math.max(1, Ui.dp(0.75f)), 0x44FFFFFF);
+            goBtn.setBackground(gbg);
+            goBtn.addView(new Icons.IconView(c, Icons.PLAYLIST_GO, 14, 0xFFFFFFFF), new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
+            TextView goTxt = Ui.text(c, c.getString(isPl ? R.string.go_current_playlist : R.string.go_current_album), 12f, Ui.semibold, 0xFFFFFFFF);
+            LinearLayout.LayoutParams gtl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            gtl.leftMargin = Ui.dp(5);
+            goBtn.addView(goTxt, gtl);
+            goBtn.setOnClickListener(v -> main.openCurrentPlayingContext());
+            Ui.press(goBtn, 0.94f);
+            curHead.addView(goBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            queueList.addView(curHead, Widgets.MW);
+
+            // Highlighted selected card for the currently playing track
+            LinearLayout curCard = new LinearLayout(c);
+            curCard.setGravity(Gravity.CENTER_VERTICAL);
+            curCard.setPadding(Ui.dp(12), Ui.dp(10), Ui.dp(14), Ui.dp(10));
+            android.graphics.drawable.GradientDrawable curBg = Ui.round(Ui.alpha(Ui.ACCENT, 0.28f), 16);
+            curBg.setStroke(Math.max(1, Ui.dp(1.2f)), Ui.alpha(Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f), 0.75f));
+            curCard.setBackground(curBg);
+            Img.ArtView curArt = new Img.ArtView(c, 8);
+            curArt.setUrl(cur.artSmall != null ? cur.artSmall : cur.art);
+            curCard.addView(curArt, new LinearLayout.LayoutParams(Ui.dp(46), Ui.dp(46)));
+            LinearLayout curCol = new LinearLayout(c);
+            curCol.setOrientation(LinearLayout.VERTICAL);
+            curCol.setPadding(Ui.dp(12), 0, Ui.dp(8), 0);
+            curCol.addView(Ui.text(c, cur.name, 15.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
+            curCol.addView(Ui.text(c, cur.artist, 13f, Ui.medium, 0xCCFFFFFF), Widgets.MW);
+            curCard.addView(curCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            curCard.addView(new Icons.IconView(c, Icons.WAVE, 18, Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.55f)), new LinearLayout.LayoutParams(Ui.dp(24), Ui.dp(24)));
+            curCard.setOnClickListener(v -> main.openCurrentPlayingContext());
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.setMargins(Ui.dp(20), 0, Ui.dp(20), Ui.dp(14));
+            queueList.addView(curCard, clp);
+        }
+
         LinearLayout head = new LinearLayout(c);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setPadding(Ui.dp(28), 0, Ui.dp(20), Ui.dp(8));
-        head.addView(Ui.text(c, c.getString(R.string.continue_playing), 17, Ui.bold, 0xFFFFFFFF), Widgets.MW);
-        Player.Track cur = Player.track;
+        head.addView(Ui.text(c, c.getString(R.string.continue_playing), 16.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
         if (cur != null && cur.album != null && !cur.album.isEmpty())
             head.addView(Ui.text(c, cur.album, 13, Ui.regular, 0x99FFFFFF), Widgets.MW);
         queueList.addView(head, Widgets.MW);
@@ -1533,6 +1786,18 @@ final class NowPlaying extends FrameLayout {
                 final int at = i;
                 View row = queueRow(c, tr.name, tr.artist, tr.artSmall);
                 tapToPlay(row, () -> { LocalMusic.jumpUpNext(at); Spotify.MAIN.postDelayed(this::loadQueue, 120); });
+                queueList.addView(row, Widgets.MW);
+            }
+            return;
+        }
+        if (Player.ytm()) {
+            List<Player.Track> up = YouTubeMusic.upNext();
+            if (up.isEmpty()) queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+            for (int i = 0; i < up.size(); i++) {
+                Player.Track tr = up.get(i);
+                final int at = i;
+                View row = queueRow(c, tr.name, tr.artist, tr.artSmall);
+                tapToPlay(row, () -> { YouTubeMusic.jumpUpNext(at); Spotify.MAIN.postDelayed(this::loadQueue, 120); });
                 queueList.addView(row, Widgets.MW);
             }
             return;
@@ -1583,7 +1848,10 @@ final class NowPlaying extends FrameLayout {
             }
             @Override public void err(int code, String m) {
                 queueList.removeView(sp);
-                queueList.addView(Ui.text(c, c.getString(R.string.load_failed), 14, Ui.regular, 0x99FFFFFF));
+                TextView et = Ui.text(c, c.getString(R.string.load_failed), 14, Ui.regular, 0x99FFFFFF);
+                et.setSingleLine(false);
+                et.setPadding(Ui.dp(28), Ui.dp(8), Ui.dp(28), Ui.dp(8));
+                queueList.addView(et, Widgets.MW);
             }
         });
     }
@@ -1766,6 +2034,7 @@ final class NowPlaying extends FrameLayout {
 
     @Override protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        releaseMvPlayer();
         if (volumeRxRegistered) {
             try { getContext().unregisterReceiver(volumeRx); } catch (Throwable ignored) {}
             volumeRxRegistered = false;
@@ -1870,21 +2139,26 @@ final class NowPlaying extends FrameLayout {
      */
     private final class GlassChip extends LinearLayout {
         private final Glass.Surface pill = new Glass.Surface();
+        private final Glass.Surface lens = new Glass.Surface();
         private final RectF bounds = new RectF();
         private final RectF capRect = new RectF();
+        private final RectF lensRect = new RectF();
         private final Paint capFill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint capStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final android.graphics.RenderNode localBg = new android.graphics.RenderNode("chip-bg");
         boolean isActionPill;
 
-        // Spring animations for actionPill: 4 per-button active springs + touch-bloom pulse spring
+        // Critically-damped (dampingRatio = 1.0f -> ZERO bounce!) fluid Liquid Glass springs
         private final Ui.Spring[] actSprings = {
-                new Ui.Spring(520f, 0.72f, 0.002f),
-                new Ui.Spring(520f, 0.72f, 0.002f),
-                new Ui.Spring(520f, 0.72f, 0.002f),
-                new Ui.Spring(520f, 0.72f, 0.002f)
+                new Ui.Spring(420f, 1.0f, 0.002f),
+                new Ui.Spring(420f, 1.0f, 0.002f),
+                new Ui.Spring(420f, 1.0f, 0.002f),
+                new Ui.Spring(420f, 1.0f, 0.002f)
         };
-        private final Ui.Spring pulse = new Ui.Spring(560f, 0.65f, 0.002f);
+        private final Ui.Spring pulse = new Ui.Spring(360f, 1.0f, 0.002f);
+        private final Ui.Spring glideX = new Ui.Spring(340f, 1.0f, 0.35f);
+        private final Ui.Spring glideVis = new Ui.Spring(380f, 1.0f, 0.002f);
+        private boolean glideInit;
         private float pulseX, pulseY;
 
         GlassChip(Context c) {
@@ -1894,22 +2168,30 @@ final class NowPlaying extends FrameLayout {
             pill.edgeDp = 14f;
             pill.rim = 0.28f;
             pill.shadowAlpha = 0.14f;
+            lens.blur = false;
+            lens.refractDp = 14f;
+            lens.edgeDp = 16f;
+            lens.outerDp = 5f;
+            lens.outerRefractDp = 8f;
+            lens.chroma = 0.45f;
+            lens.rim = 0.56f;
+            lens.shadowAlpha = 0.08f;
             capStroke.setStyle(Paint.Style.STROKE);
-            capStroke.setStrokeWidth(Math.max(1f, Ui.dpf(0.8f)));
-            Runnable inv = () -> {
-                float p = pulse.value;
-                setScaleX(1f + 0.026f * p);
-                setScaleY(1f + 0.026f * p);
-                invalidate();
-            };
+            capStroke.setStrokeWidth(Math.max(1f, Ui.dpf(0.85f)));
             for (Ui.Spring s : actSprings) s.onUpdate = this::invalidate;
-            pulse.onUpdate = inv;
+            pulse.onUpdate = this::invalidate;
+            glideX.onUpdate = this::invalidate;
+            glideVis.onUpdate = this::invalidate;
         }
 
         void pulseAt(View btn) {
             if (btn == null) return;
-            pulseX = (btn.getLeft() + btn.getRight()) * 0.5f - getLeft();
+            float cx = (btn.getLeft() + btn.getRight()) * 0.5f - getLeft();
+            pulseX = cx;
             pulseY = getHeight() * 0.5f;
+            if (!glideInit) { glideInit = true; glideX.snap(cx); }
+            else glideX.to(cx);
+            glideVis.to(1f);
             pulse.snap(1f);
             pulse.to(0f);
             invalidate();
@@ -1922,6 +2204,10 @@ final class NowPlaying extends FrameLayout {
                 if (animate && isAttachedToWindow()) actSprings[i].to(t);
                 else actSprings[i].snap(t);
             }
+            if (!b0 && !b1 && !b2 && !b3) {
+                if (animate && isAttachedToWindow()) glideVis.to(0f);
+                else glideVis.snap(0f);
+            }
             invalidate();
         }
 
@@ -1930,20 +2216,20 @@ final class NowPlaying extends FrameLayout {
             if (w <= 0 || h <= 0) return;
             bounds.set(0, 0, w, h);
             float r = h / 2f;
-            float p = isActionPill ? Ui.clamp(pulse.value, 0f, 1.2f) : 0f;
+            float p = isActionPill ? Ui.clamp(pulse.value, 0f, 1f) : 0f;
             pill.shapes(bounds, r, null, 0, null, 0);
             // Exact same background color & transparency as the output device pill!
             pill.tint = Ui.barTint();
             pill.blurDp = Ui.barBlur();
             pill.strokeColor = Ui.glassStroke();
-            pill.refractDp = 12f + 6f * p;
-            pill.edgeDp = 14f + 3f * p;
-            pill.rim = 0.28f + 0.22f * p;
-            pill.shadowAlpha = 0.14f + 0.04f * p;
+            pill.refractDp = 12f + 4.5f * p;
+            pill.edgeDp = 14f + 2.5f * p;
+            pill.rim = 0.28f + 0.20f * p;
+            pill.shadowAlpha = 0.14f + 0.03f * p;
             pill.pressX = pulseX;
             pill.pressY = pulseY;
-            pill.pressR = Ui.dpf(44);
-            pill.pressAmt = 0.72f * p;
+            pill.pressR = Ui.dpf(48);
+            pill.pressAmt = 0.65f * p;
             pill.alpha = 1f;
             if (bgRecorded && c.isHardwareAccelerated()) {
                 float pad = Ui.dpf(pill.blurDp) * 2f + Ui.dpf(pill.refractDp);
@@ -1962,25 +2248,59 @@ final class NowPlaying extends FrameLayout {
             }
             pill.draw(c, this, null);
 
-            // Draw spring-animated active circular/capsule highlights inside actionPill
+            // Snug horizontal Liquid Glass active capsules (matches reference screenshot: compact pill ~60dp × 36dp, inset ~7dp)
             if (isActionPill) {
                 View[] btns = {lyricsBtn, shuffleBtn, repeatBtn, queueBtn};
-                int baseFill = Ui.dark ? 0x3CFFFFFF : 0x26000000;
-                int baseRim = Ui.dark ? 0x52FFFFFF : 0x30000000;
+                boolean lightBar = !Ui.dark && Ui.glassT < 0.72f;
+                int baseFill = lightBar ? 0x22000000 : 0x42FFFFFF;
+                int baseRim = lightBar ? 0x2E000000 : 0x62FFFFFF;
+                float insetY = Ui.dpf(6.5f);
+                float capH = Math.max(Ui.dpf(32), h - insetY * 2f);
+                float capBaseW = Math.min(Ui.dpf(60), w * 0.22f);
+                float capR = capH * 0.5f;
+
+                // 1) Active per-option snug horizontal capsules (critically damped, zero bounce)
                 for (int i = 0; i < 4; i++) {
-                    float k = actSprings[i].value;
+                    float k = Ui.clamp(actSprings[i].value, 0f, 1f);
                     if (k <= 0.01f) continue;
                     View b = btns[i];
                     if (b == null || b.getVisibility() != VISIBLE) continue;
                     float cx = (b.getLeft() + b.getRight()) * 0.5f - getLeft();
                     float cy = h * 0.5f;
-                    float rad = (b.getWidth() * 0.5f) * Ui.lerp(0.55f, 1.0f, k);
-                    float a = Ui.clamp(k, 0f, 1f);
-                    capRect.set(cx - rad, cy - rad, cx + rad, cy + rad);
-                    capFill.setColor(Ui.alpha(baseFill, ((baseFill >>> 24) / 255f) * a));
-                    c.drawRoundRect(capRect, rad, rad, capFill);
-                    capStroke.setColor(Ui.alpha(baseRim, ((baseRim >>> 24) / 255f) * a));
-                    c.drawRoundRect(capRect, rad, rad, capStroke);
+                    float cw = capBaseW * Ui.lerp(0.84f, 1.0f, k);
+                    float ch = capH * Ui.lerp(0.86f, 1.0f, k);
+                    float cr = ch * 0.5f;
+                    capRect.set(cx - cw * 0.5f, cy - ch * 0.5f, cx + cw * 0.5f, cy + ch * 0.5f);
+                    capFill.setColor(Ui.alpha(baseFill, ((baseFill >>> 24) / 255f) * k));
+                    c.drawRoundRect(capRect, cr, cr, capFill);
+                    capStroke.setColor(Ui.alpha(baseRim, ((baseRim >>> 24) / 255f) * k));
+                    c.drawRoundRect(capRect, cr, cr, capStroke);
+                }
+
+                // 2) Fluid refracting Liquid Glass droplet lens that smoothly glides & stretches along velocity (no bounce!)
+                float gVis = Ui.clamp(Math.max(p, Math.min(1f, Math.abs(glideX.velocity) / 480f)) * glideVis.value, 0f, 1f);
+                if (glideInit && gVis > 0.01f) {
+                    float stretch = Ui.clamp(Math.abs(glideX.velocity) * 0.014f, 0f, Ui.dpf(14));
+                    float lw = capBaseW + stretch + Ui.dpf(6) * p;
+                    float lh = capH - stretch * 0.16f + Ui.dpf(2) * p;
+                    float cy = h * 0.5f;
+                    lensRect.set(glideX.value - lw * 0.5f, cy - lh * 0.5f, glideX.value + lw * 0.5f, cy + lh * 0.5f);
+                    if (bgRecorded && c.isHardwareAccelerated() && Glass.shadersOk && Ui.glass) {
+                        lens.shapes(lensRect, lh * 0.5f, null, 0, null, 0);
+                        lens.alpha = gVis;
+                        lens.tint = Ui.dark ? 0x26FFFFFF : 0x20FFFFFF;
+                        lens.mag = 1f + 0.08f * gVis;
+                        lens.magX = glideX.value;
+                        lens.magY = cy;
+                        lens.strokeColor = Ui.alpha(0x66FFFFFF, gVis);
+                        lens.extra = localBg;
+                        lens.draw(c, this, null);
+                    } else {
+                        capFill.setColor(Ui.alpha(0x38FFFFFF, 0.35f * gVis));
+                        c.drawRoundRect(lensRect, lh * 0.5f, lh * 0.5f, capFill);
+                        capStroke.setColor(Ui.alpha(0x78FFFFFF, 0.6f * gVis));
+                        c.drawRoundRect(lensRect, lh * 0.5f, lh * 0.5f, capStroke);
+                    }
                 }
             }
         }
@@ -2401,8 +2721,20 @@ final class NowPlaying extends FrameLayout {
                         tp.setColor(0xE6FFFFFF);
                         l.draw(c);
                     } else if (i == current) {
-                        c.scale(1.03f, 1.03f, 0f, l.getHeight() * 0.5f);
-                        drawFillingLine(c, l, lineProgress(res.lines.get(i), i, pos));
+                        Lyrics.Line curLine = res.lines.get(i);
+                        boolean inInterlude = (i + 1 < res.lines.size())
+                                && curLine.endTime > curLine.time
+                                && pos > curLine.endTime + 150L
+                                && (res.lines.get(i + 1).time - curLine.endTime) >= 1800L;
+                        if (inInterlude) {
+                            // Vocal line already finished on tempo; settle to soft past tint while showing interlude dots below!
+                            tp.setShader(null);
+                            tp.setColor(0x78FFFFFF);
+                            l.draw(c);
+                        } else {
+                            c.scale(1.03f, 1.03f, 0f, l.getHeight() * 0.5f);
+                            drawFillingLine(c, l, lineProgress(curLine, i, pos));
+                        }
                     } else {
                         tp.setShader(null);
                         tp.setColor(i < current ? 0x45FFFFFF : 0x5CFFFFFF);
@@ -2416,6 +2748,26 @@ final class NowPlaying extends FrameLayout {
                     c.restore();
                 }
                 y += bh + gap;
+                // Animated 3-dot instrumental interlude indicator (• • •) between sung line and next line
+                if (res.synced && i == current && i + 1 < res.lines.size()) {
+                    Lyrics.Line curLine = res.lines.get(i);
+                    long nextTime = res.lines.get(i + 1).time;
+                    long gapLen = nextTime - curLine.endTime;
+                    if (curLine.endTime > curLine.time && pos >= curLine.endTime && pos < nextTime && gapLen >= 1800L) {
+                        float interP = Ui.clamp((pos - curLine.endTime) / (float) gapLen, 0f, 1f);
+                        float dotY = y - gap * 0.45f;
+                        double tSec = SystemClock.uptimeMillis() / 1000.0;
+                        tp.setShader(null);
+                        for (int d = 0; d < 3; d++) {
+                            float seg = Ui.clamp((interP * 3f) - d, 0f, 1f);
+                            float breathe = 0.85f + 0.15f * (float) Math.sin(tSec * 3.2 - d * 0.9);
+                            float rad = Ui.dpf(3.6f + 1.6f * seg) * breathe;
+                            int alpha = Math.round(Ui.lerp(72f, 240f, seg));
+                            tp.setColor((alpha << 24) | 0xFFFFFF);
+                            c.drawCircle(Ui.dpf(34 + d * 15), dotY, rad, tp);
+                        }
+                    }
+                }
             }
             fade.setShader(new LinearGradient(0, 0, 0, getHeight(), new int[]{0, 0xFF000000, 0xFF000000, 0},
                     new float[]{0f, 0.08f, 0.85f, 1f}, Shader.TileMode.CLAMP));

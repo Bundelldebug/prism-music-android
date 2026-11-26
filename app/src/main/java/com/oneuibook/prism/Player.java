@@ -98,11 +98,15 @@ final class Player {
     static void notifyAll0() { for (Runnable r : new ArrayList<>(listeners)) r.run(); }
 
     static boolean local() { return LocalMusic.isLocal(track); }
+    static boolean ytm() { return YouTubeMusic.isYtm(track); }
+    /** Tracks the active playlist/album URI & display title so Queue can jump straight back to it. */
+    static String playingSourceUri, playingSourceTitle;
 
     private static long lastRefresh;
 
     static void refresh() {
         if (local()) { LocalMusic.sync(); return; }
+        if (ytm()) { YouTubeMusic.sync(); return; }
         if (!Spotify.loggedIn() || Spotify.isRateLimited()) return;
         final long requested = SystemClock.elapsedRealtime();
         // Throttle /me/player polls so rapid UI events never burn through 2026 Dev Mode rolling rate limits
@@ -170,6 +174,7 @@ final class Player {
 
     static void toggle() {
         if (local()) { LocalMusic.toggle(); return; }
+        if (ytm()) { YouTubeMusic.toggle(); return; }
         if (track == null && !hasDevice) { toast(R.string.nothing_playing); return; }
         progress = position();
         stamp = SystemClock.elapsedRealtime();
@@ -182,6 +187,7 @@ final class Player {
 
     static void next() {
         if (local()) { LocalMusic.next(); return; }
+        if (ytm()) { YouTubeMusic.next(); return; }
         if (SpotifyWeb.active()) {
             SpotifyWeb.switchTrack(SpotifyWeb::nextTrack);
             progress = 0; stamp = SystemClock.elapsedRealtime(); optimistic();
@@ -193,6 +199,7 @@ final class Player {
 
     static void prev() {
         if (local()) { LocalMusic.prev(); return; }
+        if (ytm()) { YouTubeMusic.prev(); return; }
         if (position() > 3000) { seek(0); return; }
         if (SpotifyWeb.active()) {
             SpotifyWeb.switchTrack(SpotifyWeb::prevTrack);
@@ -205,6 +212,7 @@ final class Player {
 
     static void seek(long ms) {
         if (local()) { LocalMusic.seek(ms); return; }
+        if (ytm()) { YouTubeMusic.seek(ms); return; }
         progress = ms;
         stamp = SystemClock.elapsedRealtime();
         optimistic();
@@ -216,6 +224,7 @@ final class Player {
         shuffle = !shuffle;
         optimistic();
         if (local()) { LocalMusic.setShuffle(shuffle); return; }
+        if (ytm()) { YouTubeMusic.setShuffle(shuffle); return; }
         command("PUT", "/me/player/shuffle?state=" + shuffle, null, null);
     }
 
@@ -223,7 +232,7 @@ final class Player {
         repeat = "off".equals(repeat) ? "context" : ("context".equals(repeat) ? "track" : "off");
         Spotify.prefs.edit().putString("repeat", repeat).apply();
         optimistic();
-        if (local()) return;
+        if (local() || ytm()) return;
         command("PUT", "/me/player/repeat?state=" + repeat, null, null);
     }
 
@@ -291,9 +300,9 @@ final class Player {
     // ---- what the sound actually comes out of ----
     private static boolean outputWatch;
 
-    /** True when this phone itself produces the audio (an on-device song, or Spotify on Prism's in-app player). */
+    /** True when this phone itself produces the audio (an on-device song, YouTube Music, or Spotify on Prism's in-app player). */
     static boolean onThisPhone() {
-        return local() || (SpotifyWeb.ready() && SpotifyWeb.deviceId.equals(deviceId));
+        return local() || ytm() || (SpotifyWeb.ready() && SpotifyWeb.deviceId.equals(deviceId));
     }
 
     /**
@@ -384,8 +393,13 @@ final class Player {
 
     private static void startPlay(JSONObject body, Track preview, String openUri, String fallbackBody) {
         final int seq = ++playSeq;
-        final boolean wasPlaying = playing && !local();
+        final boolean wasPlaying = playing && !local() && !ytm();
         LocalMusic.stopForOther();
+        YouTubeMusic.stopForOther();
+        if (body != null && body.has("context_uri")) {
+            playingSourceUri = body.optString("context_uri", null);
+            contextUri = playingSourceUri;
+        }
         boolean changed = false;
         if (preview != null) {
             changed = track == null || !preview.id.equals(track.id);

@@ -107,11 +107,13 @@ final class Sidebar extends FrameLayout {
     void buildLibrary() {
         libBox.removeAllViews();
         if (m.isLocalSource()) {
+            libBox.addView(row(Icons.RECAP, m.getString(R.string.recap_local), v -> m.push(new Pages.RecapPage(m, true))), rowLp());
             libBox.addView(row(Icons.NOTE, m.getString(R.string.all_songs), v -> m.openLibrarySection("all")), rowLp());
             libBox.addView(row(Icons.ALBUM, m.getString(R.string.lib_albums), v -> m.openLibrarySection("lalbums")), rowLp());
             libBox.addView(row(Icons.ARTIST, m.getString(R.string.lib_artists), v -> m.openLibrarySection("lartists")), rowLp());
             return;
         }
+        libBox.addView(row(Icons.RECAP, m.getString(R.string.recap_spotify), v -> m.push(new Pages.RecapPage(m, false))), rowLp());
         libBox.addView(row(Icons.HEART, m.getString(R.string.lib_liked), v -> m.openLibrarySection("liked")), rowLp());
         libBox.addView(row(Icons.QUEUE, m.getString(R.string.lib_playlists), v -> m.openLibrarySection("playlists")), rowLp());
         libBox.addView(row(Icons.ALBUM, m.getString(R.string.lib_albums), v -> m.openLibrarySection("albums")), rowLp());

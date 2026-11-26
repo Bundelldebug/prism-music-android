@@ -396,19 +396,25 @@ final class NpuAudio {
         boolean tube = "tube".equals(hm);
         float airMul = crystal ? 1.32f : (tube ? 0.65f : 1.0f);
         float warmAdd = tube ? (2.6f * str) : (crystal ? -1.1f * str : 0f);
+        // Oversampling filter voicing (Sharp / Slow / Minimum Phase) & headphone crossfeed low-mid compensation
+        String flt = BitPerfect.filter(c);
+        float flt16 = "slow".equals(flt) ? -0.9f : ("min".equals(flt) ? 0.45f : 0f);
+        float flt20 = "slow".equals(flt) ? -1.8f : ("min".equals(flt) ? 0.35f : 0.4f);
+        float xfeedWarm = BitPerfect.crossfeed(c) ? 0.65f : 0f;
+        float ditherAir = "ns".equals(BitPerfect.dither(c)) ? 0.45f : 0f;
         return new float[]{
                 clampDb(6.8f * basK + (tube ? 1.0f * str : 0f)),     // 45 Hz sub-bass
-                clampDb(5.2f * basK + warmAdd * 0.4f),                // 90 Hz punch bass
-                clampDb(1.8f * basK + warmAdd),                       // 180 Hz warmth
+                clampDb(5.2f * basK + warmAdd * 0.4f + xfeedWarm),    // 90 Hz punch bass
+                clampDb(1.8f * basK + warmAdd + xfeedWarm * 0.8f),    // 180 Hz warmth
                 clampDb(-1.4f * str + warmAdd * 0.7f),                // 360 Hz mud cut / tube body
                 clampDb(-0.6f * str + warmAdd * 0.35f),               // 700 Hz clean low-mid
                 clampDb(1.8f * vocK),                                 // 1.4 kHz vocal body
                 clampDb(4.8f * vocK),                                 // 2.8 kHz vocal presence
                 clampDb(5.4f * vocK + (crystal ? 0.8f * str : 0f)),   // 4.8 kHz clarity
                 clampDb(5.2f * airK * airMul),                        // 8 kHz brilliance
-                clampDb(6.8f * airK * airMul),                        // 12 kHz air
-                clampDb(7.8f * airK * airMul),                        // 16 kHz ultra-air
-                clampDb(6.2f * airK * airMul)                         // 20 kHz harmonic sheen
+                clampDb(6.8f * airK * airMul + ditherAir),            // 12 kHz air
+                clampDb(7.8f * airK * airMul + flt16 + ditherAir),    // 16 kHz ultra-air
+                clampDb(6.2f * airK * airMul + flt20)                 // 20 kHz harmonic sheen
         };
     }
 

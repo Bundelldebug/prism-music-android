@@ -24,10 +24,32 @@ final class BitPerfect {
     private BitPerfect() {}
 
     static final String PREF = "bit_perfect";
+    static final String PREF_OUTPUT_MODE = "bp_output_mode"; // auto | direct | fixed | float
+    static final String PREF_SAMPLE_RATE = "bp_sample_rate"; // 0 (auto) | 44100 | 48000 | 96000 | 192000 | 384000
+    static final String PREF_BUFFER_MS = "bp_buffer_ms";     // 20 | 45 | 90
+    static final String PREF_DITHER = "bp_dither";           // off | tpdf | ns
+    static final String PREF_FILTER = "bp_filter";           // sharp | slow | min
+    static final String PREF_REPLAYGAIN = "bp_replaygain";
+    static final String PREF_CROSSFEED = "bp_crossfeed";
+    static final String PREF_MONO = "bp_mono";
+    static final String PREF_BALANCE = "bp_balance";         // -100..100 (0 = center)
+
+    static final String[] OUTPUT_MODES = {"auto", "direct", "fixed", "float"};
+    static final int[] OUTPUT_MODE_LABELS = {R.string.bpa_mode_auto, R.string.bpa_mode_direct, R.string.bpa_mode_fixed, R.string.bpa_mode_float};
+    static final int[] SAMPLE_RATES = {0, 44100, 48000, 96000, 192000, 384000};
+    static final int[] BUFFER_MS_OPTS = {20, 45, 90};
+    static final int[] BUFFER_LABELS = {R.string.bpa_buf_low, R.string.bpa_buf_std, R.string.bpa_buf_safe};
+    static final String[] DITHERS = {"off", "tpdf", "ns"};
+    static final int[] DITHER_LABELS = {R.string.bpa_dither_off, R.string.bpa_dither_tpdf, R.string.bpa_dither_ns};
+    static final String[] FILTERS = {"sharp", "slow", "min"};
+    static final int[] FILTER_LABELS = {R.string.bpa_filter_sharp, R.string.bpa_filter_slow, R.string.bpa_filter_min};
+
     /** Last outcome, for the settings row. */
     static String state = "";
     /** Active USB stream format when running on a USB DAC (0 when inactive). */
     static int activeRate, activeBits;
+    /** Source track format (0 when unknown). */
+    static int sourceRate, sourceBits;
     /** True when Android accepted MIXER_BEHAVIOR_BIT_PERFECT; false when running in Direct Hi-Res USB fallback. */
     static boolean activeBitPerfect;
     /** The USB output device selected for the active playback session (passed to MediaPlayer.setPreferredDevice). */
@@ -36,6 +58,45 @@ final class BitPerfect {
     static boolean supportedOs() { return Build.VERSION.SDK_INT >= 34; }
 
     static boolean enabled(Context c) { return Settings.pref(c, PREF, false); }
+    static String outputMode(Context c) { return MainActivity.prefs(c).getString(PREF_OUTPUT_MODE, "auto"); }
+    static int targetSampleRate(Context c) { return MainActivity.prefs(c).getInt(PREF_SAMPLE_RATE, 0); }
+    static int bufferMs(Context c) { return MainActivity.prefs(c).getInt(PREF_BUFFER_MS, 45); }
+    static String dither(Context c) { return MainActivity.prefs(c).getString(PREF_DITHER, "tpdf"); }
+    static String filter(Context c) { return MainActivity.prefs(c).getString(PREF_FILTER, "sharp"); }
+    static boolean replayGain(Context c) { return MainActivity.prefs(c).getBoolean(PREF_REPLAYGAIN, false); }
+    static boolean crossfeed(Context c) { return MainActivity.prefs(c).getBoolean(PREF_CROSSFEED, false); }
+    static boolean mono(Context c) { return MainActivity.prefs(c).getBoolean(PREF_MONO, false); }
+    static int balance(Context c) { return Math.max(-100, Math.min(100, MainActivity.prefs(c).getInt(PREF_BALANCE, 0))); }
+
+    /** Computes [left, right] MediaPlayer volume gains from channel balance (-100..+100) + ReplayGain headroom. */
+    static float[] channelGains(Context c) {
+        if (c == null) return new float[]{1f, 1f};
+        float bal = balance(c) / 100f;
+        float rg = replayGain(c) ? 0.86f : 1.0f;
+        float l = bal > 0f ? (1f - bal) : 1f;
+        float r = bal < 0f ? (1f + bal) : 1f;
+        return new float[]{l * rg, r * rg};
+    }
+
+    /** Human-readable hardware capability summary of the connected USB DAC (for Bit-Perfect Assist diagnostics). */
+    static String dacProfileSummary(Context c) {
+        AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        AudioDeviceInfo d = usbOut(am);
+        if (d == null) return c.getString(R.string.bp_no_dac);
+        int maxR = maxSampleRate(am, d);
+        int maxB = maxBits(am, d);
+        int bpN = bitPerfectModes(am, d);
+        StringBuilder sb = new StringBuilder(name(d));
+        if (maxR > 0) sb.append(" · 최대 ").append(khz(maxR));
+        if (maxB > 0) sb.append(" / ").append(maxB).append("-bit");
+        if (bpN > 0) sb.append(" · BP ").append(bpN).append("모드");
+        else sb.append(" · UAC2 Direct");
+        return sb.toString();
+    }
+
+    static String formatRateLabel(Context c, int rate) {
+        return rate <= 0 ? c.getString(R.string.bpa_rate_auto) : khz(rate);
+    }
 
     /** True when bit-perfect or direct USB routing is currently active (effects like EQ/NPU must be bypassed). */
     static boolean isActive() { return activeRate > 0 && activeDevice != null; }
@@ -317,10 +378,17 @@ final class BitPerfect {
             }
         } catch (Exception ignored) {
         } finally { ex.release(); }
+        sourceRate = rate;
+        sourceBits = bits;
+        int lockRate = targetSampleRate(c);
+        if (lockRate > 0) rate = lockRate;
+        String mode = outputMode(c);
+        boolean preferBp = "auto".equals(mode) || "fixed".equals(mode);
+        if ("float".equals(mode)) bits = 32;
 
         List<AudioMixerAttributes> all = null;
         try { all = am.getSupportedMixerAttributes(d); } catch (Throwable ignored) {}
-        AudioMixerAttributes pick = pickBestMixer(all, rate, bits);
+        AudioMixerAttributes pick = preferBp ? pickBestMixer(all, rate, bits) : buildFromProfiles(d, rate, bits, false);
 
         // Try the best supported mixer attribute first
         boolean ok = false;

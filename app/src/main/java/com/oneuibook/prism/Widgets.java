@@ -560,14 +560,23 @@ final class Widgets {
         g.shadowAlpha = 0.16f + 0.06f * k;
     }
 
+    /**
+     * Faithful port of Kyant0/AndroidLiquidGlass {@code LiquidToggle.kt}:
+     * - 64dp × 28dp capsule track (accent #34C759 light / #30D158 dark; track #787878@20% light / #787880@36% dark)
+     * - 40dp × 24dp horizontal capsule thumb (2dp padding, 20dp drag travel)
+     * - Damped drag physics (initialScale=1f, pressedScale=1.45f, critically damped non-bouncy settle) with velocity droplet stretch
+     * - Optical Liquid Glass thumb: opaque white at rest (alpha = 1 - progress) morphing into clear refractive lens
+     *   (refract 5dp, edge 10dp, chromatic aberration, ambient highlight, inner & outer shadow) over the live track.
+     */
     static final class Toggle extends View {
         boolean on;
         float pos;
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Paint rimP = new Paint(Paint.ANTI_ALIAS_FLAG);
         final RectF r = new RectF(), knob = new RectF();
         java.util.function.Consumer<Boolean> change;
-        private final Ui.Spring lens = new Ui.Spring(520f, 0.72f, 0.002f);
-        private final Ui.Spring move = new Ui.Spring(420f, 0.78f, 0.002f);
+        private final Ui.Spring press = new Ui.Spring(460f, 1.0f, 0.002f);
+        private final Ui.Spring move = new Ui.Spring(380f, 1.0f, 0.002f);
         private final Glass.Surface glass = new Glass.Surface();
         private final Track track = new Track();
         private float downX;
@@ -576,44 +585,63 @@ final class Widgets {
         Toggle(Context c, boolean on) {
             super(c);
             this.on = on;
-            pos = on ? 1 : 0;
+            pos = on ? 1f : 0f;
             move.snap(pos);
-            lens.onUpdate = this::invalidate;
+            press.snap(0f);
+            press.onUpdate = this::invalidate;
             move.onUpdate = () -> { pos = move.value; invalidate(); };
-            glass.blur = false;
-            glass.refractDp = 8f;
+            rimP.setStyle(Paint.Style.STROKE);
+            glass.blur = true;
+            glass.blurDp = 8f;
+            glass.refractDp = 5f;
             glass.edgeDp = 10f;
-            glass.chroma = 0.6f;
-            glass.rim = 0.55f;
-            glass.tint = 0x14FFFFFF;
-            glass.shadowAlpha = 0.18f;
-            glass.strokeColor = 0x1A000000;
+            glass.chroma = 0.55f;
+            glass.rim = 0.52f;
+            glass.tint = 0xFFFFFFFF;
+            glass.shadowAlpha = 0.14f;
+            glass.strokeColor = 0x16000000;
         }
 
-        @Override protected void onMeasure(int w, int h) { setMeasuredDimension(Ui.dp(56), Ui.dp(34)); }
+        @Override protected void onMeasure(int w, int h) { setMeasuredDimension(Ui.dp(64), Ui.dp(36)); }
+
+        void setChecked(boolean checked, boolean animate) {
+            on = checked;
+            if (animate) move.to(on ? 1f : 0f);
+            else { pos = on ? 1f : 0f; move.snap(pos); }
+            invalidate();
+        }
+
+        /** Test seam for capturing mid-press Liquid Glass refractive capsule frames in Robolectric. */
+        void setPreviewState(float fraction, float pressProgress) {
+            pos = Ui.clamp(fraction, 0f, 1f);
+            move.snap(pos);
+            press.snap(Ui.clamp(pressProgress, 0f, 1f));
+            invalidate();
+        }
 
         @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            float dragWidth = Math.max(1f, Ui.dpf(20));
             switch (e.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
-                    getParent().requestDisallowInterceptTouchEvent(true);
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
                     downX = e.getX();
                     dragged = false;
-                    lens.to(1f);
+                    press.to(1f);
                     return true;
                 case android.view.MotionEvent.ACTION_MOVE: {
                     float dx = e.getX() - downX;
-                    if (Math.abs(dx) > Ui.dpf(4)) dragged = true;
-                    if (dragged) move.snap(Ui.clamp((on ? 1f : 0f) + dx / (getWidth() - getHeight()), 0f, 1f));
+                    if (Math.abs(dx) > Ui.dpf(3)) dragged = true;
+                    if (dragged) move.to(Ui.clamp((on ? 1f : 0f) + dx / dragWidth, 0f, 1f));
                     return true;
                 }
                 case android.view.MotionEvent.ACTION_UP:
                 case android.view.MotionEvent.ACTION_CANCEL: {
-                    boolean next = dragged ? pos > 0.5f : !on;
+                    boolean next = dragged ? pos >= 0.5f : !on;
                     if (e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL) next = on;
                     boolean changed = next != on;
                     on = next;
                     move.to(on ? 1f : 0f);
-                    postDelayed(() -> lens.to(0f), 120);
+                    postDelayed(() -> press.to(0f), 110);
                     if (changed && change != null) change.accept(on);
                     return true;
                 }
@@ -622,35 +650,68 @@ final class Widgets {
         }
 
         private void drawTrack(Canvas c) {
-            r.set(Ui.dpf(2), Ui.dpf(2), getWidth() - Ui.dpf(2), getHeight() - Ui.dpf(2));
-            int off = Ui.gStyle ? (Ui.dark ? 0xFF45454A : 0xFFC7C7CC) : (Ui.dark ? 0xFF39393D : 0xFFE9E9EA);
-            int onCol = Ui.gStyle ? Ui.ACCENT : 0xFF34C759;
-            p.setColor(Ui.mix(off, onCol, pos));
-            c.drawRoundRect(r, r.height() / 2, r.height() / 2, p);
+            float trackH = Ui.dpf(28);
+            float top = (getHeight() - trackH) * 0.5f;
+            r.set(0f, top, getWidth(), top + trackH);
+            int off = Ui.dark ? 0x5C787880 : 0x33787878;
+            int onCol = Ui.gStyle ? Ui.ACCENT : (Ui.dark ? 0xFF30D158 : 0xFF34C759);
+            p.setColor(Ui.mix(off, onCol, Ui.clamp(pos, 0f, 1f)));
+            c.drawRoundRect(r, trackH * 0.5f, trackH * 0.5f, p);
         }
 
         @Override protected void onDraw(Canvas c) {
-            float l = lens.value;
-            float d = getHeight() - Ui.dpf(8);
-            float w = d * Ui.lerp(1f, 1.45f, l), h = d * Ui.lerp(1f, 1.22f, l);
-            float cx = Ui.lerp(Ui.dpf(4) + d / 2f, getWidth() - Ui.dpf(4) - d / 2f, pos);
-            knob.set(cx - w / 2f, getHeight() / 2f - h / 2f, cx + w / 2f, getHeight() / 2f + h / 2f);
-            if (c.isHardwareAccelerated() && Glass.shadersOk && Ui.glass) {
+            float pr = Ui.clamp(press.value, 0f, 1f);
+            float pad = Ui.dpf(2);
+            float baseW = Ui.dpf(40), baseH = Ui.dpf(24);
+            float dragW = Math.max(0f, getWidth() - baseW - pad * 2f);
+            float cx = pad + baseW * 0.5f + dragW * Ui.clamp(pos, 0f, 1f);
+            float cy = getHeight() * 0.5f;
+
+            // Kyant0 DampedDragAnimation pressScale (1.0 -> 1.45) + horizontal velocity droplet stretch
+            float sc = Ui.lerp(1f, 1.42f, pr);
+            float vel = Ui.clamp(move.velocity * 0.04f, -0.2f, 0.2f);
+            float sx = sc / (1f - Math.abs(vel) * 0.75f);
+            float sy = sc * (1f - Math.abs(vel) * 0.25f);
+            float kw = baseW * sx;
+            float kh = baseH * sy;
+            knob.set(cx - kw * 0.5f, cy - kh * 0.5f, cx + kw * 0.5f, cy + kh * 0.5f);
+
+            if (c.isHardwareAccelerated() && Glass.shadersOk && Ui.glass && !Ui.gStyle) {
                 android.graphics.RecordingCanvas rc = track.begin(getWidth(), getHeight());
                 try { drawTrack(rc); } finally { track.end(); }
                 c.drawRenderNode(track.node);
-                // the knob IS one glass surface: an opaque white glass knob at rest that clears into a lens
-                // as it lifts (never a white disc fading out while a separate glass fades in)
-                liftKnob(glass, knob, l, 0.12f);
+
+                glass.shapes(knob, kh * 0.5f, null, 0, null, 0);
+                glass.alpha = 1f;
+                glass.blur = pr < 0.95f;
+                glass.blurDp = 8f * (1f - pr);
+                glass.refractDp = 5f * pr;
+                glass.edgeDp = 10f * Math.max(0.25f, pr);
+                glass.outerDp = 4f;
+                glass.outerRefractDp = 2.5f * pr;
+                glass.chroma = 0.55f * pr;
+                glass.rim = 0.24f + 0.42f * pr;
+                glass.mag = 1f + 0.14f * pr;
+                glass.magX = cx;
+                glass.magY = cy;
+                glass.tint = Ui.mix(0xFFFFFFFF, Ui.dark ? 0x1EFFFFFF : 0x14FFFFFF, pr);
+                glass.shadowAlpha = 0.12f + 0.06f * pr;
                 glass.extra = track.node;
                 glass.draw(c, this, null);
                 return;
             }
             drawTrack(c);
-            p.setColor(0xFFFFFFFF);
-            p.setShadowLayer(Ui.dpf(3), 0, Ui.dpf(1.5f), 0x33000000);
-            c.drawRoundRect(knob, knob.height() / 2, knob.height() / 2, p);
+            // Software / G-style fallback matching Kyant0 capsule geometry + translucent refractive preview when pressed
+            int fillCol = Ui.gStyle ? 0xFFFFFFFF : Ui.mix(0xFFFFFFFF, 0x55FFFFFF, pr);
+            p.setColor(fillCol);
+            p.setShadowLayer(Ui.dpf(3.5f), 0, Ui.dpf(1.2f), 0x24000000);
+            c.drawRoundRect(knob, kh * 0.5f, kh * 0.5f, p);
             p.clearShadowLayer();
+            if (pr > 0.02f && !Ui.gStyle) {
+                rimP.setStrokeWidth(Ui.dpf(1.2f));
+                rimP.setColor(Ui.alpha(0xFFFFFFFF, 0.78f * pr));
+                c.drawRoundRect(knob, kh * 0.5f, kh * 0.5f, rimP);
+            }
         }
     }
 

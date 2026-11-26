@@ -328,9 +328,16 @@ final class LocalMusic {
     static MediaSession session;
 
     static void play(List<Player.Track> list, int idx) {
+        play(list, idx, null, null);
+    }
+
+    static void play(List<Player.Track> list, int idx, String sourceUri, String sourceTitle) {
         if (list.isEmpty()) return;
-        // switching from Spotify: pause it so the two never play over each other
-        if (!Player.local() && Player.playing && Spotify.loggedIn()) Spotify.send("PUT", "/me/player/pause", null, null);
+        // switching from Spotify / YouTube Music: pause them so two engines never play together
+        if (!Player.local() && !Player.ytm() && Player.playing && Spotify.loggedIn()) Spotify.send("PUT", "/me/player/pause", null, null);
+        YouTubeMusic.stopForOther();
+        Player.playingSourceUri = sourceUri;
+        Player.playingSourceTitle = sourceTitle;
         Player.repeat = Spotify.prefs.getString("repeat", "off");
         original.clear();
         original.addAll(list);
@@ -375,6 +382,7 @@ final class LocalMusic {
             // 10-band equalizer & Bit-Perfect Assist ride on this player's audio session
             try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
             try { NpuAudio.attachLocalSession(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
+            applyChannelBalance();
         }
         mp.setWakeMode(app, android.os.PowerManager.PARTIAL_WAKE_LOCK);
         mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -400,9 +408,19 @@ final class LocalMusic {
         Player.stamp = SystemClock.elapsedRealtime();
         Player.deviceName = app.getString(R.string.this_device);
         Player.liked = false;
-        if (changed) for (Runnable r : new ArrayList<>(Player.trackListeners)) r.run();
+        if (changed) {
+            Recap.recordPlay(app, t);
+            for (Runnable r : new ArrayList<>(Player.trackListeners)) r.run();
+        }
         Player.notifyAll0();
         PlaybackService.update(app);
+    }
+
+    static void applyChannelBalance() {
+        if (mp == null || app == null) return;
+        if (BitPerfect.enabled(app) && BitPerfect.isActive()) return;
+        float[] lr = BitPerfect.channelGains(app);
+        try { mp.setVolume(lr[0], lr[1]); } catch (Throwable ignored) {}
     }
 
     private static void onComplete() {
@@ -528,7 +546,7 @@ final class LocalMusic {
         private android.os.PowerManager.WakeLock wake;
 
         static void update(Context c) {
-            if (c == null || Player.track == null || !(isLocal(Player.track) || inApp())) return;
+            if (c == null || Player.track == null || !(isLocal(Player.track) || YouTubeMusic.isYtm(Player.track) || inApp())) return;
             Intent i = new Intent(c, PlaybackService.class);
             try {
                 if (running == null) c.startForegroundService(i); else running.post();

@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.16";
+    static final String VERSION = "9.5.17";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -166,6 +166,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         root.postDelayed(this::startSpotifyPlayer, 220);
         // keep the media session / foreground service in step with every playback change
         LocalMusic.app = getApplicationContext();
+        YouTubeMusic.app = getApplicationContext();
         LocalMusic.artChanged = this::onAlbumArtChanged;
         // once per process: the notification must follow playback even after this window is gone
         if (!serviceHooked) {
@@ -617,11 +618,12 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     // ------------------------------------------------------------------ Header.Listener
     @Override public void onHeaderButton(int icon, RectF anchor) {
         if (icon == Icons.QUEUE) {
-            // music source picker,
+            // music source picker: Local / Spotify / YouTube Music
             List<GlassMenu.Entry> e = new ArrayList<>();
-            e.add(new GlassMenu.Entry(getString(R.string.source_local), 0, isLocalSource(), () -> setSource("local")));
-            e.add(new GlassMenu.Entry("Spotify", 0, !isLocalSource(), () -> setSource("spotify")));
-            if (!isLocalSource() && Spotify.loggedIn())
+            e.add(new GlassMenu.Entry(getString(R.string.source_local), Icons.NOTE, isLocalSource(), () -> setSource("local")));
+            e.add(new GlassMenu.Entry("Spotify", Icons.WAVE, isSpotifySource(), () -> setSource("spotify")));
+            e.add(new GlassMenu.Entry(getString(R.string.source_ytm), Icons.YTM, isYtmSource(), () -> setSource("ytm")));
+            if (isSpotifySource() && Spotify.loggedIn())
                 e.add(new GlassMenu.Entry(getString(R.string.choose_device), Icons.DEVICE, false, () -> np.deviceMenuAt(anchor)));
             GlassMenu.show(this, anchor, e);
         } else if (icon == Icons.PROFILE) {
@@ -676,12 +678,17 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     }
 
     // ------------------------------------------------------------------ music source
-    /** On-device music is the default until a Spotify account is connected. */
-    static boolean isLocalSource(Context c) {
-        return "local".equals(prefs(c).getString("source", Spotify.loggedIn() ? "spotify" : "local"));
+    static String source(Context c) {
+        return prefs(c).getString("source", Spotify.loggedIn() ? "spotify" : "local");
     }
 
+    /** On-device music is the default until a Spotify account is connected. */
+    static boolean isLocalSource(Context c) { return "local".equals(source(c)); }
+    static boolean isYtmSource(Context c) { return "ytm".equals(source(c)); }
+
     boolean isLocalSource() { return isLocalSource(this); }
+    boolean isYtmSource() { return isYtmSource(this); }
+    boolean isSpotifySource() { return !isLocalSource() && !isYtmSource(); }
 
     // ------------------------------------------------------------------ custom album & playlist covers
     private String coverAlbum;
@@ -864,7 +871,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (it == null) return;
         if (it.action != null) { it.action.run(); return; }
         if ("lalbum".equals(it.type) || "lartist".equals(it.type)) { push(new Pages.LocalListPage(this, it)); return; }
-        if ("track".equals(it.type) || "ltrack".equals(it.type)) {
+        if ("track".equals(it.type) || "ltrack".equals(it.type) || "ytm_track".equals(it.type)) {
             List<Widgets.Item> one = new ArrayList<>();
             one.add(it);
             playList(one, 0, null);
@@ -873,7 +880,49 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         push(new Pages.DetailPage(this, it));
     }
 
-    /** Opens spotify:album:… / spotify:artist:… after fetching its header data. */
+    /** Navigates directly to the currently playing playlist / album / source list (from Expanded Player Queue). */
+    void openCurrentPlayingContext() {
+        Player.Track t = Player.track;
+        if (t == null) return;
+        if (np != null && np.isOpen()) np.close();
+        String src = Player.playingSourceUri;
+        if ((src == null || src.isEmpty()) && Player.contextUri != null && !Player.contextUri.isEmpty()) {
+            src = Player.contextUri;
+        }
+        if (Player.local()) {
+            if (src != null && (src.startsWith("lalbum") || src.startsWith("lartist:"))) {
+                openUri(src, Player.playingSourceTitle != null ? Player.playingSourceTitle : t.album);
+            } else if (t.albumUri != null && !t.albumUri.isEmpty()) {
+                openUri(t.albumUri, t.album);
+            } else {
+                Widgets.Item all = new Widgets.Item();
+                all.title = getString(R.string.all_songs);
+                push(new Pages.LocalListPage(this, all));
+            }
+            return;
+        }
+        if (Player.ytm()) {
+            if (!isYtmSource()) setSource("ytm");
+            if (tab != 0) { dock.select(0, true); switchTab(0); }
+            tabs[0].popToRoot();
+            return;
+        }
+        if ("liked".equals(src)) {
+            openLibrarySection("liked");
+            return;
+        }
+        if (src != null && src.startsWith("spotify:")) {
+            openUri(src, Player.playingSourceTitle != null ? Player.playingSourceTitle : t.album);
+            return;
+        }
+        if (t.albumUri != null && !t.albumUri.isEmpty()) {
+            openUri(t.albumUri, t.album);
+            return;
+        }
+        openLibrarySection("playlists");
+    }
+
+    /** Opens spotify:album:… / spotify:artist:… / spotify:playlist:… after fetching its header data. */
     void openUri(String uri, String name) {
         if (uri == null) return;
         if (uri.startsWith("lalbum") || uri.startsWith("lartist:")) {
@@ -898,10 +947,17 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (items.get(0).track != null) {
             List<Player.Track> l = new ArrayList<>();
             for (Widgets.Item i : items) if (i.track != null) l.add(i.track);
-            LocalMusic.play(l, idx);
+            if (!l.isEmpty() && YouTubeMusic.isYtm(l.get(0))) {
+                YouTubeMusic.play(l, idx, ctx);
+                return;
+            }
+            String srcTitle = (!l.isEmpty() && idx < l.size()) ? l.get(idx).album : null;
+            LocalMusic.play(l, idx, ctx, srcTitle);
             return;
         }
         Widgets.Item cur = items.get(idx);
+        Player.playingSourceUri = ctx;
+        Player.playingSourceTitle = cur != null ? cur.title : null;
         int from = Math.max(0, idx - 15), to = Math.min(items.size(), idx + 50);
         List<String> uris = new ArrayList<>();
         int targetPos = -1;

@@ -18,7 +18,8 @@ final class Icons {
             CLOCK = 24, HEART = 25, HEART_FILL = 26, GLOBE = 27, APPEARANCE = 28, CONTENT = 29, WAVE = 30,
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
             REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
-            BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55, BUDS2 = 56, BUDS_LIVE = 57;
+            BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55, BUDS2 = 56, BUDS_LIVE = 57,
+            VIDEO = 58, RECAP = 59, YTM = 60, SLIDERS = 61, PLAYLIST_GO = 62;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -657,6 +658,58 @@ final class Icons {
                 c.drawLine(12f, 17.8f, 12f, 21f, P);
                 P.setStyle(Paint.Style.FILL);
                 c.drawCircle(12f, 12.5f, 1.5f, P);
+                break;
+            }
+            case VIDEO: {
+                // Sleek rounded screen frame with inner play triangle (Switch to video pill)
+                stroke(1.8f);
+                R.set(2.8f, 4.8f, 21.2f, 19.2f);
+                c.drawRoundRect(R, 3.2f, 3.2f, P);
+                fill();
+                P.setPathEffect(ROUND1);
+                p.moveTo(10.0f, 8.8f); p.lineTo(15.6f, 12.0f); p.lineTo(10.0f, 15.2f); p.close();
+                c.drawPath(p, P);
+                break;
+            }
+            case RECAP: {
+                // Bar-chart + sparkle badge (Recap statistics)
+                fill();
+                R.set(4.0f, 12.6f, 7.2f, 19.6f); c.drawRoundRect(R, 1.4f, 1.4f, P);
+                R.set(10.4f, 7.8f, 13.6f, 19.6f); c.drawRoundRect(R, 1.4f, 1.4f, P);
+                R.set(16.8f, 4.4f, 20.0f, 19.6f); c.drawRoundRect(R, 1.4f, 1.4f, P);
+                break;
+            }
+            case YTM: {
+                // Concentric disc with play glyph (YouTube Music source icon)
+                stroke(1.8f);
+                c.drawCircle(12f, 12f, 9.2f, P);
+                c.drawCircle(12f, 12f, 5.6f, P);
+                fill();
+                p.moveTo(10.4f, 9.4f); p.lineTo(15.2f, 12f); p.lineTo(10.4f, 14.6f); p.close();
+                c.drawPath(p, P);
+                break;
+            }
+            case SLIDERS: {
+                // Horizontal audio tuning faders
+                stroke(1.8f);
+                c.drawLine(3.5f, 7f, 20.5f, 7f, P);
+                c.drawLine(3.5f, 12f, 20.5f, 12f, P);
+                c.drawLine(3.5f, 17f, 20.5f, 17f, P);
+                fill();
+                c.drawCircle(8.5f, 7f, 2.2f, P);
+                c.drawCircle(15.5f, 12f, 2.2f, P);
+                c.drawCircle(10.5f, 17f, 2.2f, P);
+                break;
+            }
+            case PLAYLIST_GO: {
+                // Playlist lines + arrow-right jump indicator
+                stroke(1.85f);
+                c.drawLine(3.5f, 6.5f, 14.5f, 6.5f, P);
+                c.drawLine(3.5f, 11.5f, 12.0f, 11.5f, P);
+                c.drawLine(3.5f, 16.5f, 10.5f, 16.5f, P);
+                c.drawLine(14.0f, 14.5f, 20.4f, 14.5f, P);
+                p.moveTo(17.4f, 11.4f); p.lineTo(20.6f, 14.5f); p.lineTo(17.4f, 17.6f);
+                c.drawPath(p, P);
                 break;
             }
             default:

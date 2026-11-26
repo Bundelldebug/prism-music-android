@@ -89,6 +89,7 @@ final class Lyrics {
     static final class Line {
         final long time;
         long endTime;
+        boolean explicitEnd;
         final String text;
         String trans; // native Korean translation line from lyric source (never machine-translated)
         final List<Word> words;
@@ -96,7 +97,7 @@ final class Lyrics {
         Line(long t, String s) { this(t, 0, s, null, null); }
         Line(long t, long end, String s, List<Word> w) { this(t, end, s, null, w); }
         Line(long t, long end, String s, String tr, List<Word> w) {
-            time = t; endTime = end; text = s; trans = tr; words = w;
+            time = t; endTime = end; explicitEnd = end > t; text = s; trans = tr; words = w;
         }
     }
 
@@ -921,17 +922,73 @@ final class Lyrics {
         } catch (Exception ignored) {}
     }
 
+    /** Estimates natural vocal duration for a sung lyric line so instrumental interludes never drag out the fill. */
+    static long estimateVocalDurationMs(String text) {
+        if (text == null || text.trim().isEmpty()) return 1800L;
+        String s = text.trim();
+        int cjk = 0, other = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (Character.isWhitespace(ch)) continue;
+            if ((ch >= 0xAC00 && ch <= 0xD7A3) || (ch >= 0x3040 && ch <= 0x30FF) || (ch >= 0x4E00 && ch <= 0x9FFF)) cjk++;
+            else other++;
+        }
+        long est = 1050L + cjk * 240L + other * 95L;
+        return Math.max(2000L, Math.min(6800L, est));
+    }
+
     static Result finalizeEndTimes(Result r, long trackDurationMs) {
         if (r == null || !r.synced || r.lines.isEmpty()) return r;
+        // Pass 1: collapse explicit blank/interlude timestamp lines (e.g. "[01:24.00] ") into the previous line's endTime!
+        List<Line> cleaned = new ArrayList<>(r.lines.size());
         for (int i = 0; i < r.lines.size(); i++) {
             Line cur = r.lines.get(i);
-            if (cur.endTime > cur.time) continue;
-            if (i + 1 < r.lines.size()) {
-                long next = r.lines.get(i + 1).time;
-                cur.endTime = next > cur.time ? next : cur.time + 2500L;
+            String txt = cur.text == null ? "" : cur.text.trim();
+            boolean isBlankMarker = txt.isEmpty() || "♪".equals(txt) || "🎵".equals(txt) || "...".equals(txt) || "…".equals(txt);
+            if (isBlankMarker && !cleaned.isEmpty()) {
+                Line prev = cleaned.get(cleaned.size() - 1);
+                if (!prev.explicitEnd && cur.time > prev.time + 300L) {
+                    prev.endTime = cur.time;
+                    prev.explicitEnd = true;
+                }
+                continue;
+            }
+            cleaned.add(cur);
+        }
+        if (!cleaned.isEmpty()) {
+            r.lines.clear();
+            r.lines.addAll(cleaned);
+        }
+
+        // Pass 2: assign vocal endTimes; cap across long instrumental interludes so live fill finishes cleanly on tempo!
+        for (int i = 0; i < r.lines.size(); i++) {
+            Line cur = r.lines.get(i);
+            long next = (i + 1 < r.lines.size()) ? r.lines.get(i + 1).time : -1L;
+            if (cur.words != null && !cur.words.isEmpty()) {
+                Word last = cur.words.get(cur.words.size() - 1);
+                long wEnd = last.start + last.duration;
+                if (wEnd > cur.time) {
+                    cur.endTime = next > cur.time ? Math.min(wEnd, next) : wEnd;
+                    cur.explicitEnd = true;
+                    continue;
+                }
+            }
+            if (cur.explicitEnd && cur.endTime > cur.time) {
+                if (next > cur.time && cur.endTime > next) cur.endTime = next;
+                continue;
+            }
+            long est = estimateVocalDurationMs(cur.text);
+            if (next > cur.time) {
+                long gap = next - cur.time;
+                // If there is a clear instrumental interlude (> est + 2.2s), end vocal fill at cur.time + est!
+                if (gap > est + 2200L) {
+                    cur.endTime = cur.time + est;
+                } else {
+                    cur.endTime = next;
+                }
             } else {
-                long tail = trackDurationMs > cur.time ? Math.min(cur.time + 6000L, trackDurationMs) : cur.time + 4500L;
-                cur.endTime = Math.max(cur.time + 1500L, tail);
+                long tail = trackDurationMs > cur.time ? Math.min(cur.time + Math.max(est, 4800L), trackDurationMs) : cur.time + est;
+                cur.endTime = Math.max(cur.time + 1800L, tail);
             }
         }
         return r;

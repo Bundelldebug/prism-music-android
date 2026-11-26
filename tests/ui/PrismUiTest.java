@@ -1281,6 +1281,131 @@ public class PrismUiTest {
             MainActivity.prefs(app).edit().remove("refresh_token").remove("client_id").commit();
         }
 
+        // [16] 9.5.17 regression checks + UI screenshots + animated GIFs (all 9 items):
+        try {
+            // (3) Real-time Lyrics interlude gap fix: 15-second instrumental break must NOT stretch line 1 across 15s!
+            Lyrics.Result interLyr = Lyrics.parse(
+                    "[00:10.00] Hello world\n[00:26.00] Next verse begins\n[00:30.00] \n[00:45.00] Final chorus", "");
+            Lyrics.finalizeEndTimes(interLyr, 180_000L);
+            assertNotNull("Parsed lyrics", interLyr);
+            assertEquals("Blank end-marker collapsed into explicit endTime", 3, interLyr.lines.size());
+            long line0Dur = interLyr.lines.get(0).endTime - interLyr.lines.get(0).time;
+            assertTrue("Line before 16s interlude capped cleanly (" + line0Dur + "ms)", line0Dur >= 2000L && line0Dur <= 6800L);
+            assertEquals("Explicit blank timestamp sets line 1 endTime to 30000ms", 30_000L, interLyr.lines.get(1).endTime);
+
+            // (8) BitPerfect channel balance + ReplayGain gains math
+            MainActivity.prefs(app).edit().putInt(BitPerfect.PREF_BALANCE, 0).putBoolean(BitPerfect.PREF_REPLAYGAIN, false).commit();
+            float[] gCenter = BitPerfect.channelGains(app);
+            assertEquals(1.0f, gCenter[0], 0.01f);
+            assertEquals(1.0f, gCenter[1], 0.01f);
+            MainActivity.prefs(app).edit().putInt(BitPerfect.PREF_BALANCE, -50).putBoolean(BitPerfect.PREF_REPLAYGAIN, true).commit();
+            float[] gLeft = BitPerfect.channelGains(app);
+            assertTrue("Left louder than right when balanced left", gLeft[0] > gLeft[1]);
+            MainActivity.prefs(app).edit().putInt(BitPerfect.PREF_BALANCE, 0).putBoolean(BitPerfect.PREF_REPLAYGAIN, false).commit();
+
+            // (1) YouTube Music home screenshot with fixture shelves
+            Ui.gStyle = false;
+            MainActivity.prefs(app).edit().putString("player_style", "prism").putString("source", "ytm").commit();
+            YouTubeMusic.testFixtures = k9517 -> {
+                java.util.List<Widgets.Item> l = new java.util.ArrayList<>();
+                l.add(YouTubeMusic.buildItem("dQw4w9WgXcQ", "Locked out of Heaven", "Bruno Mars", "Unorthodox Jukebox", "", 233_000L));
+                l.add(YouTubeMusic.buildItem("kJQP7kiw5Fk", "Die With A Smile", "Lady Gaga & Bruno Mars", "Single", "", 251_000L));
+                l.add(YouTubeMusic.buildItem("fRh_vgS2dFE", "Blinding Lights", "The Weeknd", "After Hours", "", 200_000L));
+                l.add(YouTubeMusic.buildItem("JGwWNGJdvx8", "APT.", "ROSE & Bruno Mars", "rosie", "", 169_000L));
+                return l;
+            };
+            ActivityController<MainActivity> ytmC = launch("ko-w393dp-h852dp-xxhdpi");
+            MainActivity ya = ytmC.get();
+            fakeTrack();
+            idle(900);
+            shot(ya, "90_ytm_home");
+
+            // (7) & (9) A-Style Expanded Player with "Switch to video" pill + snug compact horizontal active pill capsule + GIF!
+            Player.playingSourceUri = "spotify:playlist:pl_demo";
+            Player.playingSourceTitle = "My Favorite Hits";
+            ya.np.open(); idle(900);
+            shot(ya, "91_player_a_style_9517");
+
+            // Capture multi-frame animated GIF of non-bouncy Liquid Glass bottom pill glide (lyrics -> queue -> artwork)
+            java.util.List<Bitmap> pillFrames = new java.util.ArrayList<>();
+            java.lang.reflect.Method setPanelM = NowPlaying.class.getDeclaredMethod("setPanel", int.class);
+            setPanelM.setAccessible(true);
+            java.lang.reflect.Field lyrBtnF = NowPlaying.class.getDeclaredField("lyricsBtn");
+            java.lang.reflect.Field qBtnF = NowPlaying.class.getDeclaredField("queueBtn");
+            java.lang.reflect.Field apF = NowPlaying.class.getDeclaredField("actionPill");
+            lyrBtnF.setAccessible(true); qBtnF.setAccessible(true); apF.setAccessible(true);
+            View lyrBtnV = (View) lyrBtnF.get(ya.np), qBtnV = (View) qBtnF.get(ya.np);
+            Object actionPillObj = apF.get(ya.np);
+            java.lang.reflect.Method pulseAtM = actionPillObj.getClass().getDeclaredMethod("pulseAt", View.class);
+            pulseAtM.setAccessible(true);
+            pillFrames.add(captureScaled(ya, 0.5f));
+            pulseAtM.invoke(actionPillObj, lyrBtnV);
+            setPanelM.invoke(ya.np, 1);
+            for (int f = 0; f < 5; f++) { idle(70); pillFrames.add(captureScaled(ya, 0.5f)); }
+            pulseAtM.invoke(actionPillObj, qBtnV);
+            setPanelM.invoke(ya.np, 2);
+            for (int f = 0; f < 6; f++) { idle(70); pillFrames.add(captureScaled(ya, 0.5f)); }
+            shot(ya, "92_player_queue_9517");
+            writeGif(new File(OUT, "97_player_pill_glide.gif"), pillFrames, 110);
+            for (Bitmap fb : pillFrames) fb.recycle();
+            ya.np.close(); idle(400);
+
+            // (6) Local Music Recap screenshot
+            java.util.List<Player.Track> demoRecap = new java.util.ArrayList<>();
+            for (int i = 0; i < 4; i++) {
+                Player.Track tr = new Player.Track();
+                tr.id = "local:" + (100 + i);
+                tr.uri = "content://media/external/audio/media/" + (100 + i);
+                tr.name = new String[]{"Locked out of Heaven", "Supernova", "Night Dancer", "Ditto"}[i];
+                tr.artist = new String[]{"Bruno Mars", "aespa", "imase", "NewJeans"}[i];
+                tr.album = new String[]{"Unorthodox Jukebox", "Armageddon", "Bonsai", "OMG"}[i];
+                tr.duration = 215_000L;
+                demoRecap.add(tr);
+            }
+            Recap.seedForTest(app, demoRecap);
+            ya.push(new Pages.RecapPage(ya, true)); idle(600);
+            shot(ya, "93_recap_local");
+            ya.pop(); idle(250);
+
+            // (8) Overhauled Bit-Perfect Assist screen + (5) Kyant0 LiquidToggle GIF
+            NpuAudio.testSupportedOverride = Boolean.TRUE;
+            NpuAudio.testSocOverride = "SM8850";
+            MainActivity.prefs(app).edit().putBoolean(NpuAudio.PREF_ON, true).commit();
+            ya.push(new Settings.BitPerfectAssistPage(ya)); idle(600);
+            shot(ya, "94_bitperfect_assist_9517");
+            ya.pop(); idle(250);
+
+            // Capture standalone Kyant0 LiquidToggle animation GIF (off -> pressed refractive glass -> on)
+            java.util.List<Bitmap> togFrames = new java.util.ArrayList<>();
+            Widgets.Toggle demoT = new Widgets.Toggle(ya, false);
+            demoT.measure(View.MeasureSpec.makeMeasureSpec(Ui.dp(64), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(Ui.dp(36), View.MeasureSpec.EXACTLY));
+            demoT.layout(0, 0, demoT.getMeasuredWidth(), demoT.getMeasuredHeight());
+            float[][] states = {{0f, 0f}, {0.05f, 0.6f}, {0.25f, 1.0f}, {0.55f, 1.0f}, {0.85f, 1.0f}, {1.0f, 0.7f}, {1.0f, 0.2f}, {1.0f, 0f}};
+            for (float[] st : states) {
+                demoT.setPreviewState(st[0], st[1]);
+                Bitmap b = Bitmap.createBitmap(Ui.dp(120), Ui.dp(72), Bitmap.Config.ARGB_8888);
+                Canvas cv = new Canvas(b);
+                cv.drawColor(0xFFF2F2F7);
+                cv.translate(Ui.dp(28), Ui.dp(18));
+                demoT.draw(cv);
+                togFrames.add(b);
+            }
+            writeGif(new File(OUT, "96_kyant0_toggle_anim.gif"), togFrames, 120);
+            for (Bitmap fb : togFrames) fb.recycle();
+
+            // (4) Search suggestions screenshot
+            MainActivity.prefs(app).edit().putString("search_history_v1", "Bruno Mars\nIU\naespa").commit();
+            ya.onSearch(); idle(400);
+            ya.onQuery("Bru", false); idle(300);
+            shot(ya, "95_search_suggestions");
+            ya.onExitSearch(); idle(200);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            YouTubeMusic.testFixtures = null;
+        }
+
         AudioInfo.testSpec = null;
         NpuAudio.testSupportedOverride = null;
         NpuAudio.testSocOverride = null;
@@ -1299,5 +1424,60 @@ public class PrismUiTest {
         ic.draw(icv);
         try (FileOutputStream o = new FileOutputStream(new File(OUT, "62_notification_icon.png"))) { ib.compress(Bitmap.CompressFormat.PNG, 100, o); }
         LocalMusic.songs.clear();
+    }
+
+    private static Bitmap captureScaled(MainActivity act, float scale) {
+        View root = act.getWindow().getDecorView();
+        int w = Math.max(1, Math.round(root.getWidth() * scale));
+        int h = Math.max(1, Math.round(root.getHeight() * scale));
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        c.scale(scale, scale);
+        root.draw(c);
+        return b;
+    }
+
+    /** Encodes a list of Android Bitmaps into a looping animated GIF using JDK javax.imageio. */
+    private static void writeGif(File outFile, java.util.List<Bitmap> frames, int delayMs) throws Exception {
+        if (frames == null || frames.isEmpty()) return;
+        javax.imageio.ImageWriter writer = javax.imageio.ImageIO.getImageWritersByFormatName("gif").next();
+        try (javax.imageio.stream.ImageOutputStream ios = javax.imageio.ImageIO.createImageOutputStream(outFile)) {
+            writer.setOutput(ios);
+            writer.prepareWriteSequence(null);
+            for (int i = 0; i < frames.size(); i++) {
+                Bitmap bm = frames.get(i);
+                int w = bm.getWidth(), h = bm.getHeight();
+                java.awt.image.BufferedImage bi = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                int[] px = new int[w * h];
+                bm.getPixels(px, 0, w, 0, 0, w, h);
+                bi.setRGB(0, 0, w, h, px, 0, w);
+                javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+                javax.imageio.metadata.IIOMetadata meta = writer.getDefaultImageMetadata(
+                        javax.imageio.ImageTypeSpecifier.createFromRenderedImage(bi), param);
+                String fmt = meta.getNativeMetadataFormatName();
+                javax.imageio.metadata.IIOMetadataNode root = (javax.imageio.metadata.IIOMetadataNode) meta.getAsTree(fmt);
+                javax.imageio.metadata.IIOMetadataNode gce = new javax.imageio.metadata.IIOMetadataNode("GraphicControlExtension");
+                gce.setAttribute("disposalMethod", "none");
+                gce.setAttribute("userInputFlag", "FALSE");
+                gce.setAttribute("transparentColorFlag", "FALSE");
+                gce.setAttribute("delayTime", String.valueOf(Math.max(2, delayMs / 10)));
+                gce.setAttribute("transparentColorIndex", "0");
+                root.appendChild(gce);
+                if (i == 0) {
+                    javax.imageio.metadata.IIOMetadataNode appExts = new javax.imageio.metadata.IIOMetadataNode("ApplicationExtensions");
+                    javax.imageio.metadata.IIOMetadataNode appExt = new javax.imageio.metadata.IIOMetadataNode("ApplicationExtension");
+                    appExt.setAttribute("applicationID", "NETSCAPE");
+                    appExt.setAttribute("authenticationCode", "2.0");
+                    appExt.setUserObject(new byte[]{0x1, 0x0, 0x0});
+                    appExts.appendChild(appExt);
+                    root.appendChild(appExts);
+                }
+                meta.setFromTree(fmt, root);
+                writer.writeToSequence(new javax.imageio.IIOImage(bi, null, meta), param);
+            }
+            writer.endWriteSequence();
+        } finally {
+            writer.dispose();
+        }
     }
 }
