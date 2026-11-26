@@ -517,7 +517,6 @@ final class Settings {
             Widgets.Group fx = new Widgets.Group(m, m.getString(R.string.set_player_screen));
             toggleRow(fx, Icons.ALBUM, m.getString(R.string.shrink_paused), "shrink_paused", true, null);
             toggleRow(fx, Icons.CLOCK, m.getString(R.string.show_total), "show_total", false, Player::notifyAll0);
-            toggleRow(fx, Icons.VIDEO, m.getString(R.string.auto_mv), "auto_mv", false, null);
             fx.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.eq_title), m.getString(Eq.on(m) ? R.string.eq_state_on : R.string.eq_state_off), true, v -> m.push(new EqPage(m)));
             content.addView(fx, Widgets.MW);
             Widgets.Group aodG = new Widgets.Group(m, m.getString(R.string.aod_title));

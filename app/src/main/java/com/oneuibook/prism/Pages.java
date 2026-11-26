@@ -291,38 +291,93 @@ final class Pages {
         return R.string.tab_home;
     }
 
-    /** Compact glass/gradient Recap entry banner on Home (Local & Spotify). */
+    /** Liquid Glass Recap entry card on Home (matches Home horizontal 18dp grid margins & glass chrome). */
     static View recapBanner(MainActivity m, boolean localFirst) {
-        LinearLayout card = new LinearLayout(m);
+        FrameLayout wrap = new FrameLayout(m);
+        wrap.setClipChildren(false);
+        wrap.setClipToPadding(false);
+        wrap.setPadding(Ui.dp(18), Ui.dp(4), Ui.dp(18), Ui.dp(18));
+
+        final float radDp = Ui.gStyle ? 24f : 20f;
+        final Glass.Surface surf = new Glass.Surface();
+        surf.blurDp = Ui.barBlur();
+        surf.refractDp = 12f;
+        surf.edgeDp = 18f;
+        surf.outerDp = 4f;
+        surf.outerRefractDp = 8f;
+        surf.vibrance = 1.28f;
+        surf.rim = 0.34f;
+        surf.shadowAlpha = Ui.dark ? 0.16f : 0.08f;
+
+        LinearLayout card = new LinearLayout(m) {
+            private final android.graphics.RectF r = new android.graphics.RectF();
+            private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            private final android.graphics.Paint st = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            {
+                setWillNotDraw(false);
+                st.setStyle(android.graphics.Paint.Style.STROKE);
+            }
+            @Override protected void onDraw(android.graphics.Canvas c) {
+                float w = getWidth(), h = getHeight();
+                if (w <= 0 || h <= 0) return;
+                r.set(0, 0, w, h);
+                float rad = Ui.dpf(radDp);
+                if (!Ui.gStyle && Ui.glass && m.backdrop != null) {
+                    surf.tint = Ui.dark ? Ui.glassBlend(0xF01C1C22, 0xB81C1C24, 0x7A1C1C24)
+                            : Ui.glassBlend(0xF5FFFFFF, 0xCCFAFAFD, 0x9EFFFFFF);
+                    surf.blurDp = Ui.barBlur();
+                    surf.strokeColor = Ui.dark ? 0x30FFFFFF : 0x1E000000;
+                    surf.shapes(r, rad, null, 0, null, 0);
+                    surf.draw(c, this, m.backdrop);
+                    // Subtle accent glass sheen along top-left edge
+                    p.setShader(new android.graphics.LinearGradient(0, 0, w * 0.65f, h,
+                            new int[]{Ui.alpha(Ui.ACCENT, Ui.dark ? 0.18f : 0.11f), 0x00000000},
+                            null, android.graphics.Shader.TileMode.CLAMP));
+                    c.drawRoundRect(r, rad, rad, p);
+                    p.setShader(null);
+                } else {
+                    p.setColor(Ui.card());
+                    c.drawRoundRect(r, rad, rad, p);
+                    p.setShader(new android.graphics.LinearGradient(0, 0, w * 0.55f, h,
+                            new int[]{Ui.alpha(Ui.ACCENT, Ui.dark ? 0.16f : 0.08f), 0x00000000},
+                            null, android.graphics.Shader.TileMode.CLAMP));
+                    c.drawRoundRect(r, rad, rad, p);
+                    p.setShader(null);
+                    st.setStrokeWidth(Math.max(1f, Ui.dpf(0.8f)));
+                    st.setColor(Ui.dark ? 0x22FFFFFF : 0x14000000);
+                    c.drawRoundRect(r, rad, rad, st);
+                }
+            }
+        };
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(Ui.dp(18), Ui.dp(15), Ui.dp(16), Ui.dp(15));
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                new int[]{Ui.mix(Ui.ACCENT, 0xFF1C1C2E, Ui.dark ? 0.55f : 0.12f), Ui.mix(0xFF5E5CE6, Ui.ACCENT, 0.45f)});
-        bg.setCornerRadius(Ui.dpf(Ui.gStyle ? 22 : 16));
-        card.setBackground(bg);
-        card.setElevation(Ui.dpf(2));
+        card.setPadding(Ui.dp(15), Ui.dp(13), Ui.dp(15), Ui.dp(13));
+        card.setElevation(Ui.dpf(Ui.dark ? 0f : 1.5f));
+
         FrameLayout badge = new FrameLayout(m);
-        badge.setBackground(Ui.round(0x2EFFFFFF, 12));
-        badge.addView(new Icons.IconView(m, Icons.RECAP, 22, 0xFFFFFFFF), new FrameLayout.LayoutParams(Ui.dp(24), Ui.dp(24), Gravity.CENTER));
+        android.graphics.drawable.GradientDrawable bBg = Ui.round(Ui.alpha(Ui.ACCENT, Ui.dark ? 0.24f : 0.14f), 13);
+        bBg.setStroke(Math.max(1, Ui.dp(0.75f)), Ui.alpha(Ui.ACCENT, Ui.dark ? 0.42f : 0.24f));
+        badge.setBackground(bBg);
+        badge.addView(new Icons.IconView(m, Icons.RECAP, 21, Ui.ACCENT),
+                new FrameLayout.LayoutParams(Ui.dp(24), Ui.dp(24), Gravity.CENTER));
         card.addView(badge, new LinearLayout.LayoutParams(Ui.dp(42), Ui.dp(42)));
+
         LinearLayout col = new LinearLayout(m);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(Ui.dp(13), 0, Ui.dp(8), 0);
-        col.addView(Ui.text(m, m.getString(localFirst ? R.string.recap_local : R.string.recap_spotify), 15.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
-        TextView sub = Ui.text(m, m.getString(R.string.recap_card_sub), 12.5f, Ui.regular, 0xD9FFFFFF);
+        col.addView(Ui.text(m, m.getString(localFirst ? R.string.recap_local : R.string.recap_spotify), 15.5f, Ui.bold, Ui.text()), Widgets.MW);
+        TextView sub = Ui.text(m, m.getString(R.string.recap_card_sub), 12.5f, Ui.regular, Ui.text2());
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         sl.topMargin = Ui.dp(2);
         col.addView(sub, sl);
         card.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        card.addView(new Icons.IconView(m, Icons.CHEVRON, 16, 0xCCFFFFFF), new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18)));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(Ui.dp(16), Ui.dp(2), Ui.dp(16), Ui.dp(10));
-        card.setLayoutParams(lp);
+
+        card.addView(new Icons.IconView(m, Icons.CHEVRON, 15, Ui.text3()), new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18)));
         card.setOnClickListener(v -> m.push(new RecapPage(m, localFirst)));
         Ui.press(card, 0.97f);
-        return card;
+
+        wrap.addView(card, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return wrap;
     }
 
     /** YouTube Music Home screen (Quick Picks, Charts, Music Videos — works with or without Google login). */

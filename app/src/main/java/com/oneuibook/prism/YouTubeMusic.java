@@ -142,12 +142,29 @@ final class YouTubeMusic {
                 } catch (Throwable ignored) {}
             }
         });
+        wv.setFocusable(true);
+        wv.setFocusableInTouchMode(true);
+        wv.setOnTouchListener((v, ev) -> {
+            if (!v.hasFocus()) v.requestFocus();
+            return false;
+        });
         wv.loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F");
-        dlg[0] = new AlertDialog.Builder(a)
+        dlg[0] = new AlertDialog.Builder(a,
+                Ui.dark ? android.R.style.Theme_DeviceDefault_Dialog_Alert : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
                 .setTitle(R.string.ytm_sign_in)
                 .setView(box)
                 .setNegativeButton(R.string.cancel, null)
                 .show();
+        // Critical Android fix: AlertDialog sets FLAG_ALT_FOCUSABLE_IM when it has no EditText child,
+        // which blocks the soft keyboard (IME) from ever opening inside a WebView input field.
+        android.view.Window dw = dlg[0].getWindow();
+        if (dw != null) {
+            dw.clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
+            dw.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        }
+        wv.requestFocus(android.view.View.FOCUS_DOWN);
     }
 
     private static String sapisidHash(String cookieStr) {

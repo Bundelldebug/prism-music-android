@@ -83,17 +83,6 @@ final class NowPlaying extends FrameLayout {
     private final GlassChip chip;
     private final GlassChip actionPill;
     private final AudioBadge audioBadge;
-    // Music Video ("Switch to video") floating pill + rounded video viewport over artBig
-    private final LinearLayout mvPill;
-    private final Icons.IconView mvIcon;
-    private final TextView mvLabel;
-    private final FrameLayout mvBox;
-    private final android.view.TextureView mvTexture;
-    private android.media.MediaPlayer mvPlayer;
-    private android.view.Surface mvSurface;
-    private boolean mvActive, mvLoading;
-    private String mvResolvedUrl, mvForTrackId;
-    private long lastMvSyncMs;
     private int hiResTier;
     private float masterBgP;
     private ValueAnimator masterBgAnim;
@@ -190,50 +179,6 @@ final class NowPlaying extends FrameLayout {
         audioBadge.setOnClickListener(v -> audioInfoSheet(v));
         audioBadge.setVisibility(GONE);
         content.addView(audioBadge);
-
-        // Music Video viewport (clipped to album art frame) + floating "Switch to video" pill
-        mvBox = new FrameLayout(m);
-        mvBox.setBackgroundColor(0xFF0A0A0C);
-        mvBox.setVisibility(GONE);
-        mvBox.setClipToOutline(true);
-        mvBox.setOutlineProvider(new android.view.ViewOutlineProvider() {
-            @Override public void getOutline(View v, android.graphics.Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(oneui && !wide ? 30 : 12));
-            }
-        });
-        mvTexture = new android.view.TextureView(m);
-        mvTexture.setSurfaceTextureListener(new android.view.TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
-                mvSurface = new android.view.Surface(st);
-                if (mvPlayer != null) { try { mvPlayer.setSurface(mvSurface); } catch (Throwable ignored) {} }
-            }
-            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) {}
-            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
-                if (mvPlayer != null) { try { mvPlayer.setSurface(null); } catch (Throwable ignored) {} }
-                if (mvSurface != null) { mvSurface.release(); mvSurface = null; }
-                return true;
-            }
-            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
-        });
-        mvBox.addView(mvTexture, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        content.addView(mvBox);
-
-        mvPill = new LinearLayout(m);
-        mvPill.setOrientation(LinearLayout.HORIZONTAL);
-        mvPill.setGravity(Gravity.CENTER);
-        mvPill.setPadding(Ui.dp(13), Ui.dp(6), Ui.dp(14), Ui.dp(6));
-        android.graphics.drawable.GradientDrawable mvBg = Ui.round(0x521C1C1E, 100);
-        mvBg.setStroke(Math.max(1, Ui.dp(0.8f)), 0x38FFFFFF);
-        mvPill.setBackground(mvBg);
-        mvIcon = new Icons.IconView(m, Icons.VIDEO, 15, 0xF5FFFFFF);
-        mvPill.addView(mvIcon, new LinearLayout.LayoutParams(Ui.dp(17), Ui.dp(17)));
-        mvLabel = Ui.text(m, m.getString(R.string.switch_to_video), 12.5f, Ui.semibold, 0xF5FFFFFF);
-        LinearLayout.LayoutParams mvl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mvl.leftMargin = Ui.dp(6);
-        mvPill.addView(mvLabel, mvl);
-        mvPill.setOnClickListener(v -> toggleMusicVideo());
-        Ui.press(mvPill, 0.94f);
-        content.addView(mvPill);
 
         prev = icon(Icons.PREV, 40, 0xFFFFFFFF, v -> Player.prev());
         play = icon(Icons.PAUSE, 46, 0xFFFFFFFF, v -> Player.toggle());
@@ -379,7 +324,6 @@ final class NowPlaying extends FrameLayout {
 
     void close() {
         if (getVisibility() != VISIBLE) return;
-        if (mvPlayer != null) { try { if (mvPlayer.isPlaying()) mvPlayer.pause(); } catch (Throwable ignored) {} }
         miniR.set(dock.miniRect());
         miniArt.set(dock.miniArtRect());
         Player.setFast(false);
@@ -509,8 +453,6 @@ final class NowPlaying extends FrameLayout {
             chip.measure(MeasureSpec.makeMeasureSpec(Ui.dp(200), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
             int badgeMaxW = oneui ? Math.max(Ui.dp(72), colWi - timeW * 2 - Ui.dp(12)) : Math.max(Ui.dp(140), colWi - Ui.dp(80));
             audioBadge.measure(MeasureSpec.makeMeasureSpec(badgeMaxW, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(22), MeasureSpec.EXACTLY));
-            mvPill.measure(MeasureSpec.makeMeasureSpec(Math.max(Ui.dp(120), colWi), MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Ui.dp(32), MeasureSpec.EXACTLY));
-            exact(mvBox, Math.max(1, (int) artBig.width()), Math.max(1, (int) artBig.height()));
             if (oneui) {
                 // round translucent buttons; scale down smoothly on narrower unfolded foldable columns so 5 buttons never collide
                 int btnS = wide ? Math.min(Ui.dp(54), Math.max(Ui.dp(40), (int) (colWi * 0.20f))) : Ui.dp(60);
@@ -564,17 +506,8 @@ final class NowPlaying extends FrameLayout {
             place(elapsed, side, (int) timesY);
             place(remain, W - side - Ui.dp(70), (int) timesY);
             place(chip, (W - chip.getMeasuredWidth()) / 2, (int) timesY - Ui.dp(2));
-            // A style: place Switch-to-Video pill cleanly centred between cover and title (matching reference layout),
-            // and place Hi-Res badge neatly below the cover when visible without overlapping mvPill.
-            place(mvBox, (int) artBig.left, (int) artBig.top);
-            boolean hasBadge = audioBadge.hasText() && audioBadge.getVisibility() == VISIBLE;
-            int mvTop = hasBadge ? (int) (artBig.bottom + Ui.dpf(10)) : (int) ((artBig.bottom + titleBigY - mvPill.getMeasuredHeight()) * 0.5f);
-            place(mvPill, (W - mvPill.getMeasuredWidth()) / 2, Math.max((int) artBig.bottom + Ui.dp(6), Math.min(mvTop, (int) titleBigY - mvPill.getMeasuredHeight() - Ui.dp(6))));
-            if (hasBadge) {
-                place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.top + Ui.dpf(10)));
-            } else {
-                place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(9)));
-            }
+            // A style: place codec / Bit-Perfect Assist badge cleanly centred right below the album cover (original 9.5.16 position)
+            place(audioBadge, (W - audioBadge.getMeasuredWidth()) / 2, (int) (artBig.bottom + Ui.dpf(9)));
             int cy = (int) ctrlY;
             int gap = Math.min(Ui.dp(108), W / 4);
             place(prev, W / 2 - gap - Ui.dp(36), cy - Ui.dp(36));
@@ -613,8 +546,6 @@ final class NowPlaying extends FrameLayout {
         private void layoutOneUi(int W) {
             int side = Ui.dp(28);
             place(handle, (W - handle.getMeasuredWidth()) / 2, Ui.statusInset + Ui.dp(Ui.cover() ? 7 : 14));
-            place(mvBox, (int) artBig.left, (int) artBig.top);
-            place(mvPill, (W - mvPill.getMeasuredWidth()) / 2, (int) (artBig.bottom - mvPill.getMeasuredHeight() - Ui.dp(12)));
             // output-device pill on left, AOD / like / more on right
             int devY = (int) (artBig.bottom + Ui.dpf(Ui.cover() ? 20 : 26));
             place(chip, side, devY - chip.getMeasuredHeight() / 2);
@@ -657,8 +588,6 @@ final class NowPlaying extends FrameLayout {
         private void layoutWide(int W) {
             int x = (int) colX, cw = (int) colW;
             place(handle, (int) (panelRect.centerX() - handle.getMeasuredWidth() / 2f), Ui.statusInset + Ui.dp(14));
-            place(mvBox, (int) artBig.left, (int) artBig.top);
-            place(mvPill, (int) (artBig.centerX() - mvPill.getMeasuredWidth() / 2f), (int) (artBig.bottom - mvPill.getMeasuredHeight() - Ui.dp(10)));
             if (oneui) {
                 int devY = (int) (artBig.bottom + Ui.dpf(22));
                 place(chip, x, devY - chip.getMeasuredHeight() / 2);
@@ -740,25 +669,12 @@ final class NowPlaying extends FrameLayout {
             }
             if (!GlassMenu.isSourceHidden(chip)) { chip.setAlpha(1f); chip.setVisibility(VISIBLE); }
             if (!GlassMenu.isSourceHidden(aodBtn)) aodBtn.setAlpha(1f);
-            mvPill.setAlpha(1f);
-            mvPill.setVisibility(VISIBLE);
-            mvBox.setAlpha(mvActive ? 1f : 0f);
-            mvBox.setVisibility(mvActive ? VISIBLE : GONE);
             panelHost.setTranslationY(0);
             panelHost.setAlpha(panel == 0 ? 0f : 1f);
             invalidate();
             return;
         }
         float k = mode;
-        float mvA = 1f - Ui.clamp(k * 1.8f, 0f, 1f);
-        mvPill.setAlpha(mvA);
-        mvPill.setVisibility(mvA < 0.02f ? INVISIBLE : VISIBLE);
-        if (mvActive) {
-            mvBox.setAlpha(mvA);
-            mvBox.setVisibility(mvA < 0.02f ? GONE : VISIBLE);
-        } else {
-            mvBox.setVisibility(GONE);
-        }
         // G style: the device/action row under the cover steps aside while lyrics / the queue are open
         float rowA = oneui ? 1f - Ui.clamp(k * 1.6f, 0f, 1f) : 1f;
         if (!GlassMenu.isSourceHidden(chip)) {
@@ -1185,125 +1101,10 @@ final class NowPlaying extends FrameLayout {
         prismPaint.setBlendMode(null);
     }
 
-    // ---------------------------------------------------------------- Music Video ("Switch to video")
-    private void toggleMusicVideo() {
-        if (mvLoading) return;
-        if (mvActive) {
-            stopMusicVideo();
-            return;
-        }
-        Player.Track t = Player.track;
-        if (t == null) return;
-        if (mvResolvedUrl != null && t.id != null && t.id.equals(mvForTrackId)) {
-            startMusicVideo(mvResolvedUrl);
-            return;
-        }
-        mvLoading = true;
-        mvLabel.setText(R.string.mv_loading);
-        content.requestLayout();
-        final String tid = t.id;
-        YouTubeMusic.findMusicVideo(t, ms -> {
-            mvLoading = false;
-            if (Player.track == null || (tid != null && !tid.equals(Player.track.id))) {
-                updateMvPillUi();
-                return;
-            }
-            if (ms == null || ms.videoUrl == null || ms.videoUrl.isEmpty()) {
-                updateMvPillUi();
-                Player.toast(R.string.mv_unavailable);
-                return;
-            }
-            mvForTrackId = tid;
-            mvResolvedUrl = ms.videoUrl;
-            startMusicVideo(ms.videoUrl);
-        });
-    }
-
-    private void startMusicVideo(String url) {
-        releaseMvPlayer();
-        mvActive = true;
-        updateMvPillUi();
-        mvBox.setVisibility(VISIBLE);
-        mvBox.setAlpha(0f);
-        mvBox.animate().alpha(1f).setDuration(260).setInterpolator(Ui.EMPHASIZED).start();
-        mvPlayer = new android.media.MediaPlayer();
-        mvPlayer.setAudioAttributes(new android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE).build());
-        mvPlayer.setVolume(0f, 0f); // Audio stays owned by Spotify / Local / YTM audio engine for zero double-audio!
-        if (mvSurface != null) {
-            try { mvPlayer.setSurface(mvSurface); } catch (Throwable ignored) {}
-        }
-        try {
-            mvPlayer.setDataSource(url);
-            mvPlayer.setOnPreparedListener(mp -> {
-                if (!mvActive) { releaseMvPlayer(); return; }
-                long pos = Player.position();
-                if (pos > 0 && mp.getDuration() > pos) { try { mp.seekTo((int) pos); } catch (Throwable ignored) {} }
-                if (Player.playing && getVisibility() == VISIBLE) { try { mp.start(); } catch (Throwable ignored) {} }
-            });
-            mvPlayer.setOnErrorListener((mp, w, e) -> { stopMusicVideo(); return true; });
-            mvPlayer.prepareAsync();
-        } catch (Exception e) {
-            stopMusicVideo();
-        }
-    }
-
-    private void stopMusicVideo() {
-        mvActive = false;
-        mvLoading = false;
-        releaseMvPlayer();
-        mvBox.setVisibility(GONE);
-        updateMvPillUi();
-    }
-
-    private void releaseMvPlayer() {
-        if (mvPlayer != null) {
-            try { mvPlayer.setSurface(null); } catch (Throwable ignored) {}
-            try { mvPlayer.release(); } catch (Throwable ignored) {}
-            mvPlayer = null;
-        }
-    }
-
-    private void updateMvPillUi() {
-        mvIcon.set(mvActive ? Icons.ALBUM : Icons.VIDEO, false);
-        mvLabel.setText(mvActive ? R.string.switch_to_audio : R.string.switch_to_video);
-        android.graphics.drawable.GradientDrawable bg = Ui.round(mvActive ? Ui.alpha(Ui.ACCENT, 0.72f) : 0x521C1C1E, 100);
-        bg.setStroke(Math.max(1, Ui.dp(0.8f)), mvActive ? 0x66FFFFFF : 0x38FFFFFF);
-        mvPill.setBackground(bg);
-        content.requestLayout();
-    }
-
-    private void syncMusicVideo(long pos) {
-        if (!mvActive || mvPlayer == null) return;
-        try {
-            if (Player.playing && getVisibility() == VISIBLE && !mvPlayer.isPlaying()) mvPlayer.start();
-            else if ((!Player.playing || getVisibility() != VISIBLE) && mvPlayer.isPlaying()) mvPlayer.pause();
-            long now = SystemClock.uptimeMillis();
-            if (now - lastMvSyncMs > 1600L) {
-                lastMvSyncMs = now;
-                int vPos = mvPlayer.getCurrentPosition();
-                int vDur = mvPlayer.getDuration();
-                if (vDur > 0 && pos < vDur && Math.abs(vPos - pos) > 750L) {
-                    mvPlayer.seekTo((int) pos);
-                }
-            }
-        } catch (Throwable ignored) {}
-    }
-
     // ---------------------------------------------------------------- state
     private void onTrack() {
         Player.Track t = Player.track;
         if (t == null) return;
-        if (mvForTrackId == null || !mvForTrackId.equals(t.id)) {
-            boolean wasMv = mvActive;
-            stopMusicVideo();
-            mvResolvedUrl = null;
-            mvForTrackId = t.id;
-            if ((wasMv || Settings.pref(getContext(), "auto_mv", false)) && getVisibility() == VISIBLE) {
-                postDelayed(this::toggleMusicVideo, 280);
-            }
-        }
         if (Settings.pref(getContext(), "lyrics", true)) Lyrics.prefetch(t);
         crossfade(title, t.name);
         crossfade(artist, t.artist);
@@ -1519,7 +1320,6 @@ final class NowPlaying extends FrameLayout {
             }
         }
         if (panel == 1) lyrics.setPosition(pos);
-        syncMusicVideo(pos);
         if ((SystemClock.uptimeMillis() / 100) % 20 == 0) refreshAudioBadge();
     }
 
@@ -2034,7 +1834,6 @@ final class NowPlaying extends FrameLayout {
 
     @Override protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        releaseMvPlayer();
         if (volumeRxRegistered) {
             try { getContext().unregisterReceiver(volumeRx); } catch (Throwable ignored) {}
             volumeRxRegistered = false;
