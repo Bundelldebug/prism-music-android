@@ -423,7 +423,13 @@ final class Pages {
     }
 
     static final class HomePage extends Page {
-        HomePage(MainActivity m) { super(m, m.getString(R.string.tab_home), true); }
+        HomePage(MainActivity m) {
+            super(m, m.getString(R.string.tab_home), true);
+            onPullRefresh = () -> {
+                if (main.isLocalSource()) LocalMusic.load(main, this::rebuild);
+                else rebuild();
+            };
+        }
 
         @Override void build() {
             MainActivity m = main;
@@ -1109,28 +1115,38 @@ final class Pages {
             }
             if (m.isYtmSource()) {
                 Widgets.Group yg = new Widgets.Group(m, m.getString(R.string.source_ytm));
-                yg.row(Icons.RECAP, Ui.ACCENT, m.getString(R.string.recap_title), null, true, v -> m.push(new RecapPage(m, true)));
+                yg.row(Icons.RECAP, Ui.ACCENT, m.getString(R.string.recap_ytm), null, true, v -> m.push(new RecapPage(m, 1)));
+                yg.row(Icons.HEART, Ui.ACCENT, m.getString(R.string.lib_liked), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_liked), "VLLM")));
+                yg.row(Icons.QUEUE, Ui.ACCENT, m.getString(R.string.lib_playlists), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_playlists), "FEmusic_liked_playlists")));
+                yg.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.lib_albums), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_albums), "FEmusic_liked_albums")));
+                yg.row(Icons.ARTIST, Ui.ACCENT, m.getString(R.string.lib_artists), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_artists), "FEmusic_library_corpus_track_artists")));
+                yg.row(Icons.CLOCK, Ui.ACCENT, m.getString(R.string.lib_recent), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_recent), "FEmusic_history")));
                 String accVal = YouTubeMusic.signedIn(m) ? YouTubeMusic.accountLabel(m) : m.getString(R.string.not_connected);
                 yg.row(Icons.PROFILE, Ui.ACCENT, m.getString(R.string.ytm_account), accVal, true, v -> m.push(new Settings.YouTubeMusicAccountPage(m)));
                 content.addView(yg, Widgets.MW);
-                content.addView(Widgets.section(m, m.getString(R.string.ytm_charts)));
+
+                boolean authed = YouTubeMusic.signedIn(m);
+                content.addView(Widgets.section(m, m.getString(authed ? R.string.lib_recently_saved : R.string.ytm_quick_picks)));
                 LinearLayout slot = slot();
                 slot.addView(Widgets.spinner(m, 140));
-                YouTubeMusic.fetchExploreCharts(list -> {
+                java.util.function.Consumer<List<Widgets.Item>> renderList = list -> {
                     slot.removeAllViews();
-                    if (list == null || list.isEmpty()) { slot.addView(Widgets.caption(m, m.getString(R.string.empty))); return; }
-                    LinearLayout card = new LinearLayout(m);
-                    card.setOrientation(LinearLayout.VERTICAL);
-                    card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
-                    card.setClipToOutline(true);
-                    for (int i = 0; i < Math.min(15, list.size()); i++) {
-                        final int idx = i;
-                        card.addView(Widgets.trackRow(m, list.get(i), 0, v -> m.playList(list, idx, m.getString(R.string.ytm_charts)), null), Widgets.MW);
+                    List<Widgets.Item> tracks = new ArrayList<>();
+                    if (list != null) for (Widgets.Item x : list) if (x.track != null) tracks.add(x);
+                    if (tracks.isEmpty()) {
+                        // Fallback to YTM Home quick picks so the library is never empty
+                        YouTubeMusic.fetchHome(secs -> {
+                            List<Widgets.Item> fb = new ArrayList<>();
+                            if (secs != null) for (List<Widgets.Item> v : secs.values()) for (Widgets.Item x : v) if (x.track != null) fb.add(x);
+                            if (fb.isEmpty()) { slot.addView(Widgets.caption(m, m.getString(R.string.empty))); return; }
+                            renderYtmTrackCard(m, slot, fb, m.getString(R.string.ytm_quick_picks));
+                        });
+                        return;
                     }
-                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    lp.leftMargin = lp.rightMargin = Ui.dp(16);
-                    slot.addView(card, lp);
-                });
+                    renderYtmTrackCard(m, slot, tracks, m.getString(R.string.source_ytm));
+                };
+                if (authed) YouTubeMusic.fetchBrowseList("FEmusic_history", renderList);
+                else YouTubeMusic.fetchExploreCharts(renderList);
                 return;
             }
             Widgets.Group g = new Widgets.Group(m, null);
@@ -1179,6 +1195,75 @@ final class Pages {
         private void open(int title, String kind) {
             if (!Spotify.loggedIn()) { Player.toast(R.string.login_needed); return; }
             main.push(new ListPage(main, main.getString(title), kind));
+        }
+
+        private static void renderYtmTrackCard(MainActivity m, LinearLayout into, List<Widgets.Item> list, String srcTitle) {
+            LinearLayout card = new LinearLayout(m);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
+            card.setClipToOutline(true);
+            for (int i = 0; i < Math.min(20, list.size()); i++) {
+                final int idx = i;
+                card.addView(Widgets.trackRow(m, list.get(i), 0, v -> m.playList(list, idx, srcTitle), null), Widgets.MW);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = lp.rightMargin = Ui.dp(16);
+            into.addView(card, lp);
+        }
+    }
+
+    /** YouTube Music Library & Playlist browser page (Liked songs, Playlists, Albums, Artists, History). */
+    static final class YtmListPage extends Page {
+        final String browseId;
+
+        YtmListPage(MainActivity m, String title, String browseId) {
+            super(m, title, true);
+            this.browseId = browseId;
+            back = true;
+            headerIcons = new int[0];
+        }
+
+        @Override void build() {
+            MainActivity m = main;
+            if (!YouTubeMusic.signedIn(m) && (browseId.startsWith("FE") || "VLLM".equals(browseId))) {
+                content.addView(Widgets.messageCard(m, Icons.PROFILE, "YouTube Music 계정에 로그인하면 내 보관함을 볼 수 있습니다.",
+                        m.getString(R.string.ytm_sign_in), v -> YouTubeMusic.showSignInDialog(m, this::rebuild)));
+                return;
+            }
+            LinearLayout list = slot();
+            list.addView(Widgets.spinner(m, 140));
+            YouTubeMusic.fetchBrowseList(browseId, items -> {
+                list.removeAllViews();
+                if (items == null || items.isEmpty()) {
+                    list.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                    return;
+                }
+                List<Widgets.Item> playable = new ArrayList<>();
+                for (Widgets.Item x : items) if (x.track != null) playable.add(x);
+                if (!playable.isEmpty()) {
+                    LinearLayout row = new LinearLayout(m);
+                    row.setPadding(Ui.dp(16), Ui.dp(6), Ui.dp(16), Ui.dp(10));
+                    row.addView(DetailPage.pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true,
+                            v -> m.playList(playable, 0, title)), new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+                    row.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
+                    row.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> {
+                        Player.shuffle = true;
+                        m.playList(playable, (int) (Math.random() * playable.size()), title);
+                    }), new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+                    list.addView(row, Widgets.MW);
+                }
+                for (int i = 0; i < items.size(); i++) {
+                    Widgets.Item it = items.get(i);
+                    if (it.track != null) {
+                        final int pIdx = playable.indexOf(it);
+                        list.addView(Widgets.trackRow(m, it, 0, v -> m.playList(playable, Math.max(0, pIdx), title), null), Widgets.MW);
+                    } else {
+                        View er = entityRow(m, it);
+                        er.setOnClickListener(v -> m.push(new YtmListPage(m, it.title, it.id)));
+                        list.addView(er, Widgets.MW);
+                    }
+                }
+            });
         }
     }
 
@@ -2391,75 +2476,54 @@ final class Pages {
             final int my = ++req;
             MainActivity m = main;
             body.removeAllViews();
-            if (sourceMode == 1 || sourceMode == 2) {
-                final boolean isYtm = sourceMode == 1;
+            if (sourceMode == 1) {
+                // YouTube Music Recap: fetch Official YouTube Music Recap first, with on-device YTM history fallback!
+                body.addView(Widgets.spinner(m, 160));
                 String p = periodIdx == 0 ? "month" : (periodIdx == 1 ? "year" : "all");
-                Recap.Summary s = isYtm ? Recap.ytmSummary(m, p) : Recap.localSummary(m, p);
-                if (s.totalPlays == 0) {
-                    body.addView(Widgets.messageCard(m, Icons.RECAP, m.getString(R.string.recap_empty), null, null));
-                    return;
-                }
-                String statTime = s.totalMs >= 3600_000L
-                        ? m.getString(R.string.recap_hours, s.totalMs / 3600_000f)
-                        : m.getString(R.string.recap_mins, Math.max(1, (int) (s.totalMs / 60_000L)));
-                String topAr = s.topArtists.isEmpty() ? "" : s.topArtists.get(0).name;
-                body.addView(heroCard(m, m.getString(isYtm ? R.string.recap_ytm : R.string.recap_local),
-                        statTime, m.getString(R.string.recap_plays, s.totalPlays), topAr, isYtm));
-
-                if (!s.topArtists.isEmpty()) {
-                    body.addView(Widgets.section(m, m.getString(R.string.recap_top_artists)));
-                    LinearLayout row = Widgets.rail(body, 10);
-                    int sz = Widgets.squareDp();
-                    for (int i = 0; i < Math.min(10, s.topArtists.size()); i++) {
-                        Recap.Entry ar = s.topArtists.get(i);
-                        Widgets.Item it = new Widgets.Item();
-                        it.type = "artist";
-                        it.title = ar.name;
-                        it.subtitle = m.getString(R.string.recap_plays, ar.plays);
-                        it.image = ar.art;
-                        Widgets.addToRail(row, Widgets.squareCard(m, it, sz, v -> {}), Ui.dp(sz));
+                YouTubeMusic.fetchOfficialRecap(off -> {
+                    if (my != req) return;
+                    body.removeAllViews();
+                    if (off != null && off.fromOfficial && (!off.topTracks.isEmpty() || !off.playlists.isEmpty())) {
+                        String topAr = off.topArtists.isEmpty() ? "" : off.topArtists.get(0).title;
+                        body.addView(heroCard(m, off.headline, off.periodLabel, off.statSummary, topAr, true));
+                        if (!off.playlists.isEmpty()) {
+                            body.addView(Widgets.section(m, "공식 리캡 재생목록"));
+                            LinearLayout row = Widgets.rail(body, 10);
+                            int sz = Widgets.squareDp();
+                            for (Widgets.Item pl : off.playlists) {
+                                Widgets.addToRail(row, Widgets.squareCard(m, pl, sz, v -> m.push(new YtmListPage(m, pl.title, pl.id))), Ui.dp(sz));
+                            }
+                        }
+                        if (!off.topArtists.isEmpty()) {
+                            body.addView(Widgets.section(m, m.getString(R.string.recap_top_artists)));
+                            LinearLayout row = Widgets.rail(body, 10);
+                            int sz = Widgets.squareDp();
+                            for (Widgets.Item ar : off.topArtists) Widgets.addToRail(row, Widgets.squareCard(m, ar, sz, v -> {}), Ui.dp(sz));
+                        }
+                        if (!off.topTracks.isEmpty()) {
+                            body.addView(Widgets.section(m, m.getString(R.string.recap_top_tracks)));
+                            LinearLayout card = new LinearLayout(m);
+                            card.setOrientation(LinearLayout.VERTICAL);
+                            card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
+                            card.setClipToOutline(true);
+                            for (int i = 0; i < Math.min(20, off.topTracks.size()); i++) {
+                                final int idx = i;
+                                card.addView(Widgets.trackRow(m, off.topTracks.get(i), i + 1,
+                                        v -> m.playList(off.topTracks, idx, off.headline), null), Widgets.MW);
+                            }
+                            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                            clp.leftMargin = clp.rightMargin = Ui.dp(16);
+                            body.addView(card, clp);
+                        }
+                        return;
                     }
-                }
-                if (!s.topTracks.isEmpty()) {
-                    body.addView(Widgets.section(m, m.getString(R.string.recap_top_tracks)));
-                    List<Widgets.Item> playItems = new ArrayList<>();
-                    for (Recap.Entry e : s.topTracks) {
-                        Player.Track tr = new Player.Track();
-                        tr.id = e.id; tr.uri = e.uri; tr.name = e.name; tr.artist = e.artist; tr.album = e.album;
-                        tr.art = e.art; tr.artSmall = e.art; tr.duration = e.durationMs;
-                        Widgets.Item it = new Widgets.Item();
-                        it.type = isYtm || (e.uri != null && e.uri.startsWith("ytm:")) ? "ytm_track" : "ltrack";
-                        it.id = e.id; it.uri = e.uri; it.title = e.name;
-                        it.subtitle = e.artist + " · " + m.getString(R.string.recap_plays, e.plays);
-                        it.image = e.art; it.track = tr;
-                        playItems.add(it);
-                    }
-                    LinearLayout card = new LinearLayout(m);
-                    card.setOrientation(LinearLayout.VERTICAL);
-                    card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
-                    card.setClipToOutline(true);
-                    for (int i = 0; i < Math.min(15, playItems.size()); i++) {
-                        final int idx = i;
-                        card.addView(Widgets.trackRow(m, playItems.get(i), i + 1, v -> m.playList(playItems, idx, isYtm ? m.getString(R.string.recap_ytm) : null), null), Widgets.MW);
-                    }
-                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    clp.leftMargin = clp.rightMargin = Ui.dp(16);
-                    body.addView(card, clp);
-                }
-                if (!s.topAlbums.isEmpty()) {
-                    body.addView(Widgets.section(m, m.getString(R.string.recap_top_albums)));
-                    LinearLayout row = Widgets.rail(body, 10);
-                    int sz = Widgets.squareDp();
-                    for (int i = 0; i < Math.min(10, s.topAlbums.size()); i++) {
-                        Recap.Entry al = s.topAlbums.get(i);
-                        Widgets.Item it = new Widgets.Item();
-                        it.type = "album";
-                        it.title = al.name;
-                        it.subtitle = al.artist + " · " + m.getString(R.string.recap_plays, al.plays);
-                        it.image = al.art;
-                        Widgets.addToRail(row, Widgets.squareCard(m, it, sz, v -> {}), Ui.dp(sz));
-                    }
-                }
+                    renderOnDeviceRecap(m, true, p);
+                });
+                return;
+            }
+            if (sourceMode == 2) {
+                String p = periodIdx == 0 ? "month" : (periodIdx == 1 ? "year" : "all");
+                renderOnDeviceRecap(m, false, p);
                 return;
             }
 
@@ -2508,6 +2572,77 @@ final class Pages {
                     }
                 });
             });
+        }
+
+        private void renderOnDeviceRecap(MainActivity m, boolean isYtm, String p) {
+            Recap.Summary s = isYtm ? Recap.ytmSummary(m, p) : Recap.localSummary(m, p);
+            if (s.totalPlays == 0) {
+                body.addView(Widgets.messageCard(m, Icons.RECAP, m.getString(R.string.recap_empty),
+                        isYtm && !YouTubeMusic.signedIn(m) ? m.getString(R.string.ytm_sign_in) : null,
+                        isYtm && !YouTubeMusic.signedIn(m) ? v -> YouTubeMusic.showSignInDialog(m, this::load) : null));
+                return;
+            }
+            String statTime = s.totalMs >= 3600_000L
+                    ? m.getString(R.string.recap_hours, s.totalMs / 3600_000f)
+                    : m.getString(R.string.recap_mins, Math.max(1, (int) (s.totalMs / 60_000L)));
+            String topAr = s.topArtists.isEmpty() ? "" : s.topArtists.get(0).name;
+            body.addView(heroCard(m, m.getString(isYtm ? R.string.recap_ytm : R.string.recap_local),
+                    statTime, m.getString(R.string.recap_plays, s.totalPlays), topAr, isYtm));
+
+            if (!s.topArtists.isEmpty()) {
+                body.addView(Widgets.section(m, m.getString(R.string.recap_top_artists)));
+                LinearLayout row = Widgets.rail(body, 10);
+                int sz = Widgets.squareDp();
+                for (int i = 0; i < Math.min(10, s.topArtists.size()); i++) {
+                    Recap.Entry ar = s.topArtists.get(i);
+                    Widgets.Item it = new Widgets.Item();
+                    it.type = "artist";
+                    it.title = ar.name;
+                    it.subtitle = m.getString(R.string.recap_plays, ar.plays);
+                    it.image = ar.art;
+                    Widgets.addToRail(row, Widgets.squareCard(m, it, sz, v -> {}), Ui.dp(sz));
+                }
+            }
+            if (!s.topTracks.isEmpty()) {
+                body.addView(Widgets.section(m, m.getString(R.string.recap_top_tracks)));
+                List<Widgets.Item> playItems = new ArrayList<>();
+                for (Recap.Entry e : s.topTracks) {
+                    Player.Track tr = new Player.Track();
+                    tr.id = e.id; tr.uri = e.uri; tr.name = e.name; tr.artist = e.artist; tr.album = e.album;
+                    tr.art = e.art; tr.artSmall = e.art; tr.duration = e.durationMs;
+                    Widgets.Item it = new Widgets.Item();
+                    it.type = isYtm || (e.uri != null && e.uri.startsWith("ytm:")) ? "ytm_track" : "ltrack";
+                    it.id = e.id; it.uri = e.uri; it.title = e.name;
+                    it.subtitle = e.artist + " · " + m.getString(R.string.recap_plays, e.plays);
+                    it.image = e.art; it.track = tr;
+                    playItems.add(it);
+                }
+                LinearLayout card = new LinearLayout(m);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackground(Ui.round(Ui.card(), Ui.cardRadius()));
+                card.setClipToOutline(true);
+                for (int i = 0; i < Math.min(15, playItems.size()); i++) {
+                    final int idx = i;
+                    card.addView(Widgets.trackRow(m, playItems.get(i), i + 1, v -> m.playList(playItems, idx, isYtm ? m.getString(R.string.recap_ytm) : null), null), Widgets.MW);
+                }
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.leftMargin = clp.rightMargin = Ui.dp(16);
+                body.addView(card, clp);
+            }
+            if (!s.topAlbums.isEmpty()) {
+                body.addView(Widgets.section(m, m.getString(R.string.recap_top_albums)));
+                LinearLayout row = Widgets.rail(body, 10);
+                int sz = Widgets.squareDp();
+                for (int i = 0; i < Math.min(10, s.topAlbums.size()); i++) {
+                    Recap.Entry al = s.topAlbums.get(i);
+                    Widgets.Item it = new Widgets.Item();
+                    it.type = "album";
+                    it.title = al.name;
+                    it.subtitle = al.artist + " · " + m.getString(R.string.recap_plays, al.plays);
+                    it.image = al.art;
+                    Widgets.addToRail(row, Widgets.squareCard(m, it, sz, v -> {}), Ui.dp(sz));
+                }
+            }
         }
 
         private static View heroCard(Context c, String kicker, String bigStat, String subStat, String topArtist, boolean ytmTheme) {

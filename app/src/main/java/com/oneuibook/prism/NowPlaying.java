@@ -2055,14 +2055,24 @@ final class NowPlaying extends FrameLayout {
             float r = h / 2f;
             float p = isActionPill ? Ui.clamp(pulse.value, 0f, 1f) : 0f;
             pill.shapes(bounds, r, null, 0, null, 0);
-            // Exact same background color & transparency as the output device pill!
-            pill.tint = Ui.barTint();
-            pill.blurDp = Ui.barBlur();
-            pill.strokeColor = Ui.glassStroke();
-            pill.refractDp = 12f + 4.5f * p;
-            pill.edgeDp = 14f + 2.5f * p;
-            pill.rim = 0.28f + 0.20f * p;
-            pill.shadowAlpha = 0.14f + 0.03f * p;
+            if (isActionPill) {
+                // Crystal-clear transparent Liquid Glass over the vivid blurred player backdrop
+                pill.tint = Ui.alpha(0xFFFFFFFF, Ui.dark ? 0.06f : 0.12f);
+                pill.blurDp = 5.5f;
+                pill.strokeColor = 0x58FFFFFF;
+                pill.refractDp = 16f + 4.5f * p;
+                pill.edgeDp = 18f + 2.5f * p;
+                pill.rim = 0.46f + 0.22f * p;
+                pill.shadowAlpha = 0.10f + 0.03f * p;
+            } else {
+                pill.tint = Ui.barTint();
+                pill.blurDp = Ui.barBlur();
+                pill.strokeColor = Ui.glassStroke();
+                pill.refractDp = 12f + 4.5f * p;
+                pill.edgeDp = 14f + 2.5f * p;
+                pill.rim = 0.28f + 0.20f * p;
+                pill.shadowAlpha = 0.14f + 0.03f * p;
+            }
             pill.pressX = pulseX;
             pill.pressY = pulseY;
             pill.pressR = Ui.dpf(48);
@@ -2085,16 +2095,17 @@ final class NowPlaying extends FrameLayout {
             }
             pill.draw(c, this, null);
 
-            // Snug horizontal Liquid Glass active capsules (matches reference screenshot: compact pill ~60dp × 36dp, inset ~7dp)
+            // Proportional horizontal Liquid Glass active capsules (never squished into vertical ovals on 2-button tablet pill!)
             if (isActionPill) {
                 View[] btns = {lyricsBtn, shuffleBtn, repeatBtn, queueBtn};
-                boolean lightBar = !Ui.dark && Ui.glassT < 0.72f;
-                int baseFill = lightBar ? 0x22000000 : 0x42FFFFFF;
-                int baseRim = lightBar ? 0x2E000000 : 0x62FFFFFF;
-                float insetY = Ui.dpf(6.5f);
+                int visCount = 0;
+                for (View b : btns) if (b != null && b.getVisibility() == VISIBLE) visCount++;
+                int baseFill = 0x34FFFFFF;
+                int baseRim = 0x72FFFFFF;
+                float insetY = Ui.dpf(5.5f);
                 float capH = Math.max(Ui.dpf(32), h - insetY * 2f);
-                float capBaseW = Math.min(Ui.dpf(60), w * 0.22f);
-                float capR = capH * 0.5f;
+                float segW = w / (float) Math.max(1, visCount);
+                float capBaseW = Math.max(capH, Math.min(Ui.dpf(60), segW - Ui.dpf(8)));
 
                 // 1) Active per-option snug horizontal capsules (critically damped, zero bounce)
                 for (int i = 0; i < 4; i++) {
@@ -2104,8 +2115,8 @@ final class NowPlaying extends FrameLayout {
                     if (b == null || b.getVisibility() != VISIBLE) continue;
                     float cx = (b.getLeft() + b.getRight()) * 0.5f - getLeft();
                     float cy = h * 0.5f;
-                    float cw = capBaseW * Ui.lerp(0.84f, 1.0f, k);
-                    float ch = capH * Ui.lerp(0.86f, 1.0f, k);
+                    float cw = Math.max(capH * 0.92f, capBaseW * Ui.lerp(0.86f, 1.0f, k));
+                    float ch = capH * Ui.lerp(0.88f, 1.0f, k);
                     float cr = ch * 0.5f;
                     capRect.set(cx - cw * 0.5f, cy - ch * 0.5f, cx + cw * 0.5f, cy + ch * 0.5f);
                     capFill.setColor(Ui.alpha(baseFill, ((baseFill >>> 24) / 255f) * k));

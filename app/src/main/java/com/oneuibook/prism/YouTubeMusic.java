@@ -67,10 +67,22 @@ final class YouTubeMusic {
         String hlsUrl;
         String userAgent;
         String videoId;
+        int clientIdx;
         long durationMs;
         String title;
         String artist;
         String thumb;
+    }
+
+    static final class OfficialRecap {
+        boolean fromOfficial;
+        String headline = "YouTube Music 리캡";
+        String periodLabel = "전체 기간";
+        String statSummary = "";
+        final List<Widgets.Item> topTracks = new ArrayList<>();
+        final List<Widgets.Item> topArtists = new ArrayList<>();
+        final List<Widgets.Item> topAlbums = new ArrayList<>();
+        final List<Widgets.Item> playlists = new ArrayList<>();
     }
 
     static boolean isYtm(Player.Track t) {
@@ -222,12 +234,16 @@ final class YouTubeMusic {
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
         c.setRequestProperty("Origin", ORIGIN);
+        c.setRequestProperty("X-Origin", ORIGIN);
         c.setRequestProperty("Referer", ORIGIN + "/");
+        c.setRequestProperty("X-YouTube-Client-Name", "67");
+        c.setRequestProperty("X-YouTube-Client-Version", "1.20250317.01.00");
         if (userAgent != null) c.setRequestProperty("User-Agent", userAgent);
         if (sendAuth && app != null) {
             String ck = cookie(app);
             if (!ck.isEmpty()) {
                 c.setRequestProperty("Cookie", ck);
+                c.setRequestProperty("X-Goog-AuthUser", "0");
                 String auth = sapisidHash(ck);
                 if (auth != null) c.setRequestProperty("Authorization", auth);
             }
@@ -271,6 +287,151 @@ final class YouTubeMusic {
                 } catch (Exception ignored) {}
             }
             Spotify.MAIN.post(() -> cb.accept(sections));
+        });
+    }
+
+    /** Fetches a YouTube Music browse endpoint (Library playlists/albums/artists/liked songs/history or playlist tracks). */
+    static void fetchBrowseList(String browseId, Consumer<List<Widgets.Item>> cb) {
+        if (testFixtures != null) {
+            List<Widgets.Item> list = testFixtures.apply("browse:" + browseId);
+            if (list == null || list.isEmpty()) list = testFixtures.apply("charts");
+            final List<Widgets.Item> resList = list != null ? list : Collections.emptyList();
+            Spotify.MAIN.post(() -> cb.accept(resList));
+            return;
+        }
+        IO.execute(() -> {
+            List<Widgets.Item> out = fetchBrowseListSync(browseId, 50);
+            Spotify.MAIN.post(() -> cb.accept(out));
+        });
+    }
+
+    static List<Widgets.Item> fetchBrowseListSync(String browseId, int limit) {
+        List<Widgets.Item> out = new ArrayList<>();
+        if (browseId == null || browseId.isEmpty()) return out;
+        try {
+            JSONObject req = new JSONObject()
+                    .put("context", webRemixContext())
+                    .put("browseId", browseId);
+            JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
+            if (res != null) extractAnyItemsRecursive(res, out, limit);
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    /**
+     * Fetches official YouTube Music Recap via authenticated InnerTube endpoints:
+     * 1) FEmusic_listening_review (official seasonal/yearly Recap page)
+     * 2) FEmusic_liked_playlists (official generated Recap playlists)
+     * 3) FEmusic_history (official server-side listening history for top songs/artists)
+     */
+    static void fetchOfficialRecap(Consumer<OfficialRecap> cb) {
+        if (testFixtures != null) {
+            OfficialRecap r = new OfficialRecap();
+            List<Widgets.Item> fix = testFixtures.apply("recap_official");
+            if (fix != null && !fix.isEmpty()) {
+                r.fromOfficial = true;
+                r.headline = "YouTube Music 공식 리캡";
+                r.statSummary = fix.size() + "곡 · 공식 기록";
+                r.topTracks.addAll(fix);
+            }
+            Spotify.MAIN.post(() -> cb.accept(r));
+            return;
+        }
+        IO.execute(() -> {
+            OfficialRecap out = new OfficialRecap();
+            if (!signedIn(app)) {
+                Spotify.MAIN.post(() -> cb.accept(out));
+                return;
+            }
+            try {
+                // 1) Official YouTube Music Listening Review (Recap)
+                JSONObject req = new JSONObject().put("context", webRemixContext()).put("browseId", "FEmusic_listening_review");
+                JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
+                if (res != null) {
+                    Map<String, List<Widgets.Item>> shelves = new LinkedHashMap<>();
+                    extractShelvesAny(res, shelves);
+                    for (Map.Entry<String, List<Widgets.Item>> e : shelves.entrySet()) {
+                        String k = e.getKey().toLowerCase(Locale.ROOT);
+                        for (Widgets.Item it : e.getValue()) {
+                            if ("ytm_playlist".equals(it.type)) {
+                                if (!containsId(out.playlists, it.id)) out.playlists.add(it);
+                            } else if ("ytm_artist".equals(it.type) || k.contains("artist") || k.contains("아티스트")) {
+                                if (!containsId(out.topArtists, it.id)) out.topArtists.add(it);
+                            } else if ("ytm_album".equals(it.type) || k.contains("album") || k.contains("앨범")) {
+                                if (!containsId(out.topAlbums, it.id)) out.topAlbums.add(it);
+                            } else if (it.track != null) {
+                                if (!containsId(out.topTracks, it.id)) out.topTracks.add(it);
+                            }
+                        }
+                    }
+                    if (!out.topTracks.isEmpty() || !out.topArtists.isEmpty() || !out.playlists.isEmpty()) {
+                        out.fromOfficial = true;
+                        out.headline = "YouTube Music 공식 리캡";
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            // 2) Official Recap playlists inside user's playlists (e.g. "2026 Recap", "2025 Recap", "가을 리캡")
+            try {
+                List<Widgets.Item> pls = fetchBrowseListSync("FEmusic_liked_playlists", 40);
+                for (Widgets.Item pl : pls) {
+                    String tl = pl.title == null ? "" : pl.title.toLowerCase(Locale.ROOT);
+                    if (tl.contains("recap") || tl.contains("리캡")) {
+                        if (!containsId(out.playlists, pl.id)) out.playlists.add(pl);
+                    }
+                }
+                if (out.topTracks.isEmpty() && !out.playlists.isEmpty()) {
+                    Widgets.Item firstRecap = out.playlists.get(0);
+                    String bid = firstRecap.uri != null && firstRecap.uri.startsWith("ytm:browse:")
+                            ? firstRecap.uri.substring(11) : firstRecap.id;
+                    List<Widgets.Item> tracks = fetchBrowseListSync(bid, 30);
+                    for (Widgets.Item tr : tracks) {
+                        if (tr.track != null && !containsId(out.topTracks, tr.id)) out.topTracks.add(tr);
+                    }
+                    if (!out.topTracks.isEmpty()) {
+                        out.fromOfficial = true;
+                        out.headline = firstRecap.title;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            // 3) Supplement with official server-side YouTube Music History (FEmusic_history)
+            if (out.topTracks.isEmpty()) {
+                try {
+                    List<Widgets.Item> hist = fetchBrowseListSync("FEmusic_history", 40);
+                    for (Widgets.Item tr : hist) {
+                        if (tr.track != null && !containsId(out.topTracks, tr.id)) out.topTracks.add(tr);
+                    }
+                    if (!out.topTracks.isEmpty()) {
+                        out.fromOfficial = true;
+                        out.headline = "YouTube Music 공식 감상 기록";
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Synthesize top artists from official topTracks if artist shelf wasn't provided separately
+            if (out.topArtists.isEmpty() && !out.topTracks.isEmpty()) {
+                Map<String, Widgets.Item> arMap = new LinkedHashMap<>();
+                for (Widgets.Item tr : out.topTracks) {
+                    if (tr.track == null || tr.track.artist == null || tr.track.artist.isEmpty() || "YouTube Music".equals(tr.track.artist)) continue;
+                    String an = tr.track.artist;
+                    if (!arMap.containsKey(an)) {
+                        Widgets.Item ai = new Widgets.Item();
+                        ai.type = "artist";
+                        ai.id = "ytm_ar:" + an;
+                        ai.title = an;
+                        ai.subtitle = "YouTube Music";
+                        ai.image = tr.image;
+                        arMap.put(an, ai);
+                    }
+                    if (arMap.size() >= 10) break;
+                }
+                out.topArtists.addAll(arMap.values());
+            }
+            if (out.fromOfficial) {
+                out.statSummary = out.topTracks.size() + "곡 · 공식 YouTube Music";
+            }
+            Spotify.MAIN.post(() -> cb.accept(out));
         });
     }
 
@@ -429,15 +590,21 @@ final class YouTubeMusic {
         return new JSONObject(txt);
     }
 
-    /** Resolves direct playable audio & HLS URLs via InnerTube /player (verified IOS 20.10.4 -> ANDROID_VR -> ANDROID_MUSIC). */
+    /** Resolves direct playable audio & HLS URLs via InnerTube /player (ANDROID_VR first: no poToken 45s cap -> IOS -> ANDROID_MUSIC). */
     static MediaStreams resolveStreamsSync(String videoId) {
+        return resolveStreamsSync(videoId, 0);
+    }
+
+    static MediaStreams resolveStreamsSync(String videoId, int startClientIdx) {
         if (videoId == null || videoId.isEmpty()) return null;
         String[][] clients = {
-                {"IOS", "5", "20.10.4", IOS_UA},
                 {"ANDROID_VR", "28", "1.62.27", "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"},
+                {"IOS", "5", "20.10.4", IOS_UA},
                 {"ANDROID_MUSIC", "21", "7.16.53", "com.google.android.apps.youtube.music/7.16.53 (Linux; U; Android 14) gzip"}
         };
-        for (String[] cl : clients) {
+        for (int step = 0; step < clients.length; step++) {
+            int cIdx = (Math.max(0, startClientIdx) + step) % clients.length;
+            String[] cl = clients[cIdx];
             try {
                 JSONObject client = new JSONObject()
                         .put("clientName", cl[0])
@@ -450,9 +617,11 @@ final class YouTubeMusic {
                             .put("osName", "iPhone")
                             .put("osVersion", "18.3.1.22D72");
                 } else if ("ANDROID_VR".equals(cl[0])) {
-                    client.put("androidSdkVersion", 32)
+                    client.put("deviceMake", "Oculus")
+                            .put("deviceModel", "Quest 3")
+                            .put("androidSdkVersion", 32)
                             .put("osName", "Android")
-                            .put("osVersion", "12");
+                            .put("osVersion", "12L");
                 }
                 JSONObject body = new JSONObject()
                         .put("videoId", videoId)
@@ -464,6 +633,7 @@ final class YouTubeMusic {
                 MediaStreams ms = parseStreamingData(videoId, res);
                 if (ms != null && (ms.audioUrl != null || ms.hlsUrl != null)) {
                     ms.userAgent = cl[3];
+                    ms.clientIdx = cIdx;
                     return ms;
                 }
             } catch (Exception ignored) {}
@@ -552,6 +722,106 @@ final class YouTubeMusic {
                 else existing.addAll(items);
             }
         }
+    }
+
+    private static void extractShelvesAny(JSONObject root, Map<String, List<Widgets.Item>> out) {
+        List<JSONObject> shelves = new ArrayList<>();
+        collectByKey(root, "musicCarouselShelfRenderer", shelves);
+        collectByKey(root, "musicShelfRenderer", shelves);
+        collectByKey(root, "gridRenderer", shelves);
+        for (JSONObject shelf : shelves) {
+            String title = extractText(shelf.optJSONObject("header"));
+            if (title.isEmpty()) title = extractText(shelf.optJSONObject("title"));
+            if (title.isEmpty()) title = "YouTube Music";
+            List<Widgets.Item> items = new ArrayList<>();
+            extractAnyItemsRecursive(shelf, items, 25);
+            if (!items.isEmpty()) {
+                List<Widgets.Item> existing = out.get(title);
+                if (existing == null) out.put(title, items);
+                else existing.addAll(items);
+            }
+        }
+    }
+
+    private static void extractAnyItemsRecursive(Object node, List<Widgets.Item> out, int limit) {
+        if (out.size() >= limit || node == null) return;
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            JSONObject rli = o.optJSONObject("musicResponsiveListItemRenderer");
+            if (rli != null) {
+                Widgets.Item it = parseListItemAny(rli);
+                if (it != null && !containsId(out, it.id)) out.add(it);
+                return;
+            }
+            JSONObject two = o.optJSONObject("musicTwoRowItemRenderer");
+            if (two != null) {
+                Widgets.Item it = parseTwoRowItemAny(two);
+                if (it != null && !containsId(out, it.id)) out.add(it);
+                return;
+            }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext() && out.size() < limit) extractAnyItemsRecursive(o.opt(it.next()), out, limit);
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length() && out.size() < limit; i++) extractAnyItemsRecursive(a.opt(i), out, limit);
+        }
+    }
+
+    private static Widgets.Item parseListItemAny(JSONObject rli) {
+        Widgets.Item tr = parseListItem(rli);
+        if (tr != null) return tr;
+        String bid = findBrowseId(rli);
+        if (bid.isEmpty()) return null;
+        JSONArray cols = rli.optJSONArray("flexColumns");
+        String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
+        String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
+        if (title.isEmpty()) return null;
+        return buildBrowseItem(bid, title, sub, extractBestThumb(rli, ""));
+    }
+
+    private static Widgets.Item parseTwoRowItemAny(JSONObject two) {
+        Widgets.Item tr = parseTwoRowItem(two);
+        if (tr != null) return tr;
+        String bid = findBrowseId(two);
+        if (bid.isEmpty()) return null;
+        String title = extractText(two.optJSONObject("title"));
+        String sub = extractText(two.optJSONObject("subtitle"));
+        if (title.isEmpty()) return null;
+        return buildBrowseItem(bid, title, sub, extractBestThumb(two, ""));
+    }
+
+    private static Widgets.Item buildBrowseItem(String browseId, String title, String subtitle, String thumb) {
+        Widgets.Item it = new Widgets.Item();
+        if (browseId.startsWith("MPREb_")) it.type = "ytm_album";
+        else if (browseId.startsWith("UC") || browseId.startsWith("MPLA")) it.type = "ytm_artist";
+        else it.type = "ytm_playlist";
+        it.id = browseId;
+        it.uri = "ytm:browse:" + browseId;
+        it.title = title;
+        it.subtitle = subtitle == null ? "" : subtitle;
+        it.image = thumb;
+        return it;
+    }
+
+    private static String findBrowseId(Object node) {
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            String b = o.optString("browseId", "");
+            if (b.length() >= 4 && !b.startsWith("FE")) return b;
+            if (b.equals("VLLM") || b.startsWith("VL")) return b;
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String f = findBrowseId(o.opt(it.next()));
+                if (!f.isEmpty()) return f;
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) {
+                String f = findBrowseId(a.opt(i));
+                if (!f.isEmpty()) return f;
+            }
+        }
+        return "";
     }
 
     private static void collectByKey(Object node, String key, List<JSONObject> out) {
@@ -837,12 +1107,13 @@ final class YouTubeMusic {
      * but serves HTTP 206 Partial Content cleanly for bounded Range: bytes=start-end requests!
      */
     static final class RangeMediaDataSource extends android.media.MediaDataSource {
-        private static final int CHUNK = 524288; // 512 KB per Range request (fewer round-trips, smoother streaming)
-        private static final int MAX_CACHED_CHUNKS = 28; // 14 MB LRU cache (holds entire typical audio track in RAM)
-        private static final ExecutorService PREFETCH_IO = Executors.newFixedThreadPool(2);
+        private static final int CHUNK = 262144; // 256 KB per native &range= request (faster turnaround, zero CDN throttle)
+        private static final int MAX_CACHED_CHUNKS = 48; // 12 MB LRU cache (holds full audio track in RAM)
+        private static final ExecutorService PREFETCH_IO = Executors.newFixedThreadPool(3);
         private final String videoId;
         private volatile String url;
         private volatile String ua;
+        private volatile int clientIdx;
         private volatile long totalSize;
         private volatile boolean closed;
         private final LinkedHashMap<Long, byte[]> cache = new LinkedHashMap<Long, byte[]>(MAX_CACHED_CHUNKS + 2, 0.75f, true) {
@@ -853,14 +1124,15 @@ final class YouTubeMusic {
         private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<byte[]>> inFlight =
                 new java.util.concurrent.ConcurrentHashMap<>();
 
-        RangeMediaDataSource(String videoId, String url, long contentLength, String ua) {
+        RangeMediaDataSource(String videoId, String url, long contentLength, String ua, int clientIdx) {
             this.videoId = videoId;
             this.url = url;
             this.totalSize = contentLength;
             this.ua = ua != null ? ua : IOS_UA;
-            // Immediately warm up the first two chunks asynchronously so initial playback & early seconds never stutter!
+            this.clientIdx = clientIdx;
             prefetchChunk(0);
             if (contentLength <= 0 || contentLength > CHUNK) prefetchChunk(1);
+            if (contentLength <= 0 || contentLength > CHUNK * 2L) prefetchChunk(2);
         }
 
         private void prefetchChunk(final long chunkIdx) {
@@ -937,9 +1209,10 @@ final class YouTubeMusic {
             int want = total > 0 ? (int) Math.min(size, total - position) : size;
             long chunkIdx = position / CHUNK;
             int inChunk = (int) (position - chunkIdx * CHUNK);
-            // Proactively prefetch the next 2 chunks ahead of the playback cursor so MediaPlayer NEVER stalls on a chunk boundary!
+            // Proactively prefetch 3 chunks ahead so playback never stalls past 40-60s!
             prefetchChunk(chunkIdx + 1);
             prefetchChunk(chunkIdx + 2);
+            prefetchChunk(chunkIdx + 3);
             byte[] data = loadChunk(chunkIdx);
             if (data == null || data.length == 0) return -1;
             if (inChunk >= data.length) return -1;
@@ -948,31 +1221,42 @@ final class YouTubeMusic {
             return n;
         }
 
+        private static String withRangeParam(String baseUrl, long start, long end) {
+            if (baseUrl == null || !baseUrl.contains("googlevideo.com")) return baseUrl;
+            String cleaned = baseUrl.replaceAll("([?&])range=[^&]*&?", "$1");
+            if (cleaned.endsWith("?") || cleaned.endsWith("&")) cleaned = cleaned.substring(0, cleaned.length() - 1);
+            return cleaned + (cleaned.contains("?") ? "&" : "?") + "range=" + start + "-" + end;
+        }
+
         private byte[] fetchRange(long start, long end, boolean parseTotal) throws java.io.IOException {
             java.io.IOException lastErr = null;
-            boolean refreshedUrl = false;
-            for (int attempt = 0; attempt < 4 && !closed; attempt++) {
+            int refreshes = 0;
+            for (int attempt = 0; attempt < 5 && !closed; attempt++) {
                 if (attempt > 0) {
-                    try { Thread.sleep(attempt == 1 ? 120L : (attempt == 2 ? 320L : 650L)); } catch (InterruptedException ignored) { break; }
+                    try { Thread.sleep(attempt == 1 ? 100L : (attempt == 2 ? 260L : 500L)); } catch (InterruptedException ignored) { break; }
                 }
                 HttpURLConnection conn = null;
                 try {
                     String curUrl = this.url;
                     String curUa = this.ua;
-                    conn = (HttpURLConnection) new URL(curUrl).openConnection();
+                    boolean useQueryRange = curUrl != null && curUrl.contains("googlevideo.com");
+                    String reqUrl = useQueryRange ? withRangeParam(curUrl, start, end) : curUrl;
+                    conn = (HttpURLConnection) new URL(reqUrl).openConnection();
                     conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(15000);
+                    conn.setReadTimeout(14000);
                     conn.setRequestProperty("User-Agent", curUa);
                     conn.setRequestProperty("Accept-Encoding", "identity");
                     conn.setRequestProperty("Connection", "keep-alive");
-                    conn.setRequestProperty("Range", "bytes=" + start + "-" + end);
+                    if (!useQueryRange) conn.setRequestProperty("Range", "bytes=" + start + "-" + end);
                     int code = conn.getResponseCode();
-                    if ((code == 403 || code == 410) && !refreshedUrl && videoId != null && !videoId.isEmpty()) {
-                        // Signed googlevideo URL expired or throttled mid-track: transparently re-resolve fresh URL!
-                        refreshedUrl = true;
-                        MediaStreams fresh = resolveStreamsSync(videoId);
+                    if ((code == 403 || code == 410) && refreshes < 2 && videoId != null && !videoId.isEmpty()) {
+                        // Rotate to NEXT InnerTube client (e.g. ANDROID_VR -> IOS -> ANDROID_MUSIC) to bypass per-client poToken/45s caps!
+                        refreshes++;
+                        int nextClient = (this.clientIdx + 1) % 3;
+                        MediaStreams fresh = resolveStreamsSync(videoId, nextClient);
                         if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()) {
                             this.url = fresh.audioUrl;
+                            this.clientIdx = fresh.clientIdx;
                             if (fresh.userAgent != null) this.ua = fresh.userAgent;
                             if (fresh.audioContentLength > 0) this.totalSize = fresh.audioContentLength;
                             continue;
@@ -989,7 +1273,7 @@ final class YouTubeMusic {
                                 long parsed = parseLongSafe(cr.substring(slash + 1).trim(), -1L);
                                 if (parsed > 0) totalSize = parsed;
                             }
-                        } else if (code == 200) {
+                        } else if (code == 200 && !useQueryRange) {
                             long cl = conn.getContentLengthLong();
                             if (cl > 0) totalSize = cl;
                         }
@@ -1005,6 +1289,15 @@ final class YouTubeMusic {
                     }
                 } catch (java.io.IOException e) {
                     lastErr = e;
+                    if (attempt >= 2 && refreshes < 2 && videoId != null && !videoId.isEmpty()) {
+                        refreshes++;
+                        MediaStreams fresh = resolveStreamsSync(videoId, (this.clientIdx + 1) % 3);
+                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()) {
+                            this.url = fresh.audioUrl;
+                            this.clientIdx = fresh.clientIdx;
+                            if (fresh.userAgent != null) this.ua = fresh.userAgent;
+                        }
+                    }
                 } finally {
                     if (conn != null) conn.disconnect();
                 }
@@ -1020,12 +1313,53 @@ final class YouTubeMusic {
         }
     }
 
+    private static MediaStreams activeStreams;
+    private static int activeRetry;
+    private static long lastWatchPos = -1L;
+    private static int stallTicks = 0;
+    private static final Runnable STALL_WATCH = new Runnable() {
+        @Override public void run() {
+            if (mp == null || !Player.ytm() || !Player.playing) { stallTicks = 0; lastWatchPos = -1L; return; }
+            try {
+                int pos = mp.getCurrentPosition();
+                int dur = mp.getDuration();
+                if (dur > 10000 && pos > 0 && pos < dur - 4000) {
+                    if (pos == lastWatchPos) {
+                        if (++stallTicks >= 2 && activeStreams != null && activeRetry < 3) {
+                            stallTicks = 0;
+                            final MediaStreams cur = activeStreams;
+                            final int nextTry = activeRetry + 1;
+                            final int gen = playGen;
+                            IO.execute(() -> {
+                                MediaStreams fresh = resolveStreamsSync(cur.videoId, (cur.clientIdx + 1) % 3);
+                                Spotify.MAIN.post(() -> {
+                                    if (gen != playGen || !Player.playing) return;
+                                    if (fresh != null) openStream(fresh, pos, nextTry >= 2, nextTry);
+                                });
+                            });
+                            return;
+                        }
+                    } else {
+                        stallTicks = 0;
+                    }
+                    lastWatchPos = pos;
+                }
+            } catch (Throwable ignored) {}
+            Spotify.MAIN.postDelayed(this, 2500);
+        }
+    };
+
     private static void openStream(MediaStreams ms, long seekTo, boolean useHls) {
         openStream(ms, seekTo, useHls, 0);
     }
 
     private static void openStream(MediaStreams ms, long seekTo, boolean useHls, int retryCount) {
         release();
+        Spotify.MAIN.removeCallbacks(STALL_WATCH);
+        activeStreams = ms;
+        activeRetry = retryCount;
+        lastWatchPos = -1L;
+        stallTicks = 0;
         if (app == null || ms == null) return;
         final int gen = playGen;
         boolean playingHls = useHls || (ms.audioUrl == null && ms.hlsUrl != null);
@@ -1045,8 +1379,8 @@ final class YouTubeMusic {
                 headers.put("User-Agent", ms.userAgent != null ? ms.userAgent : IOS_UA);
                 mp.setDataSource(app, android.net.Uri.parse(url), headers);
             } else {
-                // Prefetching HTTP Range MediaDataSource prevents CDN 403s AND mid-track stalls/stuttering!
-                mp.setDataSource(new RangeMediaDataSource(ms.videoId, url, ms.audioContentLength, ms.userAgent));
+                // Native &range= prefetching RangeMediaDataSource with automatic client rotation (prevents 40-60s CDN cutoffs!)
+                mp.setDataSource(new RangeMediaDataSource(ms.videoId, url, ms.audioContentLength, ms.userAgent, ms.clientIdx));
             }
         } catch (Exception e) {
             if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
@@ -1064,23 +1398,24 @@ final class YouTubeMusic {
             if (seekTo > 0) p.seekTo((int) seekTo);
             if (requestFocus()) p.start();
             sync();
+            Spotify.MAIN.postDelayed(STALL_WATCH, 3500);
         });
         mp.setOnCompletionListener(p -> onComplete());
         mp.setOnErrorListener((p, w, x) -> {
             if (gen != playGen) return true;
             long resumePos = Math.max(seekTo, Player.position());
-            if (retryCount < 2) {
+            if (retryCount < 3) {
                 if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
                     openStream(ms, resumePos, true, retryCount + 1);
                     return true;
                 }
                 if (ms.videoId != null && !ms.videoId.isEmpty()) {
                     IO.execute(() -> {
-                        MediaStreams fresh = resolveStreamsSync(ms.videoId);
+                        MediaStreams fresh = resolveStreamsSync(ms.videoId, (ms.clientIdx + 1) % 3);
                         if (gen != playGen) return;
                         Spotify.MAIN.post(() -> {
                             if (gen != playGen) return;
-                            if (fresh != null) openStream(fresh, resumePos, retryCount >= 1, retryCount + 1);
+                            if (fresh != null) openStream(fresh, resumePos, retryCount >= 2, retryCount + 1);
                             else { Player.playing = false; Player.notifyAll0(); Player.toast(R.string.playback_failed); }
                         });
                     });

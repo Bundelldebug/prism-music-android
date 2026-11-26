@@ -17,8 +17,14 @@ abstract class Page extends FrameLayout {
     boolean back;
     boolean grouped;
     private boolean started;
+    Runnable onPullRefresh;
+    private TextView pullBadge;
 
     final class Scroll extends ScrollView {
+        private float pullStartY = -1f;
+        private float pullDist = 0f;
+        private boolean pulling = false;
+
         Scroll() {
             super(Page.this.getContext());
             setVerticalScrollBarEnabled(false);
@@ -30,6 +36,91 @@ abstract class Page extends FrameLayout {
             super.onScrollChanged(l, t, ol, ot);
             main.onPageScroll(Page.this, t, t - ot);
             Page.this.onScrolled(t);
+        }
+
+        @Override public boolean dispatchTouchEvent(android.view.MotionEvent ev) {
+            if (onPullRefresh != null) {
+                int act = ev.getActionMasked();
+                if (act == android.view.MotionEvent.ACTION_DOWN) {
+                    pullStartY = getScrollY() <= 2 ? ev.getRawY() : -1f;
+                    pulling = false;
+                    pullDist = 0f;
+                } else if (act == android.view.MotionEvent.ACTION_MOVE) {
+                    if (getScrollY() <= 2) {
+                        if (pullStartY < 0f) pullStartY = ev.getRawY();
+                        float dy = ev.getRawY() - pullStartY;
+                        if (dy > Ui.dpf(14)) {
+                            pulling = true;
+                            pullDist = Math.min(Ui.dpf(104), (dy - Ui.dpf(14)) * 0.55f);
+                            updatePullVisual(pullDist);
+                        } else if (pulling) {
+                            pullDist = 0f;
+                            updatePullVisual(0f);
+                        }
+                    } else if (pulling) {
+                        pulling = false;
+                        pullDist = 0f;
+                        updatePullVisual(0f);
+                    }
+                } else if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
+                    if (pulling) {
+                        boolean trigger = act == android.view.MotionEvent.ACTION_UP && pullDist >= Ui.dpf(56);
+                        pulling = false;
+                        pullStartY = -1f;
+                        if (trigger) {
+                            showRefreshingVisual();
+                            onPullRefresh.run();
+                        } else {
+                            resetPullVisual();
+                        }
+                    }
+                }
+            }
+            return super.dispatchTouchEvent(ev);
+        }
+    }
+
+    private void ensurePullBadge() {
+        if (pullBadge != null) return;
+        pullBadge = Ui.text(getContext(), "당겨서 새로고침", 12.5f, Ui.semibold, Ui.ACCENT);
+        pullBadge.setGravity(android.view.Gravity.CENTER);
+        pullBadge.setPadding(Ui.dp(16), Ui.dp(8), Ui.dp(16), Ui.dp(8));
+        android.graphics.drawable.GradientDrawable bg = Ui.round(Ui.card(), 100);
+        bg.setStroke(Math.max(1, Ui.dp(0.8f)), Ui.alpha(Ui.ACCENT, 0.35f));
+        pullBadge.setBackground(bg);
+        pullBadge.setElevation(Ui.dpf(4));
+        pullBadge.setAlpha(0f);
+        pullBadge.setVisibility(GONE);
+        LayoutParams lp = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = Ui.statusInset + Ui.dp(56);
+        addView(pullBadge, lp);
+    }
+
+    private void updatePullVisual(float dist) {
+        ensurePullBadge();
+        content.setTranslationY(dist * 0.65f);
+        float frac = Ui.clamp(dist / Ui.dpf(56), 0f, 1f);
+        pullBadge.setVisibility(frac > 0.05f ? VISIBLE : GONE);
+        pullBadge.setAlpha(frac);
+        pullBadge.setTranslationY(dist * 0.45f - Ui.dpf(12) * (1f - frac));
+        pullBadge.setText(frac >= 1f ? "놓으면 새로고침" : "당겨서 새로고침");
+    }
+
+    private void showRefreshingVisual() {
+        ensurePullBadge();
+        pullBadge.setVisibility(VISIBLE);
+        pullBadge.setAlpha(1f);
+        pullBadge.setText("새로고침 중...");
+        content.animate().translationY(Ui.dpf(36)).setDuration(180).setInterpolator(Ui.EMPHASIZED).start();
+        pullBadge.postDelayed(this::resetPullVisual, 550);
+    }
+
+    private void resetPullVisual() {
+        content.animate().translationY(0f).setDuration(240).setInterpolator(Ui.EMPHASIZED).start();
+        if (pullBadge != null) {
+            pullBadge.animate().alpha(0f).translationY(-Ui.dpf(10)).setDuration(200).setInterpolator(Ui.EMPHASIZED)
+                    .withEndAction(() -> pullBadge.setVisibility(GONE)).start();
         }
     }
 
