@@ -742,12 +742,12 @@ final class Dock extends FrameLayout {
             // PC-like wide bottom bar: title + artist + compact elapsed/total time readout + hairline progress indicator
             float tx = ax + artS + Ui.dpf(10), rightLimit = tabletRBtn(rCount() - 1) - Ui.dpf(26);
             float avail = rightLimit - tx;
-            if (Player.track != null) {
+            if (Player.track != null && avail >= Ui.dpf(24)) {
                 title.setColor(Ui.alpha(Ui.text(), show));
                 sub.setColor(Ui.alpha(Ui.text2(), show));
                 String timeStr = Player.track.duration > 0 ? (Ui.time(Player.position()) + " / " + Ui.time(Player.track.duration)) : "";
                 float timeW = (!timeStr.isEmpty() && avail > Ui.dpf(180)) ? (sub.measureText(timeStr) + Ui.dpf(12)) : 0f;
-                float textAvail = Math.max(Ui.dpf(40), avail - timeW);
+                float textAvail = Math.max(Ui.dpf(24), avail - timeW);
                 CharSequence t = TextUtils.ellipsize(Player.track.name, title, textAvail, TextUtils.TruncateAt.END);
                 CharSequence s = TextUtils.ellipsize(Player.track.artist, sub, textAvail, TextUtils.TruncateAt.END);
                 c.drawText(t, 0, t.length(), tx, mini.centerY() - Ui.dpf(2.5f), title);
@@ -756,19 +756,19 @@ final class Dock extends FrameLayout {
                     sub.setColor(Ui.alpha(Ui.text2(), show * 0.82f));
                     c.drawText(timeStr, rightLimit - sub.measureText(timeStr), mini.centerY() + Ui.dpf(4.5f), sub);
                 }
+            }
+            if (Player.track != null && Player.track.duration > 0) {
                 // Desktop-style hairline playback progress bar nested cleanly along the bottom edge of the wide pill
-                if (Player.track.duration > 0) {
-                    float frac = Ui.clamp(Player.position() / (float) Player.track.duration, 0f, 1f);
-                    float px0 = mini.left + mini.height() * 0.45f, px1 = mini.right - mini.height() * 0.45f;
-                    float py = mini.bottom - Ui.dpf(3.2f);
-                    fill.setColor(Ui.alpha(Ui.dark ? 0xFFFFFFFF : 0xFF000000, show * 0.12f));
-                    tmp.set(px0, py, px1, py + Ui.dpf(2.2f));
+                float frac = Ui.clamp(Player.position() / (float) Player.track.duration, 0f, 1f);
+                float px0 = mini.left + mini.height() * 0.45f, px1 = mini.right - mini.height() * 0.45f;
+                float py = mini.bottom - Ui.dpf(3.2f);
+                fill.setColor(Ui.alpha(Ui.dark ? 0xFFFFFFFF : 0xFF000000, show * 0.12f));
+                tmp.set(px0, py, px1, py + Ui.dpf(2.2f));
+                c.drawRoundRect(tmp, Ui.dpf(1.1f), Ui.dpf(1.1f), fill);
+                if (frac > 0.002f) {
+                    fill.setColor(Ui.alpha(Ui.ACCENT, show * 0.85f));
+                    tmp.set(px0, py, px0 + (px1 - px0) * frac, py + Ui.dpf(2.2f));
                     c.drawRoundRect(tmp, Ui.dpf(1.1f), Ui.dpf(1.1f), fill);
-                    if (frac > 0.002f) {
-                        fill.setColor(Ui.alpha(Ui.ACCENT, show * 0.85f));
-                        tmp.set(px0, py, px0 + (px1 - px0) * frac, py + Ui.dpf(2.2f));
-                        c.drawRoundRect(tmp, Ui.dpf(1.1f), Ui.dpf(1.1f), fill);
-                    }
                 }
             }
             c.restoreToCount(save);

@@ -313,7 +313,7 @@ final class NowPlaying extends FrameLayout {
         List<GlassMenu.Entry> e = new ArrayList<>();
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> main.openUri(t.albumUri, t.album)));
         if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> main.openUri(t.artistUri, t.artist)));
-        if (!Player.local()) {
+        if (!Player.local() && !Player.ytm()) {
             e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
             e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         }
@@ -1233,9 +1233,9 @@ final class NowPlaying extends FrameLayout {
      */
     private void syncActionButtons(boolean animate) {
         boolean o = oneui;
-        int cfg = chipFg();
-        int pillActiveFg = cfg;
-        int pillInactiveFg = Ui.alpha(cfg, 0.58f);
+        // actionPill is crystal-clear glass over dark blurred album art — always keep icons crisp white regardless of theme
+        int pillActiveFg = 0xFFFFFFFF;
+        int pillInactiveFg = 0xA6FFFFFF;
         int bgActiveTint = o ? Ui.alpha(Ui.ACCENT, 0.34f) : 0x38FFFFFF;
         int bgActiveFg = o ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f) : 0xFFFFFFFF;
         int bgInactiveFg = 0xB8FFFFFF;
@@ -1707,11 +1707,13 @@ final class NowPlaying extends FrameLayout {
         if (t == null) return;
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> { close(); main.openUri(t.albumUri, t.album); }));
         if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openUri(t.artistUri, t.artist); }));
-        e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
-        if (!Player.local() && t.uri != null && t.uri.startsWith("spotify:track:")) {
+        if (!Player.local() && !Player.ytm()) {
+            e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
+        }
+        if (!Player.local() && !Player.ytm() && t.uri != null && t.uri.startsWith("spotify:track:")) {
             e.add(new GlassMenu.Entry(c.getString(R.string.pl_add_track), Icons.QUEUE, false, () -> main.addToPlaylistDialog(t.uri)));
         }
-        if (!Player.local()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
+        if (!Player.local() && !Player.ytm()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> setPanel(2)));
         e.add(new GlassMenu.Entry(c.getString(R.string.set_lyrics), Icons.LYRICS, false, () -> setPanel(1)));
         if (panel == 1 && t.id != null) {
@@ -1737,7 +1739,7 @@ final class NowPlaying extends FrameLayout {
 
     /** Output-device chip opens the same glass sheet, growing out of the chip itself. */
     void deviceMenu(View v) {
-        if (Player.local()) { Player.toast(R.string.this_device); return; }
+        if (Player.local() || Player.ytm()) { Player.toast(R.string.this_device); return; }
         RectF a = anchorOf(v);
         Player.devices(new Spotify.Cb() {
             @Override public void ok(JSONObject o) {

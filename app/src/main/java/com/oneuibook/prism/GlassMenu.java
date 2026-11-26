@@ -269,6 +269,11 @@ final class GlassMenu extends FrameLayout {
         source.setAlpha(1f); source.setScaleX(1f); source.setScaleY(1f);
     }
 
+    @Override protected void onDetachedFromWindow() {
+        restoreSource();
+        super.onDetachedFromWindow();
+    }
+
     /** Over the player, rows sit on moving artwork, so the open sheet keeps a little more frost there. */
     private boolean overPlayer() { return main.np != null && main.np.getVisibility() == VISIBLE; }
 

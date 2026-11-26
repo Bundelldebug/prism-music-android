@@ -716,7 +716,7 @@ final class Player {
     }
 
     static void toggleLike() {
-        if (track == null || local()) return;
+        if (track == null || local() || ytm()) return;
         final boolean now = !liked;
         liked = now;
         if (track.id != null) LIKED_CACHE.put(track.id, now);

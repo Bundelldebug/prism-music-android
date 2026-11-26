@@ -668,7 +668,12 @@ final class YouTubeMusic {
                 if (mime.contains("mp4") && h >= bestProgH) {
                     bestProgH = h;
                     ms.videoUrl = u;
-                    if (ms.audioUrl == null) ms.audioUrl = u;
+                    if (ms.audioUrl == null) {
+                        ms.audioUrl = u;
+                        long clen = parseLongSafe(f.optString("contentLength", "-1"), -1L);
+                        if (clen <= 0) clen = parseClenFromUrl(u);
+                        ms.audioContentLength = clen;
+                    }
                 }
             }
         }
@@ -684,6 +689,7 @@ final class YouTubeMusic {
                 String mime = f.optString("mimeType", "");
                 int br = f.optInt("bitrate", 0);
                 long clen = parseLongSafe(f.optString("contentLength", "-1"), -1L);
+                if (clen <= 0) clen = parseClenFromUrl(u);
                 if (mime.startsWith("audio/mp4") && br > bestAudioBr) {
                     bestAudioBr = br;
                     ms.audioUrl = u;
@@ -695,14 +701,22 @@ final class YouTubeMusic {
                 }
             }
         }
-        // 3) HLS manifest fallback (iOS client returns hlsManifestUrl which Android MediaPlayer supports directly!)
+        // 3) HLS manifest fallback (keep hlsUrl separate from audioUrl so RangeMediaDataSource never receives .m3u8!)
         String hls = sd.optString("hlsManifestUrl", "");
         if (!hls.isEmpty()) {
             ms.hlsUrl = hls;
             if (ms.videoUrl == null) ms.videoUrl = hls;
-            if (ms.audioUrl == null) ms.audioUrl = hls;
         }
         return (ms.audioUrl != null || ms.hlsUrl != null) ? ms : null;
+    }
+
+    private static long parseClenFromUrl(String u) {
+        if (u == null) return -1L;
+        int idx = u.indexOf("clen=");
+        if (idx < 0) return -1L;
+        int s = idx + 5, e = u.indexOf('&', s);
+        String v = e > s ? u.substring(s, e) : u.substring(s);
+        return parseLongSafe(v, -1L);
     }
 
     // ---------------------------------------------------------------- JSON shelf/track extraction
@@ -1168,8 +1182,10 @@ final class YouTubeMusic {
 
         private long ensureSize() throws java.io.IOException {
             if (totalSize > 0) return totalSize;
+            long clen = parseClenFromUrl(this.url);
+            if (clen > 0) { totalSize = clen; return totalSize; }
             byte[] first = loadChunk(0);
-            if (first != null && first.length > 0 && totalSize <= 0) totalSize = first.length;
+            if (first != null && first.length > 0 && first.length < CHUNK && totalSize <= 0) totalSize = first.length;
             return totalSize > 0 ? totalSize : -1;
         }
 
@@ -1250,17 +1266,18 @@ final class YouTubeMusic {
                     if (!useQueryRange) conn.setRequestProperty("Range", "bytes=" + start + "-" + end);
                     int code = conn.getResponseCode();
                     if ((code == 403 || code == 410) && refreshes < 2 && videoId != null && !videoId.isEmpty()) {
-                        // Rotate to NEXT InnerTube client (e.g. ANDROID_VR -> IOS -> ANDROID_MUSIC) to bypass per-client poToken/45s caps!
+                        // Refresh same client first; only hot-swap URL mid-stream if byte length matches, else let openStream reopen cleanly at resumePos
                         refreshes++;
-                        int nextClient = (this.clientIdx + 1) % 3;
-                        MediaStreams fresh = resolveStreamsSync(videoId, nextClient);
-                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()) {
+                        MediaStreams fresh = resolveStreamsSync(videoId, this.clientIdx);
+                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()
+                                && (this.totalSize <= 0 || fresh.audioContentLength <= 0 || fresh.audioContentLength == this.totalSize)) {
                             this.url = fresh.audioUrl;
                             this.clientIdx = fresh.clientIdx;
                             if (fresh.userAgent != null) this.ua = fresh.userAgent;
                             if (fresh.audioContentLength > 0) this.totalSize = fresh.audioContentLength;
                             continue;
                         }
+                        throw new java.io.IOException("HTTP " + code + " stream rotated");
                     }
                     if (code != 206 && code != 200) {
                         throw new java.io.IOException("HTTP " + code);
@@ -1291,8 +1308,9 @@ final class YouTubeMusic {
                     lastErr = e;
                     if (attempt >= 2 && refreshes < 2 && videoId != null && !videoId.isEmpty()) {
                         refreshes++;
-                        MediaStreams fresh = resolveStreamsSync(videoId, (this.clientIdx + 1) % 3);
-                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()) {
+                        MediaStreams fresh = resolveStreamsSync(videoId, this.clientIdx);
+                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()
+                                && (this.totalSize <= 0 || fresh.audioContentLength <= 0 || fresh.audioContentLength == this.totalSize)) {
                             this.url = fresh.audioUrl;
                             this.clientIdx = fresh.clientIdx;
                             if (fresh.userAgent != null) this.ua = fresh.userAgent;
@@ -1362,9 +1380,16 @@ final class YouTubeMusic {
         stallTicks = 0;
         if (app == null || ms == null) return;
         final int gen = playGen;
-        boolean playingHls = useHls || (ms.audioUrl == null && ms.hlsUrl != null);
+        boolean hasHls = ms.hlsUrl != null && !ms.hlsUrl.isEmpty();
+        boolean hasAudio = ms.audioUrl != null && !ms.audioUrl.isEmpty() && !ms.audioUrl.equals(ms.hlsUrl);
+        boolean playingHls = (useHls && hasHls) || (!hasAudio && hasHls);
         String url = playingHls ? ms.hlsUrl : ms.audioUrl;
-        if (url == null || url.isEmpty()) return;
+        if (url == null || url.isEmpty()) {
+            Player.playing = false;
+            Player.notifyAll0();
+            Player.toast(R.string.playback_failed);
+            return;
+        }
         mp = new MediaPlayer();
         try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
         try { NpuAudio.attachLocalSession(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
@@ -1483,7 +1508,11 @@ final class YouTubeMusic {
         if (mp == null) { if (!queue.isEmpty()) start(Player.progress); return; }
         try {
             if (mp.isPlaying()) mp.pause();
-            else if (requestFocus()) mp.start();
+            else if (requestFocus()) {
+                mp.start();
+                Spotify.MAIN.removeCallbacks(STALL_WATCH);
+                Spotify.MAIN.postDelayed(STALL_WATCH, 3500);
+            }
         } catch (IllegalStateException ignored) {}
         sync();
     }

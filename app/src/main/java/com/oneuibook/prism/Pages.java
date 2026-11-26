@@ -427,7 +427,10 @@ final class Pages {
             super(m, m.getString(R.string.tab_home), true);
             onPullRefresh = () -> {
                 if (main.isLocalSource()) LocalMusic.load(main, this::rebuild);
-                else rebuild();
+                else {
+                    if (!main.isYtmSource()) Spotify.invalidateUserCache();
+                    rebuild();
+                }
             };
         }
 

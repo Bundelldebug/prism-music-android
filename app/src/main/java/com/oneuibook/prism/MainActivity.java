@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.22";
+    static final String VERSION = "9.5.23";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -795,11 +795,11 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         setLightStatus(p < 0.45f);
     }
 
-    private boolean lightStatus;
+    private Boolean lightStatus;
 
     private void setLightStatus(boolean light) {
         boolean want = light && !Ui.dark;
-        if (want == lightStatus && getWindow().getInsetsController() != null) return;
+        if (lightStatus != null && want == lightStatus && getWindow().getInsetsController() != null) return;
         lightStatus = want;
         WindowInsetsController c = getWindow().getInsetsController();
         if (c == null) return;
