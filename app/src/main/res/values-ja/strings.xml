@@ -385,6 +385,7 @@
     <string name="recap_all">全期間</string>
     <string name="recap_empty">もう少し音楽を聴くとリキャップが作成されます。</string>
     <string name="recap_card_sub">よく聴いた曲やアーティスト、再生統計を見る</string>
+    <string name="home_recap">ホーム画面にリキャップを表示</string>
     <string name="switch_to_video">MVに切替</string>
     <string name="switch_to_audio">ジャケットに切替</string>
     <string name="mv_loading">MVを検索中…</string>

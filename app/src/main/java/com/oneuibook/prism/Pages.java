@@ -85,7 +85,7 @@ final class Pages {
         if (localBlocked(p, c)) return;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         c.addView(Widgets.section(m, m.getString(h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening))));
-        c.addView(recapBanner(m, true), Widgets.MW);
+        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, true), Widgets.MW);
         List<Widgets.Item> albums = localGroups(true);
         LinearLayout row = Widgets.rail(c, 8);
         for (int i = 0; i < Math.min(10, albums.size()); i++) {
@@ -384,7 +384,7 @@ final class Pages {
         LinearLayout c = p.content;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         c.addView(Widgets.section(m, m.getString(h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening))));
-        c.addView(recapBanner(m, true), Widgets.MW);
+        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, true), Widgets.MW);
         View sp = Widgets.spinner(m, 160);
         c.addView(sp);
         YouTubeMusic.fetchHome(sections -> {
@@ -432,7 +432,7 @@ final class Pages {
             LinearLayout s1 = slots.get("recent"), s2 = slots.get("playlists"), s3 = slots.get("foryou"),
                     s4 = slots.get("artists"), s5 = slots.get("charts"), s6 = slots.get("new");
             s1.addView(Widgets.section(m, m.getString(greet)));
-            s1.addView(recapBanner(m, false), Widgets.MW);
+            if (Settings.pref(m, "home_recap", true)) s1.addView(recapBanner(m, false), Widgets.MW);
             View sp = Widgets.spinner(m, 192);
             s1.addView(sp);
             Spotify.get("/me/player/recently-played?limit=50", new Spotify.Cb() {

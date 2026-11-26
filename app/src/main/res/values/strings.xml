@@ -385,6 +385,7 @@
     <string name="recap_all">All time</string>
     <string name="recap_empty">Listen to more songs to build your Recap.</string>
     <string name="recap_card_sub">See your top tracks, artists and listening stats</string>
+    <string name="home_recap">Show Recap on Home</string>
     <string name="switch_to_video">Switch to video</string>
     <string name="switch_to_audio">Switch to artwork</string>
     <string name="mv_loading">Loading video…</string>

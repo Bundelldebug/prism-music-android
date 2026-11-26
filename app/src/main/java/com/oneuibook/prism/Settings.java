@@ -437,6 +437,7 @@ final class Settings {
         @Override void build() {
             MainActivity m = main;
             Widgets.Group g = new Widgets.Group(m, m.getString(R.string.set_home_sections));
+            toggleRow(g, Icons.RECAP, m.getString(R.string.home_recap), "home_recap", true, m::reloadContent);
             toggleRow(g, Icons.ARTIST, m.getString(R.string.home_artists), "home_artists", true, m::reloadContent);
             toggleRow(g, Icons.ALBUM, m.getString(R.string.home_new), "home_new", true, m::reloadContent);
             content.addView(g, Widgets.MW);

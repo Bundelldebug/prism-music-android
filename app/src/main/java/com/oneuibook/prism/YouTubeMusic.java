@@ -62,6 +62,7 @@ final class YouTubeMusic {
 
     static final class MediaStreams {
         String audioUrl;
+        long audioContentLength = -1;
         String videoUrl;
         String hlsUrl;
         String userAgent;
@@ -512,12 +513,15 @@ final class YouTubeMusic {
                 if (u.isEmpty()) continue;
                 String mime = f.optString("mimeType", "");
                 int br = f.optInt("bitrate", 0);
+                long clen = parseLongSafe(f.optString("contentLength", "-1"), -1L);
                 if (mime.startsWith("audio/mp4") && br > bestAudioBr) {
                     bestAudioBr = br;
                     ms.audioUrl = u;
+                    ms.audioContentLength = clen;
                 } else if (ms.audioUrl == null && mime.startsWith("audio/") && br > bestAudioBr) {
                     bestAudioBr = br;
                     ms.audioUrl = u;
+                    ms.audioContentLength = clen;
                 }
             }
         }
@@ -823,10 +827,126 @@ final class YouTubeMusic {
         });
     }
 
+    private static long parseLongSafe(String s, long def) {
+        try { return Long.parseLong(s); } catch (Throwable t) { return def; }
+    }
+
+    /**
+     * Chunked HTTP Range MediaDataSource (API 23+ native Android SDK).
+     * YouTube googlevideo CDN returns HTTP 403 to unbounded GETs on IOS adaptiveFormats streams,
+     * but serves HTTP 206 Partial Content cleanly for bounded Range: bytes=start-end requests!
+     */
+    static final class RangeMediaDataSource extends android.media.MediaDataSource {
+        private static final int CHUNK = 262144; // 256 KB per Range request
+        private static final int MAX_CACHED_CHUNKS = 16; // 4 MB LRU cache
+        private final String url;
+        private final String ua;
+        private volatile long totalSize;
+        private volatile boolean closed;
+        private final LinkedHashMap<Long, byte[]> cache = new LinkedHashMap<Long, byte[]>(MAX_CACHED_CHUNKS + 2, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<Long, byte[]> eldest) {
+                return size() > MAX_CACHED_CHUNKS;
+            }
+        };
+
+        RangeMediaDataSource(String url, long contentLength, String ua) {
+            this.url = url;
+            this.totalSize = contentLength;
+            this.ua = ua != null ? ua : IOS_UA;
+        }
+
+        private long ensureSize() throws java.io.IOException {
+            if (totalSize > 0) return totalSize;
+            byte[] probe = fetchRange(0, 4095, true);
+            if (probe != null && probe.length > 0 && totalSize <= 0) totalSize = probe.length;
+            return totalSize > 0 ? totalSize : -1;
+        }
+
+        @Override public long getSize() throws java.io.IOException {
+            return ensureSize();
+        }
+
+        @Override public int readAt(long position, byte[] buffer, int offset, int size) throws java.io.IOException {
+            if (closed || size <= 0) return 0;
+            long total = ensureSize();
+            if (total > 0 && position >= total) return -1;
+            int want = total > 0 ? (int) Math.min(size, total - position) : size;
+            long chunkIdx = position / CHUNK;
+            int inChunk = (int) (position - chunkIdx * CHUNK);
+            byte[] data;
+            synchronized (cache) {
+                data = cache.get(chunkIdx);
+            }
+            if (data == null) {
+                long start = chunkIdx * CHUNK;
+                long end = total > 0 ? Math.min(total - 1, start + CHUNK - 1) : (start + CHUNK - 1);
+                data = fetchRange(start, end, false);
+                if (data == null || data.length == 0) return -1;
+                synchronized (cache) {
+                    if (!closed) cache.put(chunkIdx, data);
+                }
+            }
+            if (inChunk >= data.length) return -1;
+            int n = Math.min(want, data.length - inChunk);
+            System.arraycopy(data, inChunk, buffer, offset, n);
+            return n;
+        }
+
+        private byte[] fetchRange(long start, long end, boolean parseTotal) throws java.io.IOException {
+            java.io.IOException lastErr = null;
+            for (int attempt = 0; attempt < 2 && !closed; attempt++) {
+                HttpURLConnection conn = null;
+                try {
+                    conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(12000);
+                    conn.setRequestProperty("User-Agent", ua);
+                    conn.setRequestProperty("Range", "bytes=" + start + "-" + end);
+                    int code = conn.getResponseCode();
+                    if (code != 206 && code != 200) {
+                        throw new java.io.IOException("HTTP " + code);
+                    }
+                    if (parseTotal || totalSize <= 0) {
+                        String cr = conn.getHeaderField("Content-Range");
+                        if (cr != null) {
+                            int slash = cr.lastIndexOf('/');
+                            if (slash > 0) {
+                                long parsed = parseLongSafe(cr.substring(slash + 1).trim(), -1L);
+                                if (parsed > 0) totalSize = parsed;
+                            }
+                        } else if (code == 200) {
+                            long cl = conn.getContentLengthLong();
+                            if (cl > 0) totalSize = cl;
+                        }
+                    }
+                    try (InputStream is = conn.getInputStream();
+                         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream((int) Math.min(CHUNK, Math.max(4096, end - start + 1)))) {
+                        byte[] buf = new byte[16384];
+                        int r;
+                        while (!closed && (r = is.read(buf)) != -1) bos.write(buf, 0, r);
+                        return bos.toByteArray();
+                    }
+                } catch (java.io.IOException e) {
+                    lastErr = e;
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            }
+            if (lastErr != null) throw lastErr;
+            return null;
+        }
+
+        @Override public void close() {
+            closed = true;
+            synchronized (cache) { cache.clear(); }
+        }
+    }
+
     private static void openStream(MediaStreams ms, long seekTo, boolean useHls) {
         release();
         if (app == null || ms == null) return;
-        String url = (useHls && ms.hlsUrl != null) ? ms.hlsUrl : (ms.audioUrl != null ? ms.audioUrl : ms.hlsUrl);
+        boolean playingHls = useHls || (ms.audioUrl == null && ms.hlsUrl != null);
+        String url = playingHls ? ms.hlsUrl : ms.audioUrl;
         if (url == null || url.isEmpty()) return;
         mp = new MediaPlayer();
         try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
@@ -837,11 +957,16 @@ final class YouTubeMusic {
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
         try {
-            Map<String, String> headers = new java.util.HashMap<>();
-            headers.put("User-Agent", ms.userAgent != null ? ms.userAgent : IOS_UA);
-            mp.setDataSource(app, android.net.Uri.parse(url), headers);
+            if (playingHls) {
+                Map<String, String> headers = new java.util.HashMap<>();
+                headers.put("User-Agent", ms.userAgent != null ? ms.userAgent : IOS_UA);
+                mp.setDataSource(app, android.net.Uri.parse(url), headers);
+            } else {
+                // Bounded HTTP Range MediaDataSource avoids YouTube CDN HTTP 403 on unbounded GET!
+                mp.setDataSource(new RangeMediaDataSource(url, ms.audioContentLength, ms.userAgent));
+            }
         } catch (Exception e) {
-            if (!useHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
+            if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
                 openStream(ms, seekTo, true);
                 return;
             }
@@ -858,7 +983,7 @@ final class YouTubeMusic {
         });
         mp.setOnCompletionListener(p -> onComplete());
         mp.setOnErrorListener((p, w, x) -> {
-            if (!useHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
+            if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
                 openStream(ms, seekTo, true);
                 return true;
             }

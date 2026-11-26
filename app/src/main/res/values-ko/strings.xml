@@ -385,6 +385,7 @@
     <string name="recap_all">전체 기간</string>
     <string name="recap_empty">음악을 조금 더 감상하면 나만의 리캡이 만들어져요.</string>
     <string name="recap_card_sub">자주 들은 곡, 아티스트, 누적 감상 기록 보기</string>
+    <string name="home_recap">홈 화면에 리캡 표시</string>
     <string name="switch_to_video">뮤비로 전환</string>
     <string name="switch_to_audio">앨범아트로 전환</string>
     <string name="mv_loading">뮤직비디오 찾는 중…</string>
