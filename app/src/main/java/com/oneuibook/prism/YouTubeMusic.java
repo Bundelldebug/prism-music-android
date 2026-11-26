@@ -50,6 +50,7 @@ final class YouTubeMusic {
     static final String ORIGIN = "https://music.youtube.com";
     static final String API_BASE = "https://music.youtube.com/youtubei/v1/";
     static final String YT_API_BASE = "https://www.youtube.com/youtubei/v1/";
+    private static final String IOS_UA = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_1 like Mac OS X)";
     private static final String PREF_COOKIE = "ytm_cookie";
     private static final String PREF_ACCOUNT = "ytm_account";
 
@@ -62,6 +63,8 @@ final class YouTubeMusic {
     static final class MediaStreams {
         String audioUrl;
         String videoUrl;
+        String hlsUrl;
+        String userAgent;
         String videoId;
         long durationMs;
         String title;
@@ -123,21 +126,25 @@ final class YouTubeMusic {
         CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true);
         box.addView(wv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(500)));
         final AlertDialog[] dlg = new AlertDialog[1];
+        final boolean[] completed = {false};
         wv.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (completed[0]) return;
                 try {
+                    CookieManager.getInstance().flush();
                     String c1 = CookieManager.getInstance().getCookie("https://music.youtube.com");
                     String c2 = CookieManager.getInstance().getCookie("https://www.youtube.com");
-                    String merged = (c1 != null && c1.contains("SAPISID=")) ? c1 : (c2 != null ? c2 : "");
+                    String merged = (c1 != null && (c1.contains("SAPISID=") || c1.contains("__Secure-3PAPISID="))) ? c1 : (c2 != null ? c2 : "");
                     if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
+                        completed[0] = true;
                         MainActivity.prefs(a).edit()
                                 .putString(PREF_COOKIE, merged)
                                 .putString(PREF_ACCOUNT, a.getString(R.string.ytm_signed_in))
                                 .apply();
                         if (dlg[0] != null && dlg[0].isShowing()) dlg[0].dismiss();
                         Toast.makeText(a, R.string.ytm_signed_in, Toast.LENGTH_SHORT).show();
-                        if (onDone != null) onDone.run();
+                        if (onDone != null) a.runOnUiThread(onDone);
                     }
                 } catch (Throwable ignored) {}
             }
@@ -399,32 +406,65 @@ final class YouTubeMusic {
         });
     }
 
-    /** Resolves direct playable audio & video URLs via InnerTube /player across IOS -> ANDROID_VR -> ANDROID_MUSIC. */
+    /** Posts an InnerTube /player request with exact native client headers (no mismatched web Origin/Referer). */
+    private static JSONObject postPlayerJson(String url, JSONObject body, String clientId, String clientVer, String userAgent) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setRequestMethod("POST");
+        c.setConnectTimeout(7000);
+        c.setReadTimeout(12000);
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        c.setRequestProperty("Accept", "application/json");
+        if (clientId != null) c.setRequestProperty("X-YouTube-Client-Name", clientId);
+        if (clientVer != null) c.setRequestProperty("X-YouTube-Client-Version", clientVer);
+        if (userAgent != null) c.setRequestProperty("User-Agent", userAgent);
+        byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream os = c.getOutputStream()) { os.write(bytes); }
+        int code = c.getResponseCode();
+        InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+        String txt = in == null ? "" : Spotify.read(in);
+        c.disconnect();
+        if (code >= 400 || txt.isEmpty()) return null;
+        return new JSONObject(txt);
+    }
+
+    /** Resolves direct playable audio & HLS URLs via InnerTube /player (verified IOS 20.10.4 -> ANDROID_VR -> ANDROID_MUSIC). */
     static MediaStreams resolveStreamsSync(String videoId) {
         if (videoId == null || videoId.isEmpty()) return null;
         String[][] clients = {
-                {"IOS", "19.29.1", "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)"},
-                {"ANDROID_VR", "1.60.19", "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"},
-                {"ANDROID_MUSIC", "7.16.53", "com.google.android.apps.youtube.music/7.16.53 (Linux; U; Android 14) gzip"}
+                {"IOS", "5", "20.10.4", IOS_UA},
+                {"ANDROID_VR", "28", "1.62.27", "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"},
+                {"ANDROID_MUSIC", "21", "7.16.53", "com.google.android.apps.youtube.music/7.16.53 (Linux; U; Android 14) gzip"}
         };
         for (String[] cl : clients) {
             try {
                 JSONObject client = new JSONObject()
                         .put("clientName", cl[0])
-                        .put("clientVersion", cl[1])
+                        .put("clientVersion", cl[2])
                         .put("hl", "ko")
                         .put("gl", "KR");
-                if ("IOS".equals(cl[0])) client.put("deviceModel", "iPhone16,2");
-                if ("ANDROID_VR".equals(cl[0])) client.put("androidSdkVersion", 32);
+                if ("IOS".equals(cl[0])) {
+                    client.put("deviceMake", "Apple")
+                            .put("deviceModel", "iPhone16,2")
+                            .put("osName", "iPhone")
+                            .put("osVersion", "18.3.1.22D72");
+                } else if ("ANDROID_VR".equals(cl[0])) {
+                    client.put("androidSdkVersion", 32)
+                            .put("osName", "Android")
+                            .put("osVersion", "12");
+                }
                 JSONObject body = new JSONObject()
                         .put("videoId", videoId)
                         .put("contentCheckOk", true)
                         .put("racyCheckOk", true)
                         .put("context", new JSONObject().put("client", client));
-                JSONObject res = postJson(YT_API_BASE + "player?prettyPrint=false", body, cl[2], false);
+                JSONObject res = postPlayerJson(YT_API_BASE + "player?prettyPrint=false", body, cl[1], cl[2], cl[3]);
                 if (res == null) continue;
                 MediaStreams ms = parseStreamingData(videoId, res);
-                if (ms != null && (ms.audioUrl != null || ms.videoUrl != null)) return ms;
+                if (ms != null && (ms.audioUrl != null || ms.hlsUrl != null)) {
+                    ms.userAgent = cl[3];
+                    return ms;
+                }
             } catch (Exception ignored) {}
         }
         return null;
@@ -484,10 +524,11 @@ final class YouTubeMusic {
         // 3) HLS manifest fallback (iOS client returns hlsManifestUrl which Android MediaPlayer supports directly!)
         String hls = sd.optString("hlsManifestUrl", "");
         if (!hls.isEmpty()) {
+            ms.hlsUrl = hls;
             if (ms.videoUrl == null) ms.videoUrl = hls;
             if (ms.audioUrl == null) ms.audioUrl = hls;
         }
-        return (ms.audioUrl != null || ms.videoUrl != null) ? ms : null;
+        return (ms.audioUrl != null || ms.hlsUrl != null) ? ms : null;
     }
 
     // ---------------------------------------------------------------- JSON shelf/track extraction
@@ -764,7 +805,7 @@ final class YouTubeMusic {
         IO.execute(() -> {
             MediaStreams ms = resolveStreamsSync(vid);
             if (gen != playGen) return;
-            if (ms == null || ms.audioUrl == null) {
+            if (ms == null || (ms.audioUrl == null && ms.hlsUrl == null)) {
                 Spotify.MAIN.post(() -> {
                     if (gen != playGen) return;
                     Player.playing = false;
@@ -777,14 +818,16 @@ final class YouTubeMusic {
             MV_CACHE.put(t.id, ms);
             Spotify.MAIN.post(() -> {
                 if (gen != playGen) return;
-                openStream(ms.audioUrl, seekTo);
+                openStream(ms, seekTo, false);
             });
         });
     }
 
-    private static void openStream(String url, long seekTo) {
+    private static void openStream(MediaStreams ms, long seekTo, boolean useHls) {
         release();
-        if (app == null) return;
+        if (app == null || ms == null) return;
+        String url = (useHls && ms.hlsUrl != null) ? ms.hlsUrl : (ms.audioUrl != null ? ms.audioUrl : ms.hlsUrl);
+        if (url == null || url.isEmpty()) return;
         mp = new MediaPlayer();
         try { Eq.attach(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
         try { NpuAudio.attachLocalSession(app, mp.getAudioSessionId()); } catch (Throwable ignored) {}
@@ -794,8 +837,14 @@ final class YouTubeMusic {
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
         try {
-            mp.setDataSource(url);
+            Map<String, String> headers = new java.util.HashMap<>();
+            headers.put("User-Agent", ms.userAgent != null ? ms.userAgent : IOS_UA);
+            mp.setDataSource(app, android.net.Uri.parse(url), headers);
         } catch (Exception e) {
+            if (!useHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
+                openStream(ms, seekTo, true);
+                return;
+            }
             Player.playing = false;
             Player.notifyAll0();
             Player.toast(R.string.playback_failed);
@@ -809,6 +858,10 @@ final class YouTubeMusic {
         });
         mp.setOnCompletionListener(p -> onComplete());
         mp.setOnErrorListener((p, w, x) -> {
+            if (!useHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
+                openStream(ms, seekTo, true);
+                return true;
+            }
             Player.playing = false;
             Player.notifyAll0();
             Player.toast(R.string.playback_failed);

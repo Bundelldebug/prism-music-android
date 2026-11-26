@@ -291,7 +291,7 @@ final class Pages {
         return R.string.tab_home;
     }
 
-    /** Liquid Glass Recap entry card on Home (matches Home horizontal 18dp grid margins & glass chrome). */
+    /** Liquid Glass Recap entry card on Home (self-contained glass shader/frost — never samples its own ancestor backdrop!). */
     static View recapBanner(MainActivity m, boolean localFirst) {
         FrameLayout wrap = new FrameLayout(m);
         wrap.setClipChildren(false);
@@ -299,16 +299,6 @@ final class Pages {
         wrap.setPadding(Ui.dp(18), Ui.dp(4), Ui.dp(18), Ui.dp(18));
 
         final float radDp = Ui.gStyle ? 24f : 20f;
-        final Glass.Surface surf = new Glass.Surface();
-        surf.blurDp = Ui.barBlur();
-        surf.refractDp = 12f;
-        surf.edgeDp = 18f;
-        surf.outerDp = 4f;
-        surf.outerRefractDp = 8f;
-        surf.vibrance = 1.28f;
-        surf.rim = 0.34f;
-        surf.shadowAlpha = Ui.dark ? 0.16f : 0.08f;
-
         LinearLayout card = new LinearLayout(m) {
             private final android.graphics.RectF r = new android.graphics.RectF();
             private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
@@ -322,31 +312,39 @@ final class Pages {
                 if (w <= 0 || h <= 0) return;
                 r.set(0, 0, w, h);
                 float rad = Ui.dpf(radDp);
-                if (!Ui.gStyle && Ui.glass && m.backdrop != null) {
-                    surf.tint = Ui.dark ? Ui.glassBlend(0xF01C1C22, 0xB81C1C24, 0x7A1C1C24)
-                            : Ui.glassBlend(0xF5FFFFFF, 0xCCFAFAFD, 0x9EFFFFFF);
-                    surf.blurDp = Ui.barBlur();
-                    surf.strokeColor = Ui.dark ? 0x30FFFFFF : 0x1E000000;
-                    surf.shapes(r, rad, null, 0, null, 0);
-                    surf.draw(c, this, m.backdrop);
-                    // Subtle accent glass sheen along top-left edge
-                    p.setShader(new android.graphics.LinearGradient(0, 0, w * 0.65f, h,
-                            new int[]{Ui.alpha(Ui.ACCENT, Ui.dark ? 0.18f : 0.11f), 0x00000000},
-                            null, android.graphics.Shader.TileMode.CLAMP));
-                    c.drawRoundRect(r, rad, rad, p);
-                    p.setShader(null);
-                } else {
-                    p.setColor(Ui.card());
-                    c.drawRoundRect(r, rad, rad, p);
-                    p.setShader(new android.graphics.LinearGradient(0, 0, w * 0.55f, h,
-                            new int[]{Ui.alpha(Ui.ACCENT, Ui.dark ? 0.16f : 0.08f), 0x00000000},
-                            null, android.graphics.Shader.TileMode.CLAMP));
-                    c.drawRoundRect(r, rad, rad, p);
-                    p.setShader(null);
-                    st.setStrokeWidth(Math.max(1f, Ui.dpf(0.8f)));
-                    st.setColor(Ui.dark ? 0x22FFFFFF : 0x14000000);
-                    c.drawRoundRect(r, rad, rad, st);
-                }
+                // Base translucent glass surface (safe inside backdrop — zero RenderNode recursion!)
+                int baseCol = Ui.dark
+                        ? (Ui.gStyle ? 0xFF1A1B22 : Ui.glassBlend(0xFF1C1C22, 0xE622232B, 0xCC262834))
+                        : (Ui.gStyle ? 0xFFFFFFFF : Ui.glassBlend(0xFFFFFFFF, 0xF0F7F9FF, 0xE0F4F7FF));
+                p.setShader(null);
+                p.setColor(baseCol);
+                c.drawRoundRect(r, rad, rad, p);
+
+                // Subtle luminous accent glass sheen across upper-left corner
+                p.setShader(new android.graphics.LinearGradient(0, 0, w * 0.72f, h,
+                        new int[]{Ui.alpha(Ui.ACCENT, Ui.dark ? 0.22f : 0.13f),
+                                Ui.alpha(Ui.ACCENT, Ui.dark ? 0.05f : 0.02f), 0x00000000},
+                        new float[]{0f, 0.55f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+                c.drawRoundRect(r, rad, rad, p);
+
+                // Top specular glass highlight band
+                p.setShader(new android.graphics.LinearGradient(0, 0, 0, h * 0.42f,
+                        new int[]{Ui.dark ? 0x1EFFFFFF : 0x80FFFFFF, 0x00FFFFFF},
+                        null, android.graphics.Shader.TileMode.CLAMP));
+                c.drawRoundRect(r, rad, rad, p);
+                p.setShader(null);
+
+                // 45-degree specular Liquid Glass rim stroke
+                st.setStrokeWidth(Math.max(1f, Ui.dpf(0.95f)));
+                st.setShader(new android.graphics.LinearGradient(0, 0, w, h,
+                        new int[]{Ui.dark ? 0x48FFFFFF : 0xCCFFFFFF,
+                                Ui.dark ? 0x18FFFFFF : 0x1A000000,
+                                Ui.dark ? 0x36FFFFFF : 0x88FFFFFF},
+                        new float[]{0f, 0.5f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+                r.inset(st.getStrokeWidth() * 0.5f, st.getStrokeWidth() * 0.5f);
+                c.drawRoundRect(r, Math.max(0f, rad - st.getStrokeWidth() * 0.5f),
+                        Math.max(0f, rad - st.getStrokeWidth() * 0.5f), st);
+                st.setShader(null);
             }
         };
         card.setOrientation(LinearLayout.HORIZONTAL);
