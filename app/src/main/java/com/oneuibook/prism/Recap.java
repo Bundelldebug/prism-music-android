@@ -151,6 +151,16 @@ final class Recap {
 
     /** Computes Local/Device Recap summary for period: "month", "year", or "all". */
     static Summary localSummary(Context c, String period) {
+        return summaryForSource(c, period, "local");
+    }
+
+    /** Computes YouTube Music Recap summary for period: "month", "year", or "all". */
+    static Summary ytmSummary(Context c, String period) {
+        return summaryForSource(c, period, "ytm");
+    }
+
+    /** Computes Recap summary filtered by source ("local", "ytm", or "all") and period ("month", "year", "all"). */
+    static Summary summaryForSource(Context c, String period, String source) {
         Summary s = new Summary();
         String curYm = currentYm();
         String curY = currentYear();
@@ -160,6 +170,9 @@ final class Recap {
         synchronized (LOCK) {
             List<Entry> list = loadLocked(c);
             for (Entry e : list) {
+                boolean isYtm = (e.uri != null && e.uri.startsWith("ytm:")) || (e.id != null && e.id.startsWith("ytm:"));
+                if ("ytm".equals(source) && !isYtm) continue;
+                if ("local".equals(source) && isYtm) continue;
                 if ("month".equals(period) && !curYm.equals(e.ym)) continue;
                 if ("year".equals(period) && (e.ym == null || !e.ym.startsWith(curY))) continue;
                 s.totalPlays += e.plays;

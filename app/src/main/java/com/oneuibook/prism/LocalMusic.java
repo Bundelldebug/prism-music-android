@@ -525,6 +525,20 @@ final class LocalMusic {
         start(0);
     }
 
+    static List<Player.Track> fullQueue() {
+        return new ArrayList<>(queue);
+    }
+
+    static int currentIndex() {
+        return index;
+    }
+
+    static void jumpTo(int absIndex) {
+        if (absIndex < 0 || absIndex >= queue.size()) return;
+        index = absIndex;
+        start(0);
+    }
+
     static List<Player.Track> upNext() {
         List<Player.Track> l = new ArrayList<>();
         for (int i = index + 1; i < queue.size() && l.size() < 50; i++) l.add(queue.get(i));

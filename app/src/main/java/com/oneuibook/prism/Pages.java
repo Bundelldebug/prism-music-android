@@ -85,7 +85,7 @@ final class Pages {
         if (localBlocked(p, c)) return;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         c.addView(Widgets.section(m, m.getString(h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening))));
-        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, true), Widgets.MW);
+        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, 2), Widgets.MW);
         List<Widgets.Item> albums = localGroups(true);
         LinearLayout row = Widgets.rail(c, 8);
         for (int i = 0; i < Math.min(10, albums.size()); i++) {
@@ -293,6 +293,11 @@ final class Pages {
 
     /** Liquid Glass Recap entry card on Home (self-contained glass shader/frost — never samples its own ancestor backdrop!). */
     static View recapBanner(MainActivity m, boolean localFirst) {
+        return recapBanner(m, localFirst ? 2 : 0);
+    }
+
+    /** sourceMode: 0 = Spotify, 1 = YouTube Music, 2 = Local. */
+    static View recapBanner(MainActivity m, int sourceMode) {
         FrameLayout wrap = new FrameLayout(m);
         wrap.setClipChildren(false);
         wrap.setClipToPadding(false);
@@ -363,7 +368,8 @@ final class Pages {
         LinearLayout col = new LinearLayout(m);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(Ui.dp(13), 0, Ui.dp(8), 0);
-        col.addView(Ui.text(m, m.getString(localFirst ? R.string.recap_local : R.string.recap_spotify), 15.5f, Ui.bold, Ui.text()), Widgets.MW);
+        int titleRes = sourceMode == 1 ? R.string.recap_ytm : (sourceMode == 2 ? R.string.recap_local : R.string.recap_spotify);
+        col.addView(Ui.text(m, m.getString(titleRes), 15.5f, Ui.bold, Ui.text()), Widgets.MW);
         TextView sub = Ui.text(m, m.getString(R.string.recap_card_sub), 12.5f, Ui.regular, Ui.text2());
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         sl.topMargin = Ui.dp(2);
@@ -371,7 +377,7 @@ final class Pages {
         card.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         card.addView(new Icons.IconView(m, Icons.CHEVRON, 15, Ui.text3()), new LinearLayout.LayoutParams(Ui.dp(18), Ui.dp(18)));
-        card.setOnClickListener(v -> m.push(new RecapPage(m, localFirst)));
+        card.setOnClickListener(v -> m.push(new RecapPage(m, sourceMode)));
         Ui.press(card, 0.97f);
 
         wrap.addView(card, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -384,7 +390,7 @@ final class Pages {
         LinearLayout c = p.content;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         c.addView(Widgets.section(m, m.getString(h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening))));
-        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, true), Widgets.MW);
+        if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, 1), Widgets.MW);
         View sp = Widgets.spinner(m, 160);
         c.addView(sp);
         YouTubeMusic.fetchHome(sections -> {
@@ -468,7 +474,8 @@ final class Pages {
             loadRail(s2, R.string.home_playlists, "/me/playlists?limit=50", "items", 92);
 
             s3.addView(Widgets.section(m, m.getString(R.string.home_for_you)));
-            Spotify.get("/me/top/tracks?limit=18&time_range=short_term", new Spotify.Cb() {
+            // Share exact query string with RecapPage so Home & Recap reuse 1 cached response (zero duplicate calls!)
+            Spotify.get("/me/top/tracks?limit=20&time_range=short_term", new Spotify.Cb() {
                 @Override public void ok(JSONObject o) {
                     List<Widgets.Item> l = items(o.optJSONArray("items"));
                     if (l.isEmpty()) { s3.setVisibility(GONE); return; }
@@ -1496,11 +1503,15 @@ final class Pages {
                     if (a == null) { fallbackPlaylist(0, ""); return; }
                     showTracks(items(a), false);
                 }
-                @Override public void err(int c, String e) { fallbackPlaylist(c, e); }
+                @Override public void err(int c, String e) {
+                    if (c == 429) { failed(429, e); return; }
+                    fallbackPlaylist(c, e);
+                }
             });
         }
 
         private void fallbackPlaylist(int prevCode, String prevErr) {
+            if (prevCode == 429 || Spotify.isRateLimited()) { failed(429, prevErr); return; }
             // Feb 2026 Spotify Web API enforces max limit=50 on GET /playlists/{id}/items (limit=100 fails with 400!)
             Spotify.getFirst(new Spotify.Cb() {
                 @Override public void ok(JSONObject o) { showTracks(items(o.optJSONArray("items")), false); }
@@ -1518,7 +1529,10 @@ final class Pages {
                     decorateAlbumTracks(l, o);
                     showTracks(l, true);
                 }
-                @Override public void err(int c, String e) { loadAlbumTracksFallback(item.raw, c, e); }
+                @Override public void err(int c, String e) {
+                    if (c == 429) { failed(429, e); return; }
+                    loadAlbumTracksFallback(item.raw, c, e);
+                }
             });
         }
 
@@ -1539,6 +1553,7 @@ final class Pages {
         }
 
         private void loadAlbumTracksFallback(JSONObject albumObj, int prevCode, String prevErr) {
+            if (prevCode == 429 || Spotify.isRateLimited()) { failed(429, prevErr); return; }
             Spotify.getFirst(new Spotify.Cb() {
                 @Override public void ok(JSONObject o) {
                     List<Widgets.Item> l = items(o.optJSONArray("items"));
@@ -1547,6 +1562,7 @@ final class Pages {
                     showTracks(l, true);
                 }
                 @Override public void err(int c, String e) {
+                    if (c == 429) { failed(429, e); return; }
                     loadAlbumSearchFallback(albumObj, c != 0 ? c : prevCode, e != null && !e.isEmpty() ? e : prevErr);
                 }
             }, "/albums/" + item.id + "/tracks?limit=50", "/albums/" + item.id + "/tracks?limit=10");
@@ -2313,34 +2329,41 @@ final class Pages {
         }
     }
 
-    // ------------------------------------------------------------------ Recap (Spotify + Local)
+    // ------------------------------------------------------------------ Recap (Spotify + YouTube Music + Local)
     static final class RecapPage extends Page {
-        private boolean localMode;
-        private int periodIdx; // 0 = short/month, 1 = medium/year, 2 = long/all
+        private int sourceMode; // 0 = Spotify, 1 = YouTube Music, 2 = Local
+        private int periodIdx = 2; // Default: 2 = 전체 기간 (All time / long_term)
         private LinearLayout body;
         private int req;
 
         RecapPage(MainActivity m, boolean localFirst) {
+            this(m, localFirst ? (m.isYtmSource() ? 1 : 2) : (Spotify.loggedIn() ? 0 : (m.isYtmSource() ? 1 : 2)));
+        }
+
+        RecapPage(MainActivity m, int initialMode) {
             super(m, m.getString(R.string.recap_title), true);
-            this.localMode = localFirst || !Spotify.loggedIn();
+            this.sourceMode = Math.max(0, Math.min(2, initialMode));
             back = true;
             headerIcons = new int[0];
         }
 
         @Override void build() {
             MainActivity m = main;
-            // Source switcher pills: Spotify Recap / Local Recap
+            // 3-way Source switcher pills: Spotify / YouTube Music / Local
             LinearLayout srcRow = new LinearLayout(m);
             srcRow.setOrientation(LinearLayout.HORIZONTAL);
             srcRow.setPadding(Ui.dp(16), Ui.dp(6), Ui.dp(16), Ui.dp(8));
-            srcRow.addView(segPill(m, m.getString(R.string.recap_spotify), !localMode, v -> { localMode = false; rebuild(); }),
+            srcRow.addView(segPill(m, "Spotify", sourceMode == 0, v -> { sourceMode = 0; rebuild(); }),
                     new LinearLayout.LayoutParams(0, Ui.dp(38), 1f));
-            srcRow.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(8), 1));
-            srcRow.addView(segPill(m, m.getString(R.string.recap_local), localMode, v -> { localMode = true; rebuild(); }),
+            srcRow.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(6), 1));
+            srcRow.addView(segPill(m, "YT Music", sourceMode == 1, v -> { sourceMode = 1; rebuild(); }),
+                    new LinearLayout.LayoutParams(0, Ui.dp(38), 1f));
+            srcRow.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(6), 1));
+            srcRow.addView(segPill(m, m.getString(R.string.recap_local), sourceMode == 2, v -> { sourceMode = 2; rebuild(); }),
                     new LinearLayout.LayoutParams(0, Ui.dp(38), 1f));
             content.addView(srcRow, Widgets.MW);
 
-            String[] periods = localMode
+            String[] periods = sourceMode != 0
                     ? new String[]{m.getString(R.string.recap_month), m.getString(R.string.recap_year), m.getString(R.string.recap_all)}
                     : new String[]{m.getString(R.string.chart_short), m.getString(R.string.chart_medium), m.getString(R.string.chart_long)};
             Widgets.Chips pChips = new Widgets.Chips(m, periods, idx -> { periodIdx = idx; load(); });
@@ -2356,7 +2379,7 @@ final class Pages {
         }
 
         private static TextView segPill(Context c, String label, boolean sel, View.OnClickListener click) {
-            TextView tv = Ui.text(c, label, 13.5f, sel ? Ui.bold : Ui.medium, sel ? 0xFFFFFFFF : Ui.text());
+            TextView tv = Ui.text(c, label, 13f, sel ? Ui.bold : Ui.medium, sel ? 0xFFFFFFFF : Ui.text());
             tv.setGravity(Gravity.CENTER);
             tv.setBackground(Widgets.chipBg(sel ? Ui.ACCENT : Ui.chip()));
             tv.setOnClickListener(click);
@@ -2368,9 +2391,10 @@ final class Pages {
             final int my = ++req;
             MainActivity m = main;
             body.removeAllViews();
-            if (localMode) {
+            if (sourceMode == 1 || sourceMode == 2) {
+                final boolean isYtm = sourceMode == 1;
                 String p = periodIdx == 0 ? "month" : (periodIdx == 1 ? "year" : "all");
-                Recap.Summary s = Recap.localSummary(m, p);
+                Recap.Summary s = isYtm ? Recap.ytmSummary(m, p) : Recap.localSummary(m, p);
                 if (s.totalPlays == 0) {
                     body.addView(Widgets.messageCard(m, Icons.RECAP, m.getString(R.string.recap_empty), null, null));
                     return;
@@ -2379,7 +2403,8 @@ final class Pages {
                         ? m.getString(R.string.recap_hours, s.totalMs / 3600_000f)
                         : m.getString(R.string.recap_mins, Math.max(1, (int) (s.totalMs / 60_000L)));
                 String topAr = s.topArtists.isEmpty() ? "" : s.topArtists.get(0).name;
-                body.addView(heroCard(m, m.getString(R.string.recap_local), statTime, m.getString(R.string.recap_plays, s.totalPlays), topAr));
+                body.addView(heroCard(m, m.getString(isYtm ? R.string.recap_ytm : R.string.recap_local),
+                        statTime, m.getString(R.string.recap_plays, s.totalPlays), topAr, isYtm));
 
                 if (!s.topArtists.isEmpty()) {
                     body.addView(Widgets.section(m, m.getString(R.string.recap_top_artists)));
@@ -2403,7 +2428,7 @@ final class Pages {
                         tr.id = e.id; tr.uri = e.uri; tr.name = e.name; tr.artist = e.artist; tr.album = e.album;
                         tr.art = e.art; tr.artSmall = e.art; tr.duration = e.durationMs;
                         Widgets.Item it = new Widgets.Item();
-                        it.type = e.uri != null && e.uri.startsWith("ytm:") ? "ytm_track" : "ltrack";
+                        it.type = isYtm || (e.uri != null && e.uri.startsWith("ytm:")) ? "ytm_track" : "ltrack";
                         it.id = e.id; it.uri = e.uri; it.title = e.name;
                         it.subtitle = e.artist + " · " + m.getString(R.string.recap_plays, e.plays);
                         it.image = e.art; it.track = tr;
@@ -2415,7 +2440,7 @@ final class Pages {
                     card.setClipToOutline(true);
                     for (int i = 0; i < Math.min(15, playItems.size()); i++) {
                         final int idx = i;
-                        card.addView(Widgets.trackRow(m, playItems.get(i), i + 1, v -> m.playList(playItems, idx, null), null), Widgets.MW);
+                        card.addView(Widgets.trackRow(m, playItems.get(i), i + 1, v -> m.playList(playItems, idx, isYtm ? m.getString(R.string.recap_ytm) : null), null), Widgets.MW);
                     }
                     LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                     clp.leftMargin = clp.rightMargin = Ui.dp(16);
@@ -2460,7 +2485,7 @@ final class Pages {
                     }
                     String topArtist = topA.isEmpty() ? "" : topA.get(0).title;
                     String periodLabel = periodIdx == 0 ? m.getString(R.string.chart_short) : (periodIdx == 1 ? m.getString(R.string.chart_medium) : m.getString(R.string.chart_long));
-                    body.addView(heroCard(m, m.getString(R.string.recap_spotify), periodLabel, m.getString(R.string.n_tracks, topT.size()), topArtist));
+                    body.addView(heroCard(m, m.getString(R.string.recap_spotify), periodLabel, m.getString(R.string.n_tracks, topT.size()), topArtist, false));
                     if (!topA.isEmpty()) {
                         body.addView(Widgets.section(m, m.getString(R.string.recap_top_artists)));
                         LinearLayout row = Widgets.rail(body, 10);
@@ -2485,13 +2510,15 @@ final class Pages {
             });
         }
 
-        private static View heroCard(Context c, String kicker, String bigStat, String subStat, String topArtist) {
+        private static View heroCard(Context c, String kicker, String bigStat, String subStat, String topArtist, boolean ytmTheme) {
             LinearLayout box = new LinearLayout(c);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setPadding(Ui.dp(22), Ui.dp(20), Ui.dp(22), Ui.dp(20));
+            int[] cols = ytmTheme
+                    ? new int[]{0xFFCC182D, 0xFFE11D48, 0xFF7C3AED}
+                    : new int[]{Ui.mix(Ui.ACCENT, 0xFF14142B, 0.35f), 0xFF4F46E5, 0xFF0EA5E9};
             android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable(
-                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                    new int[]{Ui.mix(Ui.ACCENT, 0xFF14142B, 0.35f), 0xFF4F46E5, 0xFF0EA5E9});
+                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR, cols);
             bg.setCornerRadius(Ui.dpf(Ui.gStyle ? 24 : 18));
             box.setBackground(bg);
             box.setElevation(Ui.dpf(3));

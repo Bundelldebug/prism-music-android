@@ -837,10 +837,12 @@ final class YouTubeMusic {
      * but serves HTTP 206 Partial Content cleanly for bounded Range: bytes=start-end requests!
      */
     static final class RangeMediaDataSource extends android.media.MediaDataSource {
-        private static final int CHUNK = 262144; // 256 KB per Range request
-        private static final int MAX_CACHED_CHUNKS = 16; // 4 MB LRU cache
-        private final String url;
-        private final String ua;
+        private static final int CHUNK = 524288; // 512 KB per Range request (fewer round-trips, smoother streaming)
+        private static final int MAX_CACHED_CHUNKS = 28; // 14 MB LRU cache (holds entire typical audio track in RAM)
+        private static final ExecutorService PREFETCH_IO = Executors.newFixedThreadPool(2);
+        private final String videoId;
+        private volatile String url;
+        private volatile String ua;
         private volatile long totalSize;
         private volatile boolean closed;
         private final LinkedHashMap<Long, byte[]> cache = new LinkedHashMap<Long, byte[]>(MAX_CACHED_CHUNKS + 2, 0.75f, true) {
@@ -848,18 +850,80 @@ final class YouTubeMusic {
                 return size() > MAX_CACHED_CHUNKS;
             }
         };
+        private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<byte[]>> inFlight =
+                new java.util.concurrent.ConcurrentHashMap<>();
 
-        RangeMediaDataSource(String url, long contentLength, String ua) {
+        RangeMediaDataSource(String videoId, String url, long contentLength, String ua) {
+            this.videoId = videoId;
             this.url = url;
             this.totalSize = contentLength;
             this.ua = ua != null ? ua : IOS_UA;
+            // Immediately warm up the first two chunks asynchronously so initial playback & early seconds never stutter!
+            prefetchChunk(0);
+            if (contentLength <= 0 || contentLength > CHUNK) prefetchChunk(1);
+        }
+
+        private void prefetchChunk(final long chunkIdx) {
+            if (closed || chunkIdx < 0) return;
+            long total = totalSize;
+            if (total > 0 && chunkIdx * CHUNK >= total) return;
+            synchronized (cache) {
+                if (cache.containsKey(chunkIdx)) return;
+            }
+            if (inFlight.containsKey(chunkIdx)) return;
+            final java.util.concurrent.CompletableFuture<byte[]> fut = new java.util.concurrent.CompletableFuture<>();
+            if (inFlight.putIfAbsent(chunkIdx, fut) != null) return;
+            PREFETCH_IO.execute(() -> {
+                try {
+                    if (closed) { fut.complete(null); return; }
+                    long start = chunkIdx * CHUNK;
+                    long curTotal = totalSize;
+                    long end = curTotal > 0 ? Math.min(curTotal - 1, start + CHUNK - 1) : (start + CHUNK - 1);
+                    byte[] data = fetchRange(start, end, curTotal <= 0);
+                    if (data != null && data.length > 0 && !closed) {
+                        synchronized (cache) {
+                            if (!closed) cache.put(chunkIdx, data);
+                        }
+                    }
+                    fut.complete(data);
+                } catch (Throwable t) {
+                    fut.completeExceptionally(t);
+                } finally {
+                    inFlight.remove(chunkIdx, fut);
+                }
+            });
         }
 
         private long ensureSize() throws java.io.IOException {
             if (totalSize > 0) return totalSize;
-            byte[] probe = fetchRange(0, 4095, true);
-            if (probe != null && probe.length > 0 && totalSize <= 0) totalSize = probe.length;
+            byte[] first = loadChunk(0);
+            if (first != null && first.length > 0 && totalSize <= 0) totalSize = first.length;
             return totalSize > 0 ? totalSize : -1;
+        }
+
+        private byte[] loadChunk(long chunkIdx) throws java.io.IOException {
+            if (closed) return null;
+            synchronized (cache) {
+                byte[] cached = cache.get(chunkIdx);
+                if (cached != null) return cached;
+            }
+            java.util.concurrent.CompletableFuture<byte[]> existing = inFlight.get(chunkIdx);
+            if (existing != null) {
+                try {
+                    byte[] waited = existing.get(16, java.util.concurrent.TimeUnit.SECONDS);
+                    if (waited != null && waited.length > 0) return waited;
+                } catch (Throwable ignored) {}
+            }
+            long total = totalSize;
+            long start = chunkIdx * CHUNK;
+            long end = total > 0 ? Math.min(total - 1, start + CHUNK - 1) : (start + CHUNK - 1);
+            byte[] data = fetchRange(start, end, total <= 0);
+            if (data != null && data.length > 0 && !closed) {
+                synchronized (cache) {
+                    if (!closed) cache.put(chunkIdx, data);
+                }
+            }
+            return data;
         }
 
         @Override public long getSize() throws java.io.IOException {
@@ -873,19 +937,11 @@ final class YouTubeMusic {
             int want = total > 0 ? (int) Math.min(size, total - position) : size;
             long chunkIdx = position / CHUNK;
             int inChunk = (int) (position - chunkIdx * CHUNK);
-            byte[] data;
-            synchronized (cache) {
-                data = cache.get(chunkIdx);
-            }
-            if (data == null) {
-                long start = chunkIdx * CHUNK;
-                long end = total > 0 ? Math.min(total - 1, start + CHUNK - 1) : (start + CHUNK - 1);
-                data = fetchRange(start, end, false);
-                if (data == null || data.length == 0) return -1;
-                synchronized (cache) {
-                    if (!closed) cache.put(chunkIdx, data);
-                }
-            }
+            // Proactively prefetch the next 2 chunks ahead of the playback cursor so MediaPlayer NEVER stalls on a chunk boundary!
+            prefetchChunk(chunkIdx + 1);
+            prefetchChunk(chunkIdx + 2);
+            byte[] data = loadChunk(chunkIdx);
+            if (data == null || data.length == 0) return -1;
             if (inChunk >= data.length) return -1;
             int n = Math.min(want, data.length - inChunk);
             System.arraycopy(data, inChunk, buffer, offset, n);
@@ -894,15 +950,34 @@ final class YouTubeMusic {
 
         private byte[] fetchRange(long start, long end, boolean parseTotal) throws java.io.IOException {
             java.io.IOException lastErr = null;
-            for (int attempt = 0; attempt < 2 && !closed; attempt++) {
+            boolean refreshedUrl = false;
+            for (int attempt = 0; attempt < 4 && !closed; attempt++) {
+                if (attempt > 0) {
+                    try { Thread.sleep(attempt == 1 ? 120L : (attempt == 2 ? 320L : 650L)); } catch (InterruptedException ignored) { break; }
+                }
                 HttpURLConnection conn = null;
                 try {
-                    conn = (HttpURLConnection) new URL(url).openConnection();
+                    String curUrl = this.url;
+                    String curUa = this.ua;
+                    conn = (HttpURLConnection) new URL(curUrl).openConnection();
                     conn.setConnectTimeout(8000);
-                    conn.setReadTimeout(12000);
-                    conn.setRequestProperty("User-Agent", ua);
+                    conn.setReadTimeout(15000);
+                    conn.setRequestProperty("User-Agent", curUa);
+                    conn.setRequestProperty("Accept-Encoding", "identity");
+                    conn.setRequestProperty("Connection", "keep-alive");
                     conn.setRequestProperty("Range", "bytes=" + start + "-" + end);
                     int code = conn.getResponseCode();
+                    if ((code == 403 || code == 410) && !refreshedUrl && videoId != null && !videoId.isEmpty()) {
+                        // Signed googlevideo URL expired or throttled mid-track: transparently re-resolve fresh URL!
+                        refreshedUrl = true;
+                        MediaStreams fresh = resolveStreamsSync(videoId);
+                        if (fresh != null && fresh.audioUrl != null && !fresh.audioUrl.isEmpty()) {
+                            this.url = fresh.audioUrl;
+                            if (fresh.userAgent != null) this.ua = fresh.userAgent;
+                            if (fresh.audioContentLength > 0) this.totalSize = fresh.audioContentLength;
+                            continue;
+                        }
+                    }
                     if (code != 206 && code != 200) {
                         throw new java.io.IOException("HTTP " + code);
                     }
@@ -920,11 +995,13 @@ final class YouTubeMusic {
                         }
                     }
                     try (InputStream is = conn.getInputStream();
-                         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream((int) Math.min(CHUNK, Math.max(4096, end - start + 1)))) {
-                        byte[] buf = new byte[16384];
+                         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream((int) Math.min(CHUNK, Math.max(8192, end - start + 1)))) {
+                        byte[] buf = new byte[32768];
                         int r;
                         while (!closed && (r = is.read(buf)) != -1) bos.write(buf, 0, r);
-                        return bos.toByteArray();
+                        byte[] out = bos.toByteArray();
+                        if (out.length > 0) return out;
+                        throw new java.io.IOException("empty range body");
                     }
                 } catch (java.io.IOException e) {
                     lastErr = e;
@@ -938,13 +1015,19 @@ final class YouTubeMusic {
 
         @Override public void close() {
             closed = true;
+            inFlight.clear();
             synchronized (cache) { cache.clear(); }
         }
     }
 
     private static void openStream(MediaStreams ms, long seekTo, boolean useHls) {
+        openStream(ms, seekTo, useHls, 0);
+    }
+
+    private static void openStream(MediaStreams ms, long seekTo, boolean useHls, int retryCount) {
         release();
         if (app == null || ms == null) return;
+        final int gen = playGen;
         boolean playingHls = useHls || (ms.audioUrl == null && ms.hlsUrl != null);
         String url = playingHls ? ms.hlsUrl : ms.audioUrl;
         if (url == null || url.isEmpty()) return;
@@ -962,12 +1045,12 @@ final class YouTubeMusic {
                 headers.put("User-Agent", ms.userAgent != null ? ms.userAgent : IOS_UA);
                 mp.setDataSource(app, android.net.Uri.parse(url), headers);
             } else {
-                // Bounded HTTP Range MediaDataSource avoids YouTube CDN HTTP 403 on unbounded GET!
-                mp.setDataSource(new RangeMediaDataSource(url, ms.audioContentLength, ms.userAgent));
+                // Prefetching HTTP Range MediaDataSource prevents CDN 403s AND mid-track stalls/stuttering!
+                mp.setDataSource(new RangeMediaDataSource(ms.videoId, url, ms.audioContentLength, ms.userAgent));
             }
         } catch (Exception e) {
             if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
-                openStream(ms, seekTo, true);
+                openStream(ms, seekTo, true, retryCount + 1);
                 return;
             }
             Player.playing = false;
@@ -976,6 +1059,7 @@ final class YouTubeMusic {
             return;
         }
         mp.setOnPreparedListener(p -> {
+            if (gen != playGen) return;
             if (Player.track != null && p.getDuration() > 0) Player.track.duration = p.getDuration();
             if (seekTo > 0) p.seekTo((int) seekTo);
             if (requestFocus()) p.start();
@@ -983,9 +1067,25 @@ final class YouTubeMusic {
         });
         mp.setOnCompletionListener(p -> onComplete());
         mp.setOnErrorListener((p, w, x) -> {
-            if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
-                openStream(ms, seekTo, true);
-                return true;
+            if (gen != playGen) return true;
+            long resumePos = Math.max(seekTo, Player.position());
+            if (retryCount < 2) {
+                if (!playingHls && ms.hlsUrl != null && !ms.hlsUrl.equals(url)) {
+                    openStream(ms, resumePos, true, retryCount + 1);
+                    return true;
+                }
+                if (ms.videoId != null && !ms.videoId.isEmpty()) {
+                    IO.execute(() -> {
+                        MediaStreams fresh = resolveStreamsSync(ms.videoId);
+                        if (gen != playGen) return;
+                        Spotify.MAIN.post(() -> {
+                            if (gen != playGen) return;
+                            if (fresh != null) openStream(fresh, resumePos, retryCount >= 1, retryCount + 1);
+                            else { Player.playing = false; Player.notifyAll0(); Player.toast(R.string.playback_failed); }
+                        });
+                    });
+                    return true;
+                }
             }
             Player.playing = false;
             Player.notifyAll0();
@@ -1076,6 +1176,20 @@ final class YouTubeMusic {
         List<Player.Track> l = new ArrayList<>();
         for (int i = index + 1; i < queue.size() && l.size() < 50; i++) l.add(queue.get(i));
         return l;
+    }
+
+    static List<Player.Track> fullQueue() {
+        return new ArrayList<>(queue);
+    }
+
+    static int currentIndex() {
+        return index;
+    }
+
+    static void jumpTo(int absIndex) {
+        if (absIndex < 0 || absIndex >= queue.size()) return;
+        index = absIndex;
+        start(0);
     }
 
     static void jumpUpNext(int i) {

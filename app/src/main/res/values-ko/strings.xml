@@ -373,6 +373,7 @@
     <string name="search_clear">지우기</string>
     <string name="recap_title">리캡</string>
     <string name="recap_spotify">Spotify 리캡</string>
+    <string name="recap_ytm">YouTube Music 리캡</string>
     <string name="recap_local">로컬 리캡</string>
     <string name="recap_plays">%1$d회 재생</string>
     <string name="recap_hours">총 %1$.1f시간 감상</string>

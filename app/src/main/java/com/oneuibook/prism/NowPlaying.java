@@ -1466,29 +1466,48 @@ final class NowPlaying extends FrameLayout {
         });
     }
 
-    private View queueRow(Context c, String name, String artist, String art) {
+    private View queueRow(Context c, String name, String artist, String art, boolean isCurrent) {
         LinearLayout r = new LinearLayout(c);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(28), Ui.dp(6), Ui.dp(28), Ui.dp(6));
-        Img.ArtView a = new Img.ArtView(c, 6);
+        r.setPadding(Ui.dp(14), Ui.dp(8), Ui.dp(14), Ui.dp(8));
+        Img.ArtView a = new Img.ArtView(c, 7);
         a.setUrl(art);
         r.addView(a, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
         LinearLayout col = new LinearLayout(c);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(Ui.dp(12), 0, 0, 0);
-        col.addView(Ui.text(c, name, 15, Ui.medium, 0xFFFFFFFF), Widgets.MW);
-        col.addView(Ui.text(c, artist, 13, Ui.regular, 0x99FFFFFF), Widgets.MW);
+        col.setPadding(Ui.dp(12), 0, Ui.dp(8), 0);
+        col.addView(Ui.text(c, name, 15, isCurrent ? Ui.bold : Ui.medium, 0xFFFFFFFF), Widgets.MW);
+        col.addView(Ui.text(c, artist, 13, isCurrent ? Ui.medium : Ui.regular, isCurrent ? 0xDDFFFFFF : 0x99FFFFFF), Widgets.MW);
         r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        r.addView(new Icons.IconView(c, Icons.DRAG, 20, 0x66FFFFFF), new LinearLayout.LayoutParams(Ui.dp(28), Ui.dp(28)));
+        r.addView(new Icons.IconView(c, isCurrent ? Icons.WAVE : Icons.DRAG, isCurrent ? 18 : 20,
+                isCurrent ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.55f) : 0x66FFFFFF),
+                new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(Ui.dp(16), Ui.dp(2), Ui.dp(16), Ui.dp(2));
+        r.setLayoutParams(lp);
+        if (isCurrent) {
+            android.graphics.drawable.GradientDrawable border = Ui.round(Ui.alpha(Ui.ACCENT, 0.16f), 14);
+            border.setStroke(Math.max(2, Ui.dp(1.6f)), Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.48f));
+            r.setBackground(border);
+        }
         return r;
     }
 
-    /** Queue rows are tappable: a soft highlight while pressed, then that song plays. */
-    private static void tapToPlay(View row, Runnable play) {
-        row.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x33FFFFFF), null, Ui.round(0xFFFFFFFF, 14)));
+    /** Queue rows are tappable: a soft highlight while pressed, then that song plays (preserving active selection border). */
+    private static void tapToPlay(View row, boolean isCurrent, Runnable play) {
+        if (!isCurrent) {
+            row.setBackground(new android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(0x33FFFFFF), null, Ui.round(0xFFFFFFFF, 14)));
+        }
         row.setClickable(true);
         row.setOnClickListener(v -> play.run());
+    }
+
+    private static boolean sameTrack(Player.Track a, Player.Track b) {
+        if (a == null || b == null) return false;
+        if (a.uri != null && !a.uri.isEmpty() && a.uri.equals(b.uri)) return true;
+        if (a.id != null && !a.id.isEmpty() && a.id.equals(b.id)) return true;
+        return a.name != null && a.name.equals(b.name) && a.artist != null && a.artist.equals(b.artist);
     }
 
     private void loadQueue() {
@@ -1518,24 +1537,30 @@ final class NowPlaying extends FrameLayout {
         }
         queueList.addView(toggles, Widgets.MW);
 
-        // Currently playing track card (highlighted selected UI) + direct jump to current playlist/album!
+        // Unified header: "계속 재생" + source subtitle on left, "현재 재생목록으로 이동" pill on right (no separate Now Playing card!)
         Player.Track cur = Player.track;
-        if (cur != null) {
-            LinearLayout curHead = new LinearLayout(c);
-            curHead.setOrientation(LinearLayout.HORIZONTAL);
-            curHead.setGravity(Gravity.CENTER_VERTICAL);
-            curHead.setPadding(Ui.dp(24), Ui.dp(2), Ui.dp(24), Ui.dp(8));
-            TextView npLbl = Ui.text(c, c.getString(R.string.now_playing_label), 13.5f, Ui.bold, 0xCCFFFFFF);
-            curHead.addView(npLbl, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout headRow = new LinearLayout(c);
+        headRow.setOrientation(LinearLayout.HORIZONTAL);
+        headRow.setGravity(Gravity.CENTER_VERTICAL);
+        headRow.setPadding(Ui.dp(24), Ui.dp(2), Ui.dp(20), Ui.dp(10));
+        LinearLayout head = new LinearLayout(c);
+        head.setOrientation(LinearLayout.VERTICAL);
+        head.addView(Ui.text(c, c.getString(R.string.continue_playing), 16.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
+        String subLabel = (Player.playingSourceTitle != null && !Player.playingSourceTitle.isEmpty())
+                ? Player.playingSourceTitle
+                : (cur != null && cur.album != null ? cur.album : "");
+        if (!subLabel.isEmpty())
+            head.addView(Ui.text(c, subLabel, 13, Ui.regular, 0x99FFFFFF), Widgets.MW);
+        headRow.addView(head, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-            // Direct button: jump straight into the currently playing playlist / album!
+        if (cur != null) {
             boolean isPl = (Player.playingSourceUri != null && Player.playingSourceUri.contains(":playlist:"))
                     || (Player.contextUri != null && Player.contextUri.contains(":playlist:"));
             LinearLayout goBtn = new LinearLayout(c);
             goBtn.setOrientation(LinearLayout.HORIZONTAL);
             goBtn.setGravity(Gravity.CENTER_VERTICAL);
-            goBtn.setPadding(Ui.dp(11), Ui.dp(5), Ui.dp(12), Ui.dp(5));
-            android.graphics.drawable.GradientDrawable gbg = Ui.round(0x33FFFFFF, 100);
+            goBtn.setPadding(Ui.dp(11), Ui.dp(6), Ui.dp(12), Ui.dp(6));
+            android.graphics.drawable.GradientDrawable gbg = Ui.round(0x2EFFFFFF, 100);
             gbg.setStroke(Math.max(1, Ui.dp(0.75f)), 0x44FFFFFF);
             goBtn.setBackground(gbg);
             goBtn.addView(new Icons.IconView(c, Icons.PLAYLIST_GO, 14, 0xFFFFFFFF), new LinearLayout.LayoutParams(Ui.dp(16), Ui.dp(16)));
@@ -1545,115 +1570,128 @@ final class NowPlaying extends FrameLayout {
             goBtn.addView(goTxt, gtl);
             goBtn.setOnClickListener(v -> main.openCurrentPlayingContext());
             Ui.press(goBtn, 0.94f);
-            curHead.addView(goBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            queueList.addView(curHead, Widgets.MW);
-
-            // Highlighted selected card for the currently playing track
-            LinearLayout curCard = new LinearLayout(c);
-            curCard.setGravity(Gravity.CENTER_VERTICAL);
-            curCard.setPadding(Ui.dp(12), Ui.dp(10), Ui.dp(14), Ui.dp(10));
-            android.graphics.drawable.GradientDrawable curBg = Ui.round(Ui.alpha(Ui.ACCENT, 0.28f), 16);
-            curBg.setStroke(Math.max(1, Ui.dp(1.2f)), Ui.alpha(Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.45f), 0.75f));
-            curCard.setBackground(curBg);
-            Img.ArtView curArt = new Img.ArtView(c, 8);
-            curArt.setUrl(cur.artSmall != null ? cur.artSmall : cur.art);
-            curCard.addView(curArt, new LinearLayout.LayoutParams(Ui.dp(46), Ui.dp(46)));
-            LinearLayout curCol = new LinearLayout(c);
-            curCol.setOrientation(LinearLayout.VERTICAL);
-            curCol.setPadding(Ui.dp(12), 0, Ui.dp(8), 0);
-            curCol.addView(Ui.text(c, cur.name, 15.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
-            curCol.addView(Ui.text(c, cur.artist, 13f, Ui.medium, 0xCCFFFFFF), Widgets.MW);
-            curCard.addView(curCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            curCard.addView(new Icons.IconView(c, Icons.WAVE, 18, Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.55f)), new LinearLayout.LayoutParams(Ui.dp(24), Ui.dp(24)));
-            curCard.setOnClickListener(v -> main.openCurrentPlayingContext());
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            clp.setMargins(Ui.dp(20), 0, Ui.dp(20), Ui.dp(14));
-            queueList.addView(curCard, clp);
+            headRow.addView(goBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
+        queueList.addView(headRow, Widgets.MW);
 
-        LinearLayout head = new LinearLayout(c);
-        head.setOrientation(LinearLayout.VERTICAL);
-        head.setPadding(Ui.dp(28), 0, Ui.dp(20), Ui.dp(8));
-        head.addView(Ui.text(c, c.getString(R.string.continue_playing), 16.5f, Ui.bold, 0xFFFFFFFF), Widgets.MW);
-        if (cur != null && cur.album != null && !cur.album.isEmpty())
-            head.addView(Ui.text(c, cur.album, 13, Ui.regular, 0x99FFFFFF), Widgets.MW);
-        queueList.addView(head, Widgets.MW);
         if (Player.local()) {
-            List<Player.Track> up = LocalMusic.upNext();
-            if (up.isEmpty()) queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
-            for (int i = 0; i < up.size(); i++) {
-                Player.Track tr = up.get(i);
-                final int at = i;
-                View row = queueRow(c, tr.name, tr.artist, tr.artSmall);
-                tapToPlay(row, () -> { LocalMusic.jumpUpNext(at); Spotify.MAIN.postDelayed(this::loadQueue, 120); });
-                queueList.addView(row, Widgets.MW);
+            List<Player.Track> all = LocalMusic.fullQueue();
+            int curIdx = LocalMusic.currentIndex();
+            if (all.isEmpty()) {
+                queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+                return;
+            }
+            int from = Math.max(0, curIdx - 15);
+            int to = Math.min(all.size(), from + 60);
+            for (int i = from; i < to; i++) {
+                Player.Track tr = all.get(i);
+                final int absIdx = i;
+                boolean isCur = (i == curIdx);
+                View row = queueRow(c, tr.name, tr.artist, tr.artSmall != null ? tr.artSmall : tr.art, isCur);
+                tapToPlay(row, isCur, () -> { LocalMusic.jumpTo(absIdx); Spotify.MAIN.postDelayed(this::loadQueue, 80); });
+                queueList.addView(row);
             }
             return;
         }
         if (Player.ytm()) {
-            List<Player.Track> up = YouTubeMusic.upNext();
-            if (up.isEmpty()) queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
-            for (int i = 0; i < up.size(); i++) {
-                Player.Track tr = up.get(i);
-                final int at = i;
-                View row = queueRow(c, tr.name, tr.artist, tr.artSmall);
-                tapToPlay(row, () -> { YouTubeMusic.jumpUpNext(at); Spotify.MAIN.postDelayed(this::loadQueue, 120); });
-                queueList.addView(row, Widgets.MW);
+            List<Player.Track> all = YouTubeMusic.fullQueue();
+            int curIdx = YouTubeMusic.currentIndex();
+            if (all.isEmpty()) {
+                queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+                return;
+            }
+            int from = Math.max(0, curIdx - 15);
+            int to = Math.min(all.size(), from + 60);
+            for (int i = from; i < to; i++) {
+                Player.Track tr = all.get(i);
+                final int absIdx = i;
+                boolean isCur = (i == curIdx);
+                View row = queueRow(c, tr.name, tr.artist, tr.artSmall != null ? tr.artSmall : tr.art, isCur);
+                tapToPlay(row, isCur, () -> { YouTubeMusic.jumpTo(absIdx); Spotify.MAIN.postDelayed(this::loadQueue, 80); });
+                queueList.addView(row);
             }
             return;
+        }
+        // Spotify: render immediately from preserved Player.activeQueue if populated so upcoming tracks NEVER disappear on tap!
+        if (!Player.activeQueue.isEmpty()) {
+            boolean curInActive = false;
+            for (Player.Track t : Player.activeQueue) {
+                if (sameTrack(t, cur)) { curInActive = true; break; }
+            }
+            if (curInActive) {
+                renderSpotifyQueueList(c, new ArrayList<>(Player.activeQueue));
+                return;
+            }
         }
         View sp = Widgets.spinner(c, 80);
         queueList.addView(sp);
         Player.queue(new Spotify.Cb() {
             @Override public void ok(JSONObject o) {
                 queueList.removeView(sp);
-                JSONArray q = o.optJSONArray("queue");
-                if (q == null || q.length() == 0) { queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF)); return; }
-                // Spotify /me/player/queue pads short albums/playlists up to 20 slots by repeating tracks cyclically:
-                // stop as soon as a track repeats (or loops back to the currently playing track).
+                List<Player.Track> merged = new ArrayList<>();
                 java.util.HashSet<String> seen = new java.util.HashSet<>();
                 Player.Track playing = Player.track;
-                if (playing != null) {
-                    if (playing.uri != null && !playing.uri.isEmpty()) seen.add(playing.uri);
-                    if (playing.id != null && !playing.id.isEmpty()) seen.add(playing.id);
+                JSONObject curObj = o == null ? null : o.optJSONObject("currently_playing");
+                Player.Track curItem = curObj != null ? Player.Track.from(curObj) : playing;
+                if (curItem != null) {
+                    merged.add(curItem);
+                    if (curItem.uri != null && !curItem.uri.isEmpty()) seen.add(curItem.uri);
+                    if (curItem.id != null && !curItem.id.isEmpty()) seen.add(curItem.id);
                 }
-                int added = 0;
-                for (int i = 0; i < Math.min(30, q.length()); i++) {
-                    JSONObject tr = q.optJSONObject(i);
-                    if (tr == null) continue;
-                    String uri = tr.optString("uri");
-                    String id = tr.optString("id");
-                    String key = !uri.isEmpty() ? uri : (!id.isEmpty() ? id : (tr.optString("name") + "\0" + Spotify.artists(tr)));
-                    if (seen.contains(key) || (!id.isEmpty() && seen.contains(id))) break;
-                    seen.add(key);
-                    if (!id.isEmpty()) seen.add(id);
-                    LinearLayout r = new LinearLayout(c);
-                    r.setGravity(Gravity.CENTER_VERTICAL);
-                    r.setPadding(Ui.dp(28), Ui.dp(6), Ui.dp(28), Ui.dp(6));
-                    Img.ArtView a = new Img.ArtView(c, 6);
-                    a.setUrl(Spotify.image(tr, 120));
-                    r.addView(a, new LinearLayout.LayoutParams(Ui.dp(44), Ui.dp(44)));
-                    LinearLayout col = new LinearLayout(c);
-                    col.setOrientation(LinearLayout.VERTICAL);
-                    col.setPadding(Ui.dp(12), 0, 0, 0);
-                    col.addView(Ui.text(c, tr.optString("name"), 15, Ui.medium, 0xFFFFFFFF), Widgets.MW);
-                    col.addView(Ui.text(c, Spotify.artists(tr), 13, Ui.regular, 0x99FFFFFF), Widgets.MW);
-                    r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    final int at = i;
-                    tapToPlay(r, () -> { Player.playFromQueue(q, at); Spotify.MAIN.postDelayed(NowPlaying.this::loadQueue, 1500); });
-                    queueList.addView(r, Widgets.MW);
-                    added++;
+                JSONArray q = o == null ? null : o.optJSONArray("queue");
+                if (q != null) {
+                    for (int i = 0; i < Math.min(35, q.length()); i++) {
+                        JSONObject tr = q.optJSONObject(i);
+                        if (tr == null) continue;
+                        String uri = tr.optString("uri");
+                        String id = tr.optString("id");
+                        String key = !uri.isEmpty() ? uri : (!id.isEmpty() ? id : (tr.optString("name") + "\0" + Spotify.artists(tr)));
+                        if (seen.contains(key) || (!id.isEmpty() && seen.contains(id))) break;
+                        seen.add(key);
+                        if (!id.isEmpty()) seen.add(id);
+                        Player.Track pt = Player.Track.from(tr);
+                        if (pt != null) merged.add(pt);
+                    }
                 }
-                if (added == 0) queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+                if (merged.size() > 1) {
+                    Player.setActiveQueue(merged);
+                } else if (!Player.activeQueue.isEmpty()) {
+                    // Server queue momentarily returned empty right after track switch: keep preserved list!
+                    merged = new ArrayList<>(Player.activeQueue);
+                }
+                if (merged.isEmpty()) {
+                    queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+                    return;
+                }
+                renderSpotifyQueueList(c, merged);
             }
             @Override public void err(int code, String m) {
                 queueList.removeView(sp);
+                if (!Player.activeQueue.isEmpty()) {
+                    renderSpotifyQueueList(c, new ArrayList<>(Player.activeQueue));
+                    return;
+                }
                 TextView et = Ui.text(c, c.getString(R.string.load_failed), 14, Ui.regular, 0x99FFFFFF);
                 et.setSingleLine(false);
                 et.setPadding(Ui.dp(28), Ui.dp(8), Ui.dp(28), Ui.dp(8));
                 queueList.addView(et, Widgets.MW);
             }
         });
+    }
+
+    private void renderSpotifyQueueList(Context c, List<Player.Track> list) {
+        Player.Track cur = Player.track;
+        for (int i = 0; i < list.size(); i++) {
+            Player.Track tr = list.get(i);
+            final int at = i;
+            boolean isCur = sameTrack(tr, cur);
+            View r = queueRow(c, tr.name, tr.artist, tr.artSmall != null ? tr.artSmall : tr.art, isCur);
+            tapToPlay(r, isCur, () -> {
+                Player.playFromActiveQueue(list, at);
+                loadQueue();
+            });
+            queueList.addView(r);
+        }
     }
 
     // ---------------------------------------------------------------- menus

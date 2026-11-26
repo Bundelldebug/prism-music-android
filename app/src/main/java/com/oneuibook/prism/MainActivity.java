@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.20";
+    static final String VERSION = "9.5.21";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -962,6 +962,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         Player.playingSourceTitle = cur != null ? cur.title : null;
         int from = Math.max(0, idx - 15), to = Math.min(items.size(), idx + 50);
         List<String> uris = new ArrayList<>();
+        List<Player.Track> trackSnap = new ArrayList<>();
         int targetPos = -1;
         for (int i = from; i < to; i++) {
             Widgets.Item it = items.get(i);
@@ -970,16 +971,26 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             if (u == null || !(u.startsWith("spotify:track:") || u.startsWith("spotify:episode:"))) continue;
             if (i == idx) targetPos = uris.size();
             uris.add(u);
+            Player.Track tr = it.raw != null ? Player.Track.from(it.raw) : null;
+            if (tr == null) {
+                tr = new Player.Track();
+                tr.id = it.id; tr.uri = it.uri; tr.name = it.title; tr.artist = it.subtitle; tr.art = it.image; tr.artSmall = it.image;
+            }
+            trackSnap.add(tr);
         }
         if (targetPos < 0) {
             String cu = cur == null ? null : cur.uri;
             if (cu != null && (cu.startsWith("spotify:track:") || cu.startsWith("spotify:episode:"))) {
                 uris.clear();
                 uris.add(cu);
+                trackSnap.clear();
+                Player.Track tr = cur.raw != null ? Player.Track.from(cur.raw) : null;
+                if (tr != null) trackSnap.add(tr);
                 targetPos = 0;
             }
         }
         if (uris.isEmpty()) { Player.toast(R.string.playback_failed); return; }
+        Player.setActiveQueue(trackSnap);
         Player.playUris(uris, Math.max(0, targetPos), Player.Track.from(cur.raw));
     }
 

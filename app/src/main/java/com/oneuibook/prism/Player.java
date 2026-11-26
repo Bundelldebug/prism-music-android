@@ -356,28 +356,57 @@ final class Player {
 
     /** The context the current Spotify song plays from (playlist, album, …), from /me/player. */
     static String contextUri;
+    /** Preserves the active Spotify playlist/queue so tapping another song in Now Playing never wipes upcoming tracks! */
+    static final List<Track> activeQueue = new ArrayList<>();
+
+    static void setActiveQueue(List<Track> list) {
+        activeQueue.clear();
+        if (list != null) {
+            for (Track t : list) if (t != null && t.uri != null && !t.uri.isEmpty()) activeQueue.add(t);
+        }
+    }
 
     /**
-     * Plays the {@code i}-th entry of a /me/player/queue list. The Web API cannot skip to a queue position, so:
-     * inside an album/playlist context restart that context at the song (keeps what follows it), otherwise play the
-     * rest of the shown queue as a list starting at the song.
+     * Plays the {@code i}-th entry of the currently displayed queue list without losing surrounding/upcoming songs.
+     * Passes the full remaining URI slice as fallbackUris so Spotify never falls back to a single-track wipe!
      */
-    static void playFromQueue(JSONArray q, int i) {
-        JSONObject t = q.optJSONObject(i);
-        if (t == null) return;
-        String uri = t.optString("uri");
-        Track preview = Track.from(t);
+    static void playFromActiveQueue(List<Track> list, int i) {
+        if (list == null || i < 0 || i >= list.size()) return;
+        Track preview = list.get(i);
+        if (preview == null || preview.uri == null || preview.uri.isEmpty()) return;
+        setActiveQueue(list);
+        lastQueueKey = null;
+        lastQueueTime = 0;
+        List<String> uris = new ArrayList<>();
+        int start = Math.max(0, i - 10);
+        int end = Math.min(list.size(), start + 60);
+        int offsetPos = 0;
+        for (int k = start; k < end; k++) {
+            Track x = list.get(k);
+            if (x != null && x.uri != null && (x.uri.startsWith("spotify:track:") || x.uri.startsWith("spotify:episode:"))) {
+                if (k == i) offsetPos = uris.size();
+                uris.add(x.uri);
+            }
+        }
         String ctx = contextUri;
         if (ctx != null && (ctx.contains(":playlist:") || ctx.contains(":album:"))) {
-            playContext(ctx, uri, preview);
+            playContext(ctx, preview.uri, preview, uris, offsetPos);
             return;
         }
-        List<String> uris = new ArrayList<>();
-        for (int k = i; k < q.length(); k++) {
-            JSONObject x = q.optJSONObject(k);
-            if (x != null && x.optString("uri").startsWith("spotify:")) uris.add(x.optString("uri"));
+        if (!uris.isEmpty()) playUris(uris, offsetPos, preview);
+    }
+
+    /**
+     * Plays the {@code i}-th entry of a /me/player/queue list. Preserves upcoming songs as fallbackUris.
+     */
+    static void playFromQueue(JSONArray q, int i) {
+        if (q == null || i < 0 || i >= q.length()) return;
+        List<Track> list = new ArrayList<>();
+        for (int k = 0; k < q.length(); k++) {
+            Track tr = Track.from(q.optJSONObject(k));
+            if (tr != null) list.add(tr);
         }
-        if (!uris.isEmpty()) playUris(uris, 0, preview);
+        if (i < list.size()) playFromActiveQueue(list, i);
     }
 
     static void playUris(List<String> uris, int index, Track preview) {
@@ -418,7 +447,7 @@ final class Player {
             String dev = SpotifyWeb.deviceId;
             SpotifyWeb.switchTrack(wasPlaying, () -> commandPlay(seq, "PUT", "/me/player/play?device_id=" + Spotify.enc(dev), body.toString(), openUri, fallbackBody, true, true));
             deviceId = dev;
-            Spotify.MAIN.postDelayed(Player::applyWantedRepeat, 900);
+            if (!"off".equals(wantedRepeat())) Spotify.MAIN.postDelayed(Player::applyWantedRepeat, 900);
             later();
         }, () -> {
             if (seq != playSeq) return;
@@ -646,8 +675,10 @@ final class Player {
         });
     }
 
+    private static volatile int likedEndpointMode; // 0 = unknown, 1 = /me/library/contains, 2 = /me/tracks/contains
+
     static void checkLiked() {
-        if (local()) return;
+        if (local() || ytm()) return;
         if (track == null || track.id == null) return;
         final String id = track.id;
         Boolean cached = LIKED_CACHE.get(id);
@@ -657,19 +688,31 @@ final class Player {
             return;
         }
         if (Spotify.isRateLimited()) return;
-        Spotify.getFirst(new Spotify.Cb() {
-            @Override public void ok(JSONObject o) {
-                JSONArray a = o.optJSONArray("items");
-                if (a != null && a.length() > 0) {
-                    boolean val = a.optBoolean(0);
-                    LIKED_CACHE.put(id, val);
-                    if (track != null && id.equals(track.id)) {
-                        liked = val;
-                        notifyAll0();
+        final String p1 = "/me/library/contains?uris=" + Spotify.enc("spotify:track:" + id);
+        final String p2 = "/me/tracks/contains?ids=" + id;
+        Spotify.IO.execute(() -> {
+            String[] order = likedEndpointMode == 2 ? new String[]{p2} : (likedEndpointMode == 1 ? new String[]{p1} : new String[]{p1, p2});
+            for (String p : order) {
+                try {
+                    JSONObject o = Spotify.call("GET", p, null);
+                    JSONArray a = o.optJSONArray("items");
+                    if (a != null && a.length() > 0) {
+                        likedEndpointMode = p.startsWith("/me/library") ? 1 : 2;
+                        boolean val = a.optBoolean(0);
+                        LIKED_CACHE.put(id, val);
+                        Spotify.MAIN.post(() -> {
+                            if (track != null && id.equals(track.id)) {
+                                liked = val;
+                                notifyAll0();
+                            }
+                        });
+                        return;
                     }
-                }
+                } catch (Spotify.ApiError ae) {
+                    if (ae.code == 429) return;
+                } catch (Exception ignored) {}
             }
-        }, "/me/library/contains?uris=" + Spotify.enc("spotify:track:" + id), "/me/tracks/contains?ids=" + id);
+        });
     }
 
     static void toggleLike() {

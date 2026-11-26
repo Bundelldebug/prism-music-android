@@ -1350,7 +1350,7 @@ public class PrismUiTest {
             for (Bitmap fb : pillFrames) fb.recycle();
             ya.np.close(); idle(400);
 
-            // (6) Local Music Recap screenshot
+            // (6) Local + YouTube Music Recap screenshots (default period: All time)
             java.util.List<Player.Track> demoRecap = new java.util.ArrayList<>();
             for (int i = 0; i < 4; i++) {
                 Player.Track tr = new Player.Track();
@@ -1362,9 +1362,22 @@ public class PrismUiTest {
                 tr.duration = 215_000L;
                 demoRecap.add(tr);
             }
+            for (int i = 0; i < 3; i++) {
+                Player.Track tr = new Player.Track();
+                tr.id = "ytm:ytvid0000" + i;
+                tr.uri = "ytm:track:ytvid0000" + i;
+                tr.name = new String[]{"ray - 超かぐや姫！ Version", "壱雫空", "春日影"}[i];
+                tr.artist = new String[]{"かぐや(cv.夏吉ゆうこ)", "MyGO!!!!!", "MyGO!!!!!"}[i];
+                tr.album = new String[]{"超かぐや姫！", "迷跡波", "迷跡波"}[i];
+                tr.duration = 240_000L;
+                demoRecap.add(tr);
+            }
             Recap.seedForTest(app, demoRecap);
-            ya.push(new Pages.RecapPage(ya, true)); idle(600);
+            ya.push(new Pages.RecapPage(ya, 2)); idle(600);
             shot(ya, "93_recap_local");
+            ya.pop(); idle(250);
+            ya.push(new Pages.RecapPage(ya, 1)); idle(600);
+            shot(ya, "93b_recap_ytm");
             ya.pop(); idle(250);
 
             // (8) Overhauled Bit-Perfect Assist screen + (5) Kyant0 LiquidToggle GIF

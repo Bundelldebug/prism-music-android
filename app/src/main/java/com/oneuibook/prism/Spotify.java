@@ -70,6 +70,8 @@ final class Spotify {
         userImage = p.getString("user_image", null);
         product = p.getString("user_product", null);
         country = p.getString("user_country", null);
+        long savedCool = p.getLong("rate_cooldown_until", 0L);
+        if (savedCool > System.currentTimeMillis()) cooldownUntil = savedCool;
         // 9.5.12 migration: clear playlists that earlier builds mistakenly blacklisted during 429 / limit=100 errors
         if (!p.getBoolean("unblock_playlists_9512", false)) {
             p.edit().remove("blocked_playlists").putBoolean("unblock_playlists_9512", true).apply();
@@ -184,12 +186,12 @@ final class Spotify {
 
     static boolean isRateLimited() { return System.currentTimeMillis() < cooldownUntil; }
 
-    /** Adaptive pacing: 200ms baseline, automatically widens to 550ms for 90s after any 429 response. */
+    /** Adaptive pacing: 260ms baseline, automatically widens to 700ms for 120s after any 429 response. */
     private static void paceRequest() throws InterruptedException {
         long wait;
         synchronized (PACE_LOCK) {
             long now = System.currentTimeMillis();
-            long interval = now < elevatedPaceUntil ? 550L : 200L;
+            long interval = now < elevatedPaceUntil ? 700L : 260L;
             if (nextPaceMs > now) {
                 wait = nextPaceMs - now;
                 nextPaceMs += interval;
@@ -198,7 +200,7 @@ final class Spotify {
                 nextPaceMs = now + interval;
             }
         }
-        if (wait > 0 && wait <= 5000) Thread.sleep(wait);
+        if (wait > 0 && wait <= 6000) Thread.sleep(wait);
     }
 
     static JSONObject call(String method, String path, String jsonBody) throws Exception {
@@ -257,10 +259,16 @@ final class Spotify {
                             ? ("QUOTA_EXCEEDED (" + wait + "s)")
                             : ("429 (" + wait + "s)");
                     long now = System.currentTimeMillis();
-                    elevatedPaceUntil = Math.max(elevatedPaceUntil, now + 90_000L);
-                    long storeWait = isPlayCmd ? Math.min(wait, 3) : Math.min(wait, 30);
-                    if (isPlayCmd) playCooldownUntil = Math.max(playCooldownUntil, now + storeWait * 1000L);
-                    else cooldownUntil = Math.max(cooldownUntil, now + storeWait * 1000L);
+                    elevatedPaceUntil = Math.max(elevatedPaceUntil, now + 120_000L);
+                    // Honor Spotify's full Retry-After (up to 300s browsing, 10s play) and persist across restarts
+                    // so retrying early never extends Spotify's rolling 429 penalty window!
+                    long storeWait = isPlayCmd ? Math.min(wait, 10) : Math.min(wait, 300);
+                    if (isPlayCmd) {
+                        playCooldownUntil = Math.max(playCooldownUntil, now + storeWait * 1000L);
+                    } else {
+                        cooldownUntil = Math.max(cooldownUntil, now + storeWait * 1000L);
+                        if (prefs != null) prefs.edit().putLong("rate_cooldown_until", cooldownUntil).apply();
+                    }
                     if (wait <= 2 && attempt == 0) continue;
                     throw new ApiError(429, lastRateReason, reason.isEmpty() ? "rate" : reason);
                 }
@@ -572,13 +580,13 @@ final class Spotify {
         });
     }
 
-    /** Tries several endpoints in order (aborts immediately on 429 so rate limits are never amplified). */
+    /** Tries several endpoints in order (uses cache/dedup and aborts immediately on 429 so rate limits are never amplified). */
     static void getFirst(Cb cb, String... paths) {
         IO.execute(() -> {
             Exception last = null;
             for (String p : paths) {
                 try {
-                    JSONObject o = call("GET", p, null);
+                    JSONObject o = callCached(p);
                     MAIN.post(() -> cb.ok(o));
                     return;
                 } catch (ApiError ae) {

@@ -373,6 +373,7 @@
     <string name="search_clear">Clear</string>
     <string name="recap_title">Recap</string>
     <string name="recap_spotify">Spotify Recap</string>
+    <string name="recap_ytm">YouTube Music Recap</string>
     <string name="recap_local">Local Recap</string>
     <string name="recap_plays">%1$d plays</string>
     <string name="recap_hours">%1$.1f hrs listened</string>
