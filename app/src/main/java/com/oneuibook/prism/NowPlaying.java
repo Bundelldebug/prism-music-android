@@ -1174,8 +1174,8 @@ final class NowPlaying extends FrameLayout {
 
     private void crossfade(TextView v, String s) {
         if (s == null || s.contentEquals(v.getText())) return;
-        if (getVisibility() != VISIBLE || openP < 0.5f) { v.setText(s); if (oneui) v.setSelected(true); return; }
-        v.animate().alpha(0f).setDuration(120).withEndAction(() -> { v.setText(s); if (oneui) v.setSelected(true); v.animate().alpha(1f).setDuration(220).start(); }).start();
+        if (getVisibility() != VISIBLE || openP < 0.5f) { v.setText(s); v.setSelected(true); return; }
+        v.animate().alpha(0f).setDuration(120).withEndAction(() -> { v.setText(s); v.setSelected(true); v.animate().alpha(1f).setDuration(220).start(); }).start();
     }
 
     /** Foreground colour on the liquid-glass device chip, keeping contrast across light/dark and glassT. */
@@ -1211,11 +1211,11 @@ final class NowPlaying extends FrameLayout {
             for (TextView tv : new TextView[]{title, artist}) {
                 tv.setSingleLine(true);
                 tv.setGravity(o ? Gravity.CENTER : (Gravity.START | Gravity.CENTER_VERTICAL));
-                tv.setEllipsize(o ? android.text.TextUtils.TruncateAt.MARQUEE : android.text.TextUtils.TruncateAt.END);
-                tv.setMarqueeRepeatLimit(o ? -1 : 0);
-                tv.setHorizontalFadingEdgeEnabled(o);
-                if (o) tv.setFadingEdgeLength(Ui.dp(18));
-                tv.setSelected(o);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
+                tv.setMarqueeRepeatLimit(-1);
+                tv.setHorizontalFadingEdgeEnabled(true);
+                tv.setFadingEdgeLength(Ui.dp(18));
+                tv.setSelected(true);
             }
             Player.Track t = Player.track;
             if (t != null) { title.setText(t.name); artist.setText(t.artist); }
@@ -1295,6 +1295,8 @@ final class NowPlaying extends FrameLayout {
             String adLbl = Player.adStatusText(getContext());
             artist.setText(!adLbl.isEmpty() ? adLbl : Player.track.artist);
             artist.setTextColor(!adLbl.isEmpty() ? 0xFFFFD56B : 0xB3FFFFFF);
+            title.setSelected(true);
+            artist.setSelected(true);
         }
         chipText.setText(Player.outputName(getContext()));
         refreshAudioBadge();
@@ -1678,6 +1680,30 @@ final class NowPlaying extends FrameLayout {
         }
         queueList.addView(headRow, Widgets.MW);
 
+        if (UnifiedPlaylist.isActive()) {
+            List<Player.Track> all = UnifiedPlaylist.fullQueue();
+            int curIdx = UnifiedPlaylist.currentIndex();
+            if (all.isEmpty()) {
+                queueList.addView(Ui.text(c, c.getString(R.string.queue_empty), 14, Ui.regular, 0x99FFFFFF));
+                return;
+            }
+            int from = Math.max(0, curIdx - 15);
+            int to = Math.min(all.size(), from + 60);
+            for (int i = from; i < to; i++) {
+                Player.Track tr = all.get(i);
+                final int absIdx = i;
+                boolean isCur = (i == curIdx);
+                LinearLayout row = (LinearLayout) queueRow(c, tr.name, tr.artist, tr.artSmall != null ? tr.artSmall : tr.art, isCur);
+                String src = UnifiedPlaylist.sourceOf(tr);
+                View badge = Pages.sourceBadgeView(c, src, true);
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22));
+                blp.rightMargin = Ui.dp(6);
+                row.addView(badge, Math.max(0, row.getChildCount() - 1), blp);
+                tapToPlay(row, isCur, () -> { UnifiedPlaylist.jumpTo(absIdx); Spotify.MAIN.postDelayed(this::loadQueue, 80); });
+                queueList.addView(row);
+            }
+            return;
+        }
         if (Player.local()) {
             List<Player.Track> all = LocalMusic.fullQueue();
             int curIdx = LocalMusic.currentIndex();
@@ -1810,13 +1836,18 @@ final class NowPlaying extends FrameLayout {
         Player.Track t = Player.track;
         if (t == null) return;
         if (t.albumUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_album), Icons.ALBUM, false, () -> { close(); main.openUri(t.albumUri, t.album); }));
-        if (t.artistUri != null) e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openUri(t.artistUri, t.artist); }));
+        if (t.artistUri != null && !t.artistUri.isEmpty()) {
+            e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openUri(t.artistUri, t.artist); }));
+        } else if (YouTubeMusic.isYtm(t) && t.artist != null && !t.artist.isEmpty() && !"YouTube Music".equals(t.artist)) {
+            e.add(new GlassMenu.Entry(c.getString(R.string.go_artist), Icons.ARTIST, false, () -> { close(); main.openYtmArtistByName(t.artist); }));
+        }
         if (!Player.local() && !Player.ytm()) {
             e.add(new GlassMenu.Entry(c.getString(Player.liked ? R.string.unlike : R.string.like), Player.liked ? Icons.HEART_FILL : Icons.HEART, false, Player::toggleLike));
         }
         if (!Player.local() && !Player.ytm() && t.uri != null && t.uri.startsWith("spotify:track:")) {
             e.add(new GlassMenu.Entry(c.getString(R.string.pl_add_track), Icons.QUEUE, false, () -> main.addToPlaylistDialog(t.uri)));
         }
+        e.add(new GlassMenu.Entry(c.getString(R.string.upl_add_track), Icons.LIST, false, () -> main.addToUnifiedPlaylistDialog(UnifiedPlaylist.Entry.fromTrack(t))));
         if (!Player.local() && !Player.ytm()) e.add(new GlassMenu.Entry(c.getString(R.string.open_in_spotify), Icons.LINK, false, () -> Player.openInSpotify(t.uri)));
         e.add(new GlassMenu.Entry(c.getString(R.string.up_next), Icons.LIST, false, () -> setPanel(2)));
         e.add(new GlassMenu.Entry(c.getString(R.string.set_lyrics), Icons.LYRICS, false, () -> setPanel(1)));
@@ -1838,7 +1869,16 @@ final class NowPlaying extends FrameLayout {
 
     private void goArtist() {
         Player.Track t = Player.track;
-        if (t != null && t.artistUri != null) { close(); main.openUri(t.artistUri, t.artist); }
+        if (t == null) return;
+        if (t.artistUri != null && !t.artistUri.isEmpty()) {
+            close();
+            main.openUri(t.artistUri, t.artist);
+            return;
+        }
+        if (YouTubeMusic.isYtm(t) && t.artist != null && !t.artist.isEmpty() && !"YouTube Music".equals(t.artist)) {
+            close();
+            main.openYtmArtistByName(t.artist);
+        }
     }
 
     /** Output-device chip opens the same glass sheet, growing out of the chip itself. */

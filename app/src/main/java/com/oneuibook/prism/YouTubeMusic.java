@@ -116,6 +116,7 @@ final class YouTubeMusic {
         String subtitle = "";
         String meta = "";
         String image = "";
+        String artistBrowseId = "";
         final List<Widgets.Item> tracks = new ArrayList<>();
         final Map<String, List<Widgets.Item>> shelves = new LinkedHashMap<>();
     }
@@ -321,10 +322,35 @@ final class YouTubeMusic {
                         .put("context", webRemixContext())
                         .put("browseId", "FEmusic_home");
                 JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
-                if (res != null) extractShelves(res, sections);
+                if (res != null) {
+                    extractShelves(res, sections);
+                    // Follow up to 2 Home continuation tokens so YTM Home is rich like Spotify Home
+                    String cont = findContinuationToken(res);
+                    for (int page = 0; page < 2 && !cont.isEmpty() && sections.size() < 10; page++) {
+                        try {
+                            JSONObject creq = new JSONObject().put("context", webRemixContext());
+                            JSONObject cres = postJson(API_BASE + "browse?ctoken=" + Spotify.enc(cont)
+                                    + "&continuation=" + Spotify.enc(cont) + "&type=next&prettyPrint=false", creq, null, true);
+                            if (cres == null) break;
+                            extractShelves(cres, sections);
+                            String next = findContinuationToken(cres);
+                            if (next.equals(cont)) break;
+                            cont = next;
+                        } catch (Exception ignored) { break; }
+                    }
+                }
             } catch (Exception ignored) {}
+            // Supplement with Explore (New releases, Moods, Charts) when Home has few shelves
+            if (sections.size() < 5) {
+                try {
+                    JSONObject req = new JSONObject()
+                            .put("context", webRemixContext())
+                            .put("browseId", "FEmusic_explore");
+                    JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
+                    if (res != null) extractShelves(res, sections);
+                } catch (Exception ignored) {}
+            }
             if (sections.isEmpty()) {
-                // Fallback to charts browseId if personalized home returned empty
                 try {
                     JSONObject req = new JSONObject()
                             .put("context", webRemixContext())
@@ -335,6 +361,31 @@ final class YouTubeMusic {
             }
             Spotify.MAIN.post(() -> cb.accept(sections));
         });
+    }
+
+    private static String findContinuationToken(Object node) {
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            JSONObject ncd = o.optJSONObject("nextContinuationData");
+            if (ncd != null) {
+                String c = ncd.optString("continuation", "");
+                if (!c.isEmpty()) return c;
+            }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if ("header".equals(k) || "menu".equals(k)) continue;
+                String f = findContinuationToken(o.opt(k));
+                if (!f.isEmpty()) return f;
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) {
+                String f = findContinuationToken(a.opt(i));
+                if (!f.isEmpty()) return f;
+            }
+        }
+        return "";
     }
 
     /** Fetches a YouTube Music browse endpoint (Library playlists/albums/artists/liked songs/history or playlist tracks). */
@@ -574,16 +625,80 @@ final class YouTubeMusic {
         }
     }
 
+    /** Resolves an artist's public YouTube Music channel browseId (UC...) by name when a track lacks artistUri. */
+    static void resolveArtistBrowseId(String artistName, Consumer<String> cb) {
+        if (artistName == null || artistName.trim().isEmpty()) {
+            Spotify.MAIN.post(() -> cb.accept(""));
+            return;
+        }
+        final String clean = artistName.split(",|&|feat\\.|ft\\.")[0].trim();
+        if (testFixtures != null) {
+            List<Widgets.Item> list = testFixtures.apply("search:" + clean);
+            String found = "";
+            if (list != null) {
+                for (Widgets.Item it : list) {
+                    if ("ytm_artist".equals(it.type) && it.id != null && !it.id.isEmpty()) { found = it.id; break; }
+                }
+            }
+            final String out = found;
+            Spotify.MAIN.post(() -> cb.accept(out));
+            return;
+        }
+        IO.execute(() -> {
+            String found = "";
+            try {
+                JSONObject req = new JSONObject()
+                        .put("context", webRemixContext())
+                        .put("query", clean)
+                        .put("params", "EgWKAQIgAWoKEAMQBBAJEAoQBQ%3D%3D");
+                JSONObject res = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
+                if (res == null) {
+                    JSONObject req2 = new JSONObject().put("context", webRemixContext()).put("query", clean);
+                    res = postJson(API_BASE + "search?prettyPrint=false", req2, null, false);
+                }
+                if (res != null) {
+                    List<Widgets.Item> all = new ArrayList<>();
+                    extractAnyItemsRecursive(res, all, 20);
+                    for (Widgets.Item it : all) {
+                        if ("ytm_artist".equals(it.type) && it.id != null && !it.id.isEmpty()) {
+                            found = normalizeArtistBrowseId(it.id);
+                            break;
+                        }
+                    }
+                    if (found.isEmpty()) {
+                        for (Widgets.Item it : all) {
+                            if (it.track != null && it.track.artistUri != null && it.track.artistUri.startsWith("ytm:browse:")) {
+                                found = normalizeArtistBrowseId(it.track.artistUri.substring(11));
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            final String out = found;
+            Spotify.MAIN.post(() -> cb.accept(out));
+        });
+    }
+
+    /** Strips library-only MPLA prefix (MPLAUC...) so artist pages load the FULL public channel (albums, singles, related). */
+    static String normalizeArtistBrowseId(String bid) {
+        if (bid == null) return "";
+        if (bid.startsWith("MPLA") && bid.length() > 6) return bid.substring(4);
+        return bid;
+    }
+
     /** Fetches structured album / playlist / artist details (header art, artist, tracklist, related shelves). */
-    static void fetchDetail(String browseId, String fallbackTitle, String fallbackSubtitle, String fallbackImage, String fallbackType, Consumer<DetailData> cb) {
-        if (browseId == null || browseId.isEmpty()) {
+    static void fetchDetail(String rawBrowseId, String fallbackTitle, String fallbackSubtitle, String fallbackImage, String fallbackType, Consumer<DetailData> cb) {
+        if (rawBrowseId == null || rawBrowseId.isEmpty()) {
             Spotify.MAIN.post(() -> cb.accept(null));
             return;
         }
+        final String resolvedType = fallbackType != null ? fallbackType : typeFromBrowseId(rawBrowseId, null);
+        final String browseId = "ytm_artist".equals(resolvedType) ? normalizeArtistBrowseId(rawBrowseId) : rawBrowseId;
         if (testFixtures != null) {
             DetailData d = new DetailData();
             d.browseId = browseId;
-            d.type = fallbackType != null ? fallbackType : typeFromBrowseId(browseId, null);
+            d.type = resolvedType;
             d.title = fallbackTitle != null ? fallbackTitle : "";
             d.subtitle = fallbackSubtitle != null ? fallbackSubtitle : "";
             d.image = fallbackImage != null ? fallbackImage : "";
@@ -592,6 +707,10 @@ final class YouTubeMusic {
             if (list != null) {
                 for (Widgets.Item it : list) {
                     if (it.track != null) d.tracks.add(it);
+                    else {
+                        List<Widgets.Item> alb = d.shelves.computeIfAbsent("앨범", k -> new ArrayList<>());
+                        alb.add(it);
+                    }
                 }
             }
             Spotify.MAIN.post(() -> cb.accept(d));
@@ -600,7 +719,7 @@ final class YouTubeMusic {
         IO.execute(() -> {
             DetailData d = new DetailData();
             d.browseId = browseId;
-            d.type = fallbackType != null ? fallbackType : typeFromBrowseId(browseId, null);
+            d.type = resolvedType;
             d.title = fallbackTitle != null ? fallbackTitle : "";
             d.subtitle = fallbackSubtitle != null ? fallbackSubtitle : "";
             d.image = fallbackImage != null ? fallbackImage : "";
@@ -612,6 +731,25 @@ final class YouTubeMusic {
                 if (res != null) {
                     parseDetailResponse(res, d);
                 }
+                // If artist page came back without albums/singles shelves (e.g. topic channel), supplement via YTM search!
+                if ("ytm_artist".equals(d.type) && d.shelves.isEmpty() && d.title != null && !d.title.isEmpty()) {
+                    try {
+                        JSONObject sreq = new JSONObject().put("context", webRemixContext()).put("query", d.title);
+                        JSONObject sres = postJson(API_BASE + "search?prettyPrint=false", sreq, null, false);
+                        if (sres != null) {
+                            List<Widgets.Item> all = new ArrayList<>();
+                            extractAnyItemsRecursive(sres, all, 40);
+                            List<Widgets.Item> albs = new ArrayList<>();
+                            List<Widgets.Item> pls = new ArrayList<>();
+                            for (Widgets.Item it : all) {
+                                if ("ytm_album".equals(it.type) && !containsId(albs, it.id)) albs.add(it);
+                                else if ("ytm_playlist".equals(it.type) && !containsId(pls, it.id)) pls.add(it);
+                            }
+                            if (!albs.isEmpty()) d.shelves.put("앨범", albs);
+                            if (!pls.isEmpty()) d.shelves.put("재생목록", pls);
+                        }
+                    } catch (Exception ignored) {}
+                }
             } catch (Exception ignored) {}
             Spotify.MAIN.post(() -> cb.accept(d));
         });
@@ -619,11 +757,12 @@ final class YouTubeMusic {
 
     static void parseDetailResponse(JSONObject res, DetailData d) {
         if (res == null || d == null) return;
-        // 1) Header metadata (musicResponsiveHeaderRenderer / musicDetailHeaderRenderer / musicImmersiveHeaderRenderer)
+        // 1) Header metadata (include musicVisualHeaderRenderer used by YTM Artist pages!)
         List<JSONObject> hdrs = new ArrayList<>();
         collectByKey(res, "musicResponsiveHeaderRenderer", hdrs);
         if (hdrs.isEmpty()) collectByKey(res, "musicDetailHeaderRenderer", hdrs);
         if (hdrs.isEmpty()) collectByKey(res, "musicImmersiveHeaderRenderer", hdrs);
+        if (hdrs.isEmpty()) collectByKey(res, "musicVisualHeaderRenderer", hdrs);
         String headerArtist = "";
         if (!hdrs.isEmpty()) {
             JSONObject h = hdrs.get(0);
@@ -631,6 +770,10 @@ final class YouTubeMusic {
             if (!ht.isEmpty()) d.title = ht;
             String hs = extractText(h.optJSONObject("subtitle"));
             String strap = extractText(h.optJSONObject("straplineTextOne"));
+            // Extract artist browseId from header strapline/subtitle so album tracks inherit clickable artistUri
+            String foundArBid = extractArtistBrowseIdFromRuns(h.optJSONObject("straplineTextOne"));
+            if (foundArBid.isEmpty()) foundArBid = extractArtistBrowseIdFromRuns(h.optJSONObject("subtitle"));
+            if (!foundArBid.isEmpty()) d.artistBrowseId = normalizeArtistBrowseId(foundArBid);
             if (!strap.isEmpty()) {
                 headerArtist = cleanSubtitleArtist(strap);
                 d.subtitle = hs.isEmpty() ? strap : (strap + " · " + hs);
@@ -639,9 +782,18 @@ final class YouTubeMusic {
                 headerArtist = cleanSubtitleArtist(hs);
             }
             String sec = extractText(h.optJSONObject("secondSubtitle"));
+            if (sec.isEmpty()) sec = extractText(h.optJSONObject("description"));
             if (!sec.isEmpty()) d.meta = sec;
-            String img = extractBestThumb(h, "");
+            // Strictly read the primary header "thumbnail" first so straplineThumbnail (artist avatar) NEVER overwrites album cover!
+            String img = extractDirectThumb(h.optJSONObject("thumbnail"));
+            if (img.isEmpty() && "ytm_artist".equals(d.type)) {
+                img = extractDirectThumb(h.optJSONObject("foregroundThumbnail"));
+            }
+            if (img.isEmpty()) img = extractBestThumb(h, "");
             if (!img.isEmpty() && !img.endsWith("/hqdefault.jpg")) d.image = img;
+        }
+        if ("ytm_artist".equals(d.type) && d.artistBrowseId.isEmpty() && d.browseId != null) {
+            d.artistBrowseId = normalizeArtistBrowseId(d.browseId);
         }
         if (headerArtist.isEmpty() || "YouTube Music".equals(headerArtist)) {
             if ("ytm_artist".equals(d.type)) headerArtist = d.title;
@@ -659,17 +811,21 @@ final class YouTubeMusic {
                 if (it.track != null) tracksInShelf.add(it);
                 else entitiesInShelf.add(it);
             }
-            if (!tracksInShelf.isEmpty() && d.tracks.isEmpty()) {
-                for (Widgets.Item tr : tracksInShelf) {
-                    decorateAlbumTrack(tr, d, headerArtist);
-                    if (!containsId(d.tracks, tr.id)) d.tracks.add(tr);
-                }
-            } else if (!entitiesInShelf.isEmpty()) {
-                d.shelves.put(e.getKey(), entitiesInShelf);
-            } else if (!tracksInShelf.isEmpty() && !isArtist) {
-                for (Widgets.Item tr : tracksInShelf) {
-                    decorateAlbumTrack(tr, d, headerArtist);
-                    if (!containsId(d.tracks, tr.id)) d.tracks.add(tr);
+            if (!entitiesInShelf.isEmpty()) {
+                List<Widgets.Item> bucket = d.shelves.get(e.getKey());
+                if (bucket == null) d.shelves.put(e.getKey(), entitiesInShelf);
+                else for (Widgets.Item x : entitiesInShelf) if (!containsId(bucket, x.id)) bucket.add(x);
+            }
+            if (!tracksInShelf.isEmpty()) {
+                if (d.tracks.isEmpty() || !isArtist) {
+                    for (Widgets.Item tr : tracksInShelf) {
+                        decorateAlbumTrack(tr, d, headerArtist);
+                        if (!containsId(d.tracks, tr.id)) d.tracks.add(tr);
+                    }
+                } else {
+                    // Secondary track/video shelves on Artist page (e.g. Videos / Live performances)
+                    for (Widgets.Item tr : tracksInShelf) decorateAlbumTrack(tr, d, headerArtist);
+                    d.shelves.put(e.getKey(), tracksInShelf);
                 }
             }
         }
@@ -686,6 +842,25 @@ final class YouTubeMusic {
         }
     }
 
+    private static String extractArtistBrowseIdFromRuns(JSONObject textNode) {
+        if (textNode == null) return "";
+        JSONArray runs = textNode.optJSONArray("runs");
+        if (runs == null) return "";
+        for (int i = 0; i < runs.length(); i++) {
+            JSONObject r = runs.optJSONObject(i);
+            if (r == null) continue;
+            JSONObject nav = r.optJSONObject("navigationEndpoint");
+            JSONObject be = nav == null ? null : nav.optJSONObject("browseEndpoint");
+            if (be == null) continue;
+            String bid = be.optString("browseId", "");
+            String pt = pageTypeOf(be);
+            if ("MUSIC_PAGE_TYPE_ARTIST".equals(pt) || bid.startsWith("UC") || bid.startsWith("MPLA")) {
+                return bid;
+            }
+        }
+        return "";
+    }
+
     private static void decorateAlbumTrack(Widgets.Item it, DetailData d, String headerArtist) {
         if (it == null || it.track == null) return;
         Player.Track t = it.track;
@@ -693,6 +868,9 @@ final class YouTubeMusic {
                 && headerArtist != null && !headerArtist.isEmpty() && !"YouTube Music".equals(headerArtist)) {
             t.artist = headerArtist;
             it.subtitle = headerArtist;
+        }
+        if ((t.artistUri == null || t.artistUri.isEmpty()) && d.artistBrowseId != null && !d.artistBrowseId.isEmpty()) {
+            t.artistUri = "ytm:browse:" + d.artistBrowseId;
         }
         if ("ytm_album".equals(d.type)) {
             if (t.album == null || t.album.isEmpty()) t.album = d.title;
@@ -746,21 +924,39 @@ final class YouTubeMusic {
         extractShelvesAny(root, out);
     }
 
+    /** Extracts ONLY the shelf's clean title (ignoring strapline account name and moreContentButton "더보기"/"모두 재생"). */
+    static String extractShelfTitle(JSONObject shelf) {
+        if (shelf == null) return "";
+        JSONObject hdr = shelf.optJSONObject("header");
+        String title = "";
+        if (hdr != null) {
+            JSONObject basic = hdr.optJSONObject("musicCarouselShelfBasicHeaderRenderer");
+            if (basic != null) title = extractText(basic.optJSONObject("title"));
+            if (title.isEmpty()) {
+                JSONObject gridH = hdr.optJSONObject("gridHeaderRenderer");
+                if (gridH != null) title = extractText(gridH.optJSONObject("title"));
+            }
+            if (title.isEmpty()) title = extractText(hdr.optJSONObject("title"));
+        }
+        if (title.isEmpty()) title = extractText(shelf.optJSONObject("title"));
+        title = title.replaceAll("\\s*(더보기|모두 재생|모두 보기|More|Play all|See all)$", "").trim();
+        return title;
+    }
+
     private static void extractShelvesAny(JSONObject root, Map<String, List<Widgets.Item>> out) {
         List<JSONObject> shelves = new ArrayList<>();
         collectByKey(root, "musicCarouselShelfRenderer", shelves);
         collectByKey(root, "musicShelfRenderer", shelves);
         collectByKey(root, "gridRenderer", shelves);
         for (JSONObject shelf : shelves) {
-            String title = extractText(shelf.optJSONObject("header"));
-            if (title.isEmpty()) title = extractText(shelf.optJSONObject("title"));
+            String title = extractShelfTitle(shelf);
             if (title.isEmpty()) title = "YouTube Music";
             List<Widgets.Item> items = new ArrayList<>();
             extractAnyItemsRecursive(shelf, items, 25);
             if (!items.isEmpty()) {
                 List<Widgets.Item> existing = out.get(title);
                 if (existing == null) out.put(title, items);
-                else existing.addAll(items);
+                else for (Widgets.Item x : items) if (!containsId(existing, x.id)) existing.add(x);
             }
         }
     }
@@ -972,10 +1168,28 @@ final class YouTubeMusic {
                             tr.albumUri = "ytm:browse:" + bid;
                             if (tr.album == null || tr.album.isEmpty()) tr.album = txt;
                         }
-                    } else if ("MUSIC_PAGE_TYPE_ARTIST".equals(pt) || bid.startsWith("UC")) {
+                    } else if ("MUSIC_PAGE_TYPE_ARTIST".equals(pt) || bid.startsWith("UC") || bid.startsWith("MPLA")) {
                         if (tr.artistUri == null || tr.artistUri.isEmpty()) {
-                            tr.artistUri = "ytm:browse:" + bid;
+                            tr.artistUri = "ytm:browse:" + normalizeArtistBrowseId(bid);
                         }
+                    }
+                }
+                return;
+            }
+            // Also check menuNavigationItemRenderer (e.g., "Go to artist" / "Go to album" in YTM track menu)
+            JSONObject mni = o.optJSONObject("menuNavigationItemRenderer");
+            if (mni != null) {
+                JSONObject nav = mni.optJSONObject("navigationEndpoint");
+                JSONObject be = nav == null ? null : nav.optJSONObject("browseEndpoint");
+                if (be != null) {
+                    String bid = be.optString("browseId", "");
+                    String pt = pageTypeOf(be);
+                    if (("MUSIC_PAGE_TYPE_ALBUM".equals(pt) || bid.startsWith("MPREb_"))
+                            && (tr.albumUri == null || tr.albumUri.isEmpty())) {
+                        tr.albumUri = "ytm:browse:" + bid;
+                    } else if (("MUSIC_PAGE_TYPE_ARTIST".equals(pt) || bid.startsWith("UC") || bid.startsWith("MPLA"))
+                            && (tr.artistUri == null || tr.artistUri.isEmpty())) {
+                        tr.artistUri = "ytm:browse:" + normalizeArtistBrowseId(bid);
                     }
                 }
                 return;
@@ -983,7 +1197,7 @@ final class YouTubeMusic {
             java.util.Iterator<String> it = o.keys();
             while (it.hasNext()) {
                 String k = it.next();
-                if ("menu".equals(k) || "overlay".equals(k) || "thumbnailOverlay".equals(k)) continue;
+                if ("overlay".equals(k) || "thumbnailOverlay".equals(k)) continue;
                 enrichTrackLinks(o.opt(k), tr);
             }
         } else if (node instanceof JSONArray) {
@@ -1016,6 +1230,7 @@ final class YouTubeMusic {
         String thumb = extractBestThumb(rli, vid);
         Widgets.Item it = buildItem(vid, title, artist, "", thumb, durMs);
         enrichTrackLinks(cols, it.track);
+        enrichTrackLinks(rli.optJSONObject("menu"), it.track);
         return it;
     }
 
@@ -1033,6 +1248,7 @@ final class YouTubeMusic {
         String thumb = extractBestThumb(two, vid);
         Widgets.Item it = buildItem(vid, title, artist, "", thumb, 0);
         enrichTrackLinks(two.optJSONObject("subtitle"), it.track);
+        enrichTrackLinks(two.optJSONObject("menu"), it.track);
         return it;
     }
 
@@ -1078,9 +1294,52 @@ final class YouTubeMusic {
         return "";
     }
 
+    /** Extracts the highest-resolution thumbnail strictly inside a single thumbnail node (never crossing into straplineThumbnail). */
+    private static String extractDirectThumb(JSONObject thumbNode) {
+        if (thumbNode == null) return "";
+        JSONObject mtr = thumbNode.optJSONObject("musicThumbnailRenderer");
+        JSONObject th = mtr != null ? mtr.optJSONObject("thumbnail") : thumbNode.optJSONObject("thumbnail");
+        JSONArray arr = th != null ? th.optJSONArray("thumbnails") : thumbNode.optJSONArray("thumbnails");
+        if (arr == null) return "";
+        String best = "";
+        int bestW = 0;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            int w = item.optInt("width", 0);
+            String u = item.optString("url", "");
+            if (!u.isEmpty() && w >= bestW) { bestW = w; best = u; }
+        }
+        return best.isEmpty() ? "" : best.replaceAll("=w\\d+-h\\d+", "=w544-h544");
+    }
+
+    private static void collectThumbRenderersSafe(Object node, List<JSONObject> out) {
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            if (o.has("musicThumbnailRenderer") && o.optJSONObject("musicThumbnailRenderer") != null) {
+                out.add(o.optJSONObject("musicThumbnailRenderer"));
+            }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                // Skip artist strapline avatars / menu / badge thumbnails so album covers are never overwritten!
+                if ("straplineThumbnail".equals(k) || "menu".equals(k) || "badges".equals(k) || "thumbnailOverlay".equals(k)) continue;
+                collectThumbRenderersSafe(o.opt(k), out);
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) collectThumbRenderersSafe(a.opt(i), out);
+        }
+    }
+
     private static String extractBestThumb(JSONObject o, String vid) {
+        if (o != null) {
+            String direct = extractDirectThumb(o.optJSONObject("thumbnailRenderer"));
+            if (direct.isEmpty()) direct = extractDirectThumb(o.optJSONObject("thumbnail"));
+            if (!direct.isEmpty()) return direct;
+        }
         List<JSONObject> tList = new ArrayList<>();
-        collectByKey(o, "musicThumbnailRenderer", tList);
+        collectThumbRenderersSafe(o, tList);
         String best = "";
         int bestW = 0;
         for (JSONObject t : tList) {
@@ -1095,7 +1354,7 @@ final class YouTubeMusic {
                 if (!u.isEmpty() && w >= bestW) { bestW = w; best = u; }
             }
         }
-        if (best.isEmpty()) return "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg";
+        if (best.isEmpty()) return vid == null || vid.isEmpty() ? "" : ("https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg");
         // Upscale Google LH3 thumbnails for crisp full-screen artwork
         return best.replaceAll("=w\\d+-h\\d+", "=w544-h544");
     }
@@ -1172,20 +1431,29 @@ final class YouTubeMusic {
     private static volatile int endedHandledGen = -1;
     private static volatile long loadStampMs;
     private static volatile boolean loadRetryDone;
+    private static volatile long preservePlayUntilMs;
 
     /**
      * Hidden WebView hosting YouTube's official mobile HTML5 player (m.youtube.com/watch?v=...).
-     * Keeps visibility reported as VISIBLE while actively playing so screen-off / background audio stays uninterrupted.
+     * Keeps visibility reported as VISIBLE while actively playing so screen-off / foldable fold-unfold
+     * / background audio stays uninterrupted.
      */
     static final class YtmWebView extends WebView {
         YtmWebView(Context c) { super(c); }
 
         @Override protected void onWindowVisibilityChanged(int visibility) {
-            super.onWindowVisibilityChanged((Player.ytm() && wantPlaying) ? View.VISIBLE : visibility);
+            super.onWindowVisibilityChanged((Player.ytm() && (wantPlaying || SystemClock.elapsedRealtime() < preservePlayUntilMs))
+                    ? View.VISIBLE : visibility);
         }
 
         @Override protected void onVisibilityChanged(View changedView, int visibility) {
-            super.onVisibilityChanged(changedView, (Player.ytm() && wantPlaying) ? View.VISIBLE : visibility);
+            super.onVisibilityChanged(changedView, (Player.ytm() && (wantPlaying || SystemClock.elapsedRealtime() < preservePlayUntilMs))
+                    ? View.VISIBLE : visibility);
+        }
+
+        @Override public void onPause() {
+            if (Player.ytm() && (wantPlaying || SystemClock.elapsedRealtime() < preservePlayUntilMs)) return;
+            super.onPause();
         }
 
         @Override public boolean onTouchEvent(MotionEvent event) { return false; }
@@ -1403,14 +1671,42 @@ final class YouTubeMusic {
     /** Re-attaches an already running YTM WebView into a newly created Activity (survives rotation / fold / unfold). */
     static void attachWeb(Activity a, ViewGroup root) {
         if (web == null || a == null || root == null) return;
+        final boolean shouldResume = wantPlaying || SystemClock.elapsedRealtime() < preservePlayUntilMs;
         if (webCtx != null) webCtx.setBaseContext(a);
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
         root.addView(web, 0, new FrameLayout.LayoutParams(Ui.dp(2), Ui.dp(2)));
+        try {
+            web.onResume();
+            web.resumeTimers();
+        } catch (Throwable ignored) {}
+        if (shouldResume && Player.ytm()) {
+            wantPlaying = true;
+            preservePlayUntilMs = SystemClock.elapsedRealtime() + 4000L;
+            web.evaluateJavascript("window.__prismPlay&&window.__prismPlay();", null);
+            final int g = playGen;
+            Spotify.MAIN.postDelayed(() -> {
+                if (g == playGen && wantPlaying && web != null) {
+                    web.evaluateJavascript("window.__prismPlay&&window.__prismPlay();", null);
+                }
+            }, 260L);
+            Spotify.MAIN.postDelayed(() -> {
+                if (g == playGen && wantPlaying && web != null) {
+                    web.evaluateJavascript("window.__prismPlay&&window.__prismPlay();", null);
+                }
+            }, 850L);
+        }
     }
 
     /** Detaches from a dying Activity without stopping playback (Recents swipe / fold / rotation). */
     static void detachWeb(Activity a) {
         if (web == null) return;
+        if (wantPlaying || (Player.ytm() && Player.playing)) {
+            wantPlaying = true;
+            preservePlayUntilMs = SystemClock.elapsedRealtime() + 5000L;
+            try {
+                web.evaluateJavascript("window.__prismWantPlay=true;window.__prismNudgeLeft=24;", null);
+            } catch (Throwable ignored) {}
+        }
         if (webCtx != null && webCtx.getBaseContext() == a) webCtx.setBaseContext(a.getApplicationContext());
         if (web.getParent() instanceof ViewGroup && ((ViewGroup) web.getParent()).getContext() == a) {
             ((ViewGroup) web.getParent()).removeView(web);
@@ -1575,7 +1871,13 @@ final class YouTubeMusic {
                 applyChannelBalance();
             }
         }
-        boolean allowPauseSync = (everStartedGen == gen) || !wantPlaying || (SystemClock.elapsedRealtime() - loadStampMs > 12000L);
+        boolean preserving = SystemClock.elapsedRealtime() < preservePlayUntilMs && wantPlaying;
+        if (preserving && !isPlaying) {
+            if (web != null) web.evaluateJavascript("window.__prismPlay&&window.__prismPlay();", null);
+            if (!Player.playing) { Player.playing = true; Player.notifyAll0(); }
+            return;
+        }
+        boolean allowPauseSync = !preserving && ((everStartedGen == gen) || !wantPlaying || (SystemClock.elapsedRealtime() - loadStampMs > 12000L));
         boolean newPlaying = isPlaying || (!allowPauseSync && wantPlaying);
         if (!isPlaying && allowPauseSync) wantPlaying = false;
         long prevPos = Player.position();
@@ -1604,6 +1906,7 @@ final class YouTubeMusic {
 
     static void play(List<Player.Track> list, int idx, String sourceUri, String sourceTitle) {
         if (list == null || list.isEmpty()) return;
+        UnifiedPlaylist.clearActive();
         if (!Player.local() && !Player.ytm() && Player.playing && Spotify.loggedIn()) {
             Spotify.send("PUT", "/me/player/pause", null, null);
         }
@@ -1734,6 +2037,7 @@ final class YouTubeMusic {
     }
 
     private static void onComplete() {
+        if (UnifiedPlaylist.onBackendTrackEnded()) return;
         if ("track".equals(Player.repeat)) { start(0); return; }
         if (index + 1 < queue.size()) { index++; start(0); }
         else if ("context".equals(Player.repeat) && !queue.isEmpty()) { index = 0; start(0); }

@@ -333,6 +333,7 @@ final class LocalMusic {
 
     static void play(List<Player.Track> list, int idx, String sourceUri, String sourceTitle) {
         if (list.isEmpty()) return;
+        UnifiedPlaylist.clearActive();
         // switching from Spotify / YouTube Music: pause them so two engines never play together
         if (!Player.local() && !Player.ytm() && Player.playing && Spotify.loggedIn()) Spotify.send("PUT", "/me/player/pause", null, null);
         YouTubeMusic.stopForOther();
@@ -424,6 +425,7 @@ final class LocalMusic {
     }
 
     private static void onComplete() {
+        if (UnifiedPlaylist.onBackendTrackEnded()) return;
         if ("track".equals(Player.repeat)) { start(0); return; }
         if (index + 1 < queue.size()) { index++; start(0); }
         else if ("context".equals(Player.repeat)) { index = 0; start(0); }

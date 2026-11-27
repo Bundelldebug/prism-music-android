@@ -1581,6 +1581,72 @@ public class PrismUiTest {
         }
     }
 
+    @Test public void prism9527RegressionsAndUnifiedPlaylist() throws Exception {
+        // 1) Home shelf header MUST strip strapline account name and moreContentButton ("더보기")
+        org.json.JSONObject shelf = new org.json.JSONObject("{"
+                + "\"header\":{\"musicCarouselShelfBasicHeaderRenderer\":{"
+                + "  \"strapline\":{\"runs\":[{\"text\":\"Jiho\"}]},"
+                + "  \"title\":{\"runs\":[{\"text\":\"다시 듣기\"}]},"
+                + "  \"moreContentButton\":{\"buttonRenderer\":{\"text\":{\"runs\":[{\"text\":\"더보기\"}]}}}"
+                + "}}}");
+        assertEquals("다시 듣기", YouTubeMusic.extractShelfTitle(shelf));
+
+        // 2) Album detail cover MUST come from primary thumbnail, NEVER straplineThumbnail (artist image!)
+        org.json.JSONObject albumDetail = new org.json.JSONObject("{"
+                + "\"header\":{\"musicResponsiveHeaderRenderer\":{"
+                + "  \"title\":{\"runs\":[{\"text\":\"LILAC\"}]},"
+                + "  \"straplineTextOne\":{\"runs\":[{\"text\":\"아이유\",\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"UC_IU_ARTIST\"}}}]},"
+                + "  \"thumbnail\":{\"musicThumbnailRenderer\":{\"thumbnail\":{\"thumbnails\":[{\"url\":\"https://lh3.googleusercontent.com/ALBUM_COVER=w226-h226\",\"width\":226}]}}},"
+                + "  \"straplineThumbnail\":{\"musicThumbnailRenderer\":{\"thumbnail\":{\"thumbnails\":[{\"url\":\"https://lh3.googleusercontent.com/ARTIST_AVATAR=w544-h544\",\"width\":544}]}}}"
+                + "}}}");
+        YouTubeMusic.DetailData d = new YouTubeMusic.DetailData();
+        d.type = "ytm_album";
+        d.browseId = "MPREb_LILAC";
+        YouTubeMusic.parseDetailResponse(albumDetail, d);
+        assertTrue("Album image must NOT be overwritten by larger artist straplineThumbnail", d.image.contains("ALBUM_COVER"));
+        assertEquals("UC_IU_ARTIST", d.artistBrowseId);
+
+        // 3) Library artist MPLA prefix normalized to full public channel UC...
+        assertEquals("UC1234567890", YouTubeMusic.normalizeArtistBrowseId("MPLAUC1234567890"));
+
+        // 4) Cross-platform Unified Playlist (Spotify + YouTube Music mixed) + UI screenshot
+        android.content.Context app = RuntimeEnvironment.getApplication();
+        UnifiedPlaylist.resetCacheForTest();
+        UnifiedPlaylist.Playlist upl = UnifiedPlaylist.create(app, "드라이브 믹스", "Spotify + YouTube Music");
+        assertNotNull(upl);
+        UnifiedPlaylist.Entry eSp = new UnifiedPlaylist.Entry();
+        eSp.source = UnifiedPlaylist.SRC_SPOTIFY;
+        eSp.id = "sp_1";
+        eSp.uri = "spotify:track:sp_1";
+        eSp.title = "Supernova";
+        eSp.artist = "aespa";
+        UnifiedPlaylist.Entry eYt = new UnifiedPlaylist.Entry();
+        eYt.source = UnifiedPlaylist.SRC_YTM;
+        eYt.id = "ytm:dQw4w9WgXcQ";
+        eYt.uri = "ytm:track:dQw4w9WgXcQ";
+        eYt.title = "ラピスラズリ (YouTube Music)";
+        eYt.artist = "Morfonica";
+        assertTrue(UnifiedPlaylist.addEntry(app, upl.id, eSp));
+        assertTrue(UnifiedPlaylist.addEntry(app, upl.id, eYt));
+
+        // Verify persistence reload
+        UnifiedPlaylist.resetCacheForTest();
+        UnifiedPlaylist.Playlist reloaded = UnifiedPlaylist.get(app, upl.id);
+        assertNotNull(reloaded);
+        assertEquals(2, reloaded.tracks.size());
+        assertEquals(UnifiedPlaylist.SRC_SPOTIFY, reloaded.tracks.get(0).source);
+        assertEquals(UnifiedPlaylist.SRC_YTM, reloaded.tracks.get(1).source);
+
+        // Render Unified Playlist detail page screenshot
+        ActivityController<MainActivity> ctrl = launch("ko-w393dp-h852dp-xxhdpi");
+        MainActivity a = ctrl.get();
+        a.push(new Pages.UnifiedPlaylistDetailPage(a, upl.id));
+        idle(500);
+        assertTrue(a.currentPage() instanceof Pages.UnifiedPlaylistDetailPage);
+        shot(a, "98_unified_playlist_detail");
+        UnifiedPlaylist.delete(app, upl.id);
+    }
+
     private static Bitmap captureScaled(MainActivity act, float scale) {
         View root = act.getWindow().getDecorView();
         int w = Math.max(1, Math.round(root.getWidth() * scale));

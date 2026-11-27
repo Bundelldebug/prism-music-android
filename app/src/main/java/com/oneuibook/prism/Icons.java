@@ -19,7 +19,7 @@ final class Icons {
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
             REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
             BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55, BUDS2 = 56, BUDS_LIVE = 57,
-            VIDEO = 58, RECAP = 59, YTM = 60, SLIDERS = 61, PLAYLIST_GO = 62;
+            VIDEO = 58, RECAP = 59, YTM = 60, SLIDERS = 61, PLAYLIST_GO = 62, SPOTIFY = 63;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -710,6 +710,20 @@ final class Icons {
                 c.drawLine(14.0f, 14.5f, 20.4f, 14.5f, P);
                 p.moveTo(17.4f, 11.4f); p.lineTo(20.6f, 14.5f); p.lineTo(17.4f, 17.6f);
                 c.drawPath(p, P);
+                break;
+            }
+            case SPOTIFY: {
+                // Spotify-style 3 curved sound arcs inside a circle ring
+                stroke(1.8f);
+                c.drawCircle(12f, 12f, 9.6f, P);
+                stroke(1.85f);
+                p.moveTo(6.8f, 9.5f); p.quadTo(12f, 7.6f, 17.5f, 10.1f); c.drawPath(p, P);
+                p.reset();
+                stroke(1.65f);
+                p.moveTo(7.7f, 12.6f); p.quadTo(12f, 11.1f, 16.4f, 13.1f); c.drawPath(p, P);
+                p.reset();
+                stroke(1.5f);
+                p.moveTo(8.7f, 15.5f); p.quadTo(12f, 14.4f, 15.3f, 16.0f); c.drawPath(p, P);
                 break;
             }
             default:

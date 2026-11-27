@@ -455,6 +455,7 @@ final class SpotifyWeb {
                             Spotify.MAIN.postDelayed(Player::checkLiked, 800);
                         }
                         Player.notifyAll0();
+                        UnifiedPlaylist.onSpotifyWebState(sid, o.optBoolean("paused"), o.optLong("position"), o.optLong("duration"));
                         if (ctx != null && (Player.playing || wasPlaying)) {
                             LocalMusic.PlaybackService.claimControl(ctx.getApplicationContext());
                         }

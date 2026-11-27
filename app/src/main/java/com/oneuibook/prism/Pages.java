@@ -385,13 +385,30 @@ final class Pages {
         return wrap;
     }
 
-    /** YouTube Music Home screen (Quick Picks, Charts, Music Videos — works with or without Google login). */
+    /** YouTube Music Home screen (rich Spotify-parity layout: poster hero, track columns, albums/playlists/artists, shared playlists & charts). */
     static void ytmHome(Page p) {
         MainActivity m = p.main;
         LinearLayout c = p.content;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         c.addView(Widgets.section(m, m.getString(h >= 5 && h < 12 ? R.string.greet_morning : (h >= 12 && h < 18 ? R.string.greet_afternoon : R.string.greet_evening))));
         if (Settings.pref(m, "home_recap", true)) c.addView(recapBanner(m, 1), Widgets.MW);
+        // Show user's cross-platform Shared Playlists right on Home if created
+        List<UnifiedPlaylist.Playlist> upls = UnifiedPlaylist.list(m);
+        if (!upls.isEmpty()) {
+            c.addView(Widgets.section(m, m.getString(R.string.upl_title)));
+            LinearLayout uRow = Widgets.rail(c, 8);
+            int sz = Widgets.squareDp();
+            for (UnifiedPlaylist.Playlist pl : upls) {
+                Widgets.Item xi = new Widgets.Item();
+                xi.type = "playlist";
+                xi.id = pl.id;
+                xi.title = pl.name;
+                xi.subtitle = pl.desc;
+                xi.count = pl.tracks.size();
+                xi.image = pl.coverArt();
+                Widgets.addToRail(uRow, Widgets.squareCard(m, xi, sz, v -> m.push(new UnifiedPlaylistDetailPage(m, pl.id))), Ui.dp(sz));
+            }
+        }
         View sp = Widgets.spinner(m, 160);
         c.addView(sp);
         YouTubeMusic.fetchHome(sections -> {
@@ -401,17 +418,36 @@ final class Pages {
                 return;
             }
             int idx = 0;
+            boolean usedPoster = false;
             for (Map.Entry<String, List<Widgets.Item>> e : sections.entrySet()) {
                 List<Widgets.Item> items = e.getValue();
                 if (items == null || items.isEmpty()) continue;
-                String secTitle = idx == 0 ? m.getString(R.string.ytm_quick_picks) : e.getKey();
+                String secTitle = (e.getKey() == null || e.getKey().isEmpty() || "YouTube Music".equals(e.getKey()))
+                        ? (idx == 0 ? m.getString(R.string.ytm_quick_picks) : m.getString(R.string.home_for_you))
+                        : e.getKey();
                 List<Widgets.Item> shelfTracks = new ArrayList<>();
                 for (Widgets.Item x : items) if (x != null && x.track != null) shelfTracks.add(x);
-                c.addView(Widgets.section(m, secTitle));
-                if (idx == 0 && !shelfTracks.isEmpty() && shelfTracks.size() * 2 >= items.size()) {
+                boolean mostlyTracks = !shelfTracks.isEmpty() && shelfTracks.size() * 2 >= items.size();
+
+                if (!usedPoster && !mostlyTracks && items.size() >= 2) {
+                    usedPoster = true;
+                    if (idx > 0) c.addView(Widgets.section(m, secTitle));
+                    LinearLayout row = Widgets.rail(c, 8);
+                    for (int i = 0; i < Math.min(12, items.size()); i++) {
+                        final Widgets.Item it = items.get(i);
+                        it.caption = secTitle;
+                        it.icon = Icons.YTM;
+                        View.OnClickListener click = it.track != null
+                                ? (v -> m.playList(shelfTracks, Math.max(0, shelfTracks.indexOf(it)), secTitle))
+                                : (v -> m.openItem(it));
+                        Widgets.addToRail(row, Widgets.posterCard(m, it, click), Widgets.posterW());
+                    }
+                } else if (mostlyTracks) {
+                    c.addView(Widgets.section(m, secTitle));
                     Widgets.trackColumns(c, shelfTracks.subList(0, Math.min(18, shelfTracks.size())),
                             i -> m.playList(shelfTracks, i, secTitle));
                 } else {
+                    c.addView(Widgets.section(m, secTitle));
                     LinearLayout row = Widgets.rail(c, 8);
                     int sz = Widgets.squareDp();
                     for (int i = 0; i < Math.min(20, items.size()); i++) {
@@ -424,6 +460,16 @@ final class Pages {
                 }
                 idx++;
             }
+            // Quick-access YTM discovery & personal tiles (matching Spotify Home's rich bottom section)
+            c.addView(Widgets.section(m, m.getString(R.string.ytm_charts)));
+            LinearLayout tiles = Widgets.rail(c, 8);
+            int tsz = Widgets.squareDp();
+            Widgets.addToRail(tiles, Widgets.gradientTile(m, m.getString(R.string.ytm_charts), null, 0xFFFF2D55, 0xFFFF7A59, tsz,
+                    v -> m.push(new YtmListPage(m, m.getString(R.string.ytm_charts), "FEmusic_charts"))), Ui.dp(tsz));
+            Widgets.addToRail(tiles, Widgets.gradientTile(m, m.getString(R.string.lib_liked), null, 0xFF5E3BEE, 0xFF2E2A8F, tsz,
+                    v -> m.push(new YtmListPage(m, m.getString(R.string.lib_liked), "VLLM"))), Ui.dp(tsz));
+            Widgets.addToRail(tiles, Widgets.gradientTile(m, m.getString(R.string.lib_recent), null, 0xFF0FB59D, 0xFF198754, tsz,
+                    v -> m.push(new YtmListPage(m, m.getString(R.string.lib_recent), "FEmusic_history"))), Ui.dp(tsz));
         });
     }
 
@@ -1140,9 +1186,12 @@ final class Pages {
 
         @Override void build() {
             MainActivity m = main;
+            int uplCount = UnifiedPlaylist.list(m).size();
+            String uplBadge = uplCount > 0 ? String.valueOf(uplCount) : null;
             if (m.isLocalSource()) {
                 Widgets.Group lg = new Widgets.Group(m, null);
                 lg.row(Icons.RECAP, Ui.ACCENT, m.getString(R.string.recap_local), null, true, v -> m.push(new RecapPage(m, true)));
+                lg.row(Icons.LIST, Ui.ACCENT, m.getString(R.string.upl_title), uplBadge, true, v -> m.push(new UnifiedPlaylistsPage(m)));
                 lg.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.all_songs), null, true, v -> { Widgets.Item all = new Widgets.Item(); all.title = m.getString(R.string.all_songs); m.push(new LocalListPage(m, all)); });
                 lg.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.lib_albums), null, true, v -> m.push(new LocalGroupsPage(m, true)));
                 lg.row(Icons.ARTIST, Ui.ACCENT, m.getString(R.string.lib_artists), null, true, v -> m.push(new LocalGroupsPage(m, false)));
@@ -1154,6 +1203,7 @@ final class Pages {
             if (m.isYtmSource()) {
                 Widgets.Group yg = new Widgets.Group(m, m.getString(R.string.source_ytm));
                 yg.row(Icons.RECAP, Ui.ACCENT, m.getString(R.string.recap_ytm), null, true, v -> m.push(new RecapPage(m, 1)));
+                yg.row(Icons.LIST, Ui.ACCENT, m.getString(R.string.upl_title), uplBadge, true, v -> m.push(new UnifiedPlaylistsPage(m)));
                 yg.row(Icons.HEART, Ui.ACCENT, m.getString(R.string.lib_liked), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_liked), "VLLM")));
                 yg.row(Icons.QUEUE, Ui.ACCENT, m.getString(R.string.lib_playlists), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_playlists), "FEmusic_liked_playlists")));
                 yg.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.lib_albums), null, true, v -> m.push(new YtmListPage(m, m.getString(R.string.lib_albums), "FEmusic_liked_albums")));
@@ -1189,6 +1239,7 @@ final class Pages {
             }
             Widgets.Group g = new Widgets.Group(m, null);
             g.row(Icons.RECAP, Ui.ACCENT, m.getString(R.string.recap_spotify), null, true, v -> m.push(new RecapPage(m, false)));
+            g.row(Icons.LIST, Ui.ACCENT, m.getString(R.string.upl_title), uplBadge, true, v -> m.push(new UnifiedPlaylistsPage(m)));
             g.row(Icons.HEART, Ui.ACCENT, m.getString(R.string.lib_liked), null, true, v -> open(R.string.lib_liked, "liked"));
             g.row(Icons.QUEUE, Ui.ACCENT, m.getString(R.string.lib_playlists), null, true, v -> open(R.string.lib_playlists, "playlists"));
             g.row(Icons.ALBUM, Ui.ACCENT, m.getString(R.string.lib_albums), null, true, v -> open(R.string.lib_albums, "albums"));
@@ -1307,7 +1358,211 @@ final class Pages {
         }
     }
 
-    /** Dedicated YouTube Music Album / Playlist / Artist detail page (matches Spotify DetailPage visual hierarchy). */
+    /** Compact circular source badge (Spotify green / YouTube Music red / Local accent) for unified playlists & queues. */
+    static View sourceBadgeView(Context c, String source, boolean onDark) {
+        int col = UnifiedPlaylist.sourceColor(source);
+        int ic = UnifiedPlaylist.sourceIcon(source);
+        FrameLayout badge = new FrameLayout(c);
+        android.graphics.drawable.GradientDrawable bg = Ui.round(Ui.alpha(col, onDark ? 0.24f : (Ui.dark ? 0.22f : 0.14f)), 100);
+        bg.setStroke(Math.max(1, Ui.dp(0.75f)), Ui.alpha(col, onDark ? 0.60f : 0.36f));
+        badge.setBackground(bg);
+        badge.addView(new Icons.IconView(c, ic, 12.5f, col),
+                new FrameLayout.LayoutParams(Ui.dp(15), Ui.dp(15), Gravity.CENTER));
+        return badge;
+    }
+
+    /** Cross-platform Unified Playlists list page (Spotify + YouTube Music + Local). */
+    static final class UnifiedPlaylistsPage extends Page {
+        UnifiedPlaylistsPage(MainActivity m) {
+            super(m, m.getString(R.string.upl_title), true);
+            back = true;
+            headerIcons = new int[0];
+        }
+
+        @Override void build() {
+            MainActivity m = main;
+            LinearLayout createRow = new LinearLayout(m);
+            createRow.setPadding(Ui.dp(16), Ui.dp(8), Ui.dp(16), Ui.dp(10));
+            createRow.addView(DetailPage.pillButton(m, Icons.QUEUE, m.getString(R.string.upl_create), true,
+                    v -> m.createUnifiedPlaylistDialog(created -> rebuild())),
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(46)));
+            content.addView(createRow, Widgets.MW);
+
+            List<UnifiedPlaylist.Playlist> pls = UnifiedPlaylist.list(m);
+            if (pls.isEmpty()) {
+                content.addView(Widgets.messageCard(m, Icons.LIST, m.getString(R.string.upl_empty),
+                        m.getString(R.string.upl_create), v -> m.createUnifiedPlaylistDialog(created -> rebuild())));
+                return;
+            }
+            for (UnifiedPlaylist.Playlist pl : pls) {
+                Widgets.Item it = new Widgets.Item();
+                it.type = "playlist";
+                it.id = pl.id;
+                it.title = pl.name;
+                it.subtitle = pl.desc;
+                it.count = pl.tracks.size();
+                it.image = pl.coverArt();
+                View row = entityRow(m, it);
+                row.setOnClickListener(v -> m.push(new UnifiedPlaylistDetailPage(m, pl.id)));
+                content.addView(row, Widgets.MW);
+            }
+        }
+    }
+
+    /** Detail page for a cross-platform Unified Playlist: shows each track's playback source badge (Spotify/YTM/Local) on the right edge! */
+    static final class UnifiedPlaylistDetailPage extends Page {
+        final String playlistId;
+
+        UnifiedPlaylistDetailPage(MainActivity m, String playlistId) {
+            super(m, m.getString(R.string.upl_title), false);
+            this.playlistId = playlistId;
+            back = true;
+            headerIcons = new int[]{Icons.MORE};
+        }
+
+        @Override boolean largeTop() { return false; }
+
+        @Override void build() {
+            MainActivity m = main;
+            UnifiedPlaylist.Playlist pl = UnifiedPlaylist.get(m, playlistId);
+            if (pl == null) {
+                content.addView(Widgets.caption(m, m.getString(R.string.empty)));
+                return;
+            }
+            title = pl.name;
+            m.syncHeader();
+
+            LinearLayout head = new LinearLayout(m);
+            head.setOrientation(LinearLayout.VERTICAL);
+            head.setGravity(Gravity.CENTER_HORIZONTAL);
+            int s = Math.min(Ui.dp(228), Ui.screenW - Ui.dp(120));
+            Img.ArtView art = new Img.ArtView(m, 14);
+            art.placeholderIcon = Icons.QUEUE;
+            String cov = pl.coverArt();
+            if (!cov.isEmpty()) art.setUrl(cov);
+            art.setElevation(Ui.dpf(10));
+            art.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View v, android.graphics.Outline o) {
+                    o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(14));
+                }
+            });
+            LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(s, s);
+            al.topMargin = Ui.dp(8);
+            head.addView(art, al);
+
+            TextView tv = Ui.text(m, pl.name, 22, Ui.bold, Ui.text());
+            tv.setSingleLine(false);
+            tv.setMaxLines(2);
+            tv.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tl.setMargins(Ui.dp(24), Ui.dp(18), Ui.dp(24), 0);
+            head.addView(tv, tl);
+
+            // Count summary per platform (e.g. "Spotify 3 · YouTube Music 4")
+            int spN = 0, ytN = 0, loN = 0;
+            for (UnifiedPlaylist.Entry e : pl.tracks) {
+                if (UnifiedPlaylist.SRC_YTM.equals(e.source)) ytN++;
+                else if (UnifiedPlaylist.SRC_LOCAL.equals(e.source)) loN++;
+                else spN++;
+            }
+            StringBuilder subSb = new StringBuilder();
+            if (spN > 0) subSb.append("Spotify ").append(spN);
+            if (ytN > 0) { if (subSb.length() > 0) subSb.append(" · "); subSb.append("YouTube Music ").append(ytN); }
+            if (loN > 0) { if (subSb.length() > 0) subSb.append(" · "); subSb.append(m.getString(R.string.source_local)).append(" ").append(loN); }
+            String subTxt = subSb.length() > 0 ? subSb.toString() : Widgets.nonEmpty(pl.desc, m.getString(R.string.upl_subtitle));
+            TextView sv = Ui.text(m, subTxt, 14, Ui.medium, Ui.ACCENT);
+            sv.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            sl.setMargins(Ui.dp(24), Ui.dp(4), Ui.dp(24), 0);
+            head.addView(sv, sl);
+
+            LinearLayout btns = new LinearLayout(m);
+            btns.setPadding(Ui.dp(16), Ui.dp(18), Ui.dp(16), Ui.dp(10));
+            btns.addView(DetailPage.pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true, v -> {
+                if (pl.tracks.isEmpty()) Player.toast(R.string.empty);
+                else UnifiedPlaylist.play(pl, 0, false);
+            }), new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
+            btns.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(12), 1));
+            btns.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> {
+                if (pl.tracks.isEmpty()) Player.toast(R.string.empty);
+                else UnifiedPlaylist.play(pl, (int) (Math.random() * pl.tracks.size()), true);
+            }), new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
+            head.addView(btns, Widgets.MW);
+            content.addView(head, Widgets.MW);
+
+            if (pl.tracks.isEmpty()) {
+                content.addView(Widgets.caption(m, m.getString(R.string.upl_empty)));
+                return;
+            }
+            for (int i = 0; i < pl.tracks.size(); i++) {
+                final int idx = i;
+                final UnifiedPlaylist.Entry en = pl.tracks.get(i);
+                Widgets.Item item = en.toItem();
+                LinearLayout row = (LinearLayout) Widgets.trackRow(m, item, 0,
+                        v -> UnifiedPlaylist.play(pl, idx, false),
+                        v -> trackRowMenu(pl, en, idx, v));
+                // Right-edge color-coded source badge icon (Spotify green / YTM red / Local accent) right beside the ⋯ button
+                View badge = sourceBadgeView(m, en.source, false);
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(Ui.dp(24), Ui.dp(24));
+                blp.leftMargin = Ui.dp(4);
+                blp.rightMargin = Ui.dp(2);
+                row.addView(badge, Math.max(0, row.getChildCount() - 1), blp);
+                content.addView(row, Widgets.MW);
+            }
+            content.addView(Widgets.caption(m, m.getString(R.string.n_tracks, pl.tracks.size())));
+        }
+
+        private void trackRowMenu(UnifiedPlaylist.Playlist pl, UnifiedPlaylist.Entry en, int idx, View anchor) {
+            float[] o = Glass.abs(anchor);
+            RectF a = new RectF(o[0], o[1], o[0] + anchor.getWidth(), o[1] + anchor.getHeight());
+            List<GlassMenu.Entry> e = new ArrayList<>();
+            e.add(new GlassMenu.Entry(main.getString(R.string.play), Icons.PLAY_SMALL, false, () -> UnifiedPlaylist.play(pl, idx, false)));
+            if (idx > 0) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_move_up), Icons.CHEVRON_UP, false, () -> {
+                    UnifiedPlaylist.moveTrack(main, pl.id, idx, idx - 1);
+                    rebuild();
+                }));
+            }
+            if (idx < pl.tracks.size() - 1) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.pl_move_down), Icons.CHEVRON, false, () -> {
+                    UnifiedPlaylist.moveTrack(main, pl.id, idx, idx + 1);
+                    rebuild();
+                }));
+            }
+            if (en.albumUri != null && !en.albumUri.isEmpty()) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.go_album), Icons.ALBUM, false, () -> main.openUri(en.albumUri, en.album)));
+            }
+            if (en.artistUri != null && !en.artistUri.isEmpty()) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.go_artist), Icons.ARTIST, false, () -> main.openUri(en.artistUri, en.artist)));
+            } else if (UnifiedPlaylist.SRC_YTM.equals(en.source) && en.artist != null && !en.artist.isEmpty()) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.go_artist), Icons.ARTIST, false, () -> main.openYtmArtistByName(en.artist)));
+            }
+            e.add(new GlassMenu.Entry(main.getString(R.string.pl_remove_track), Icons.CLOSE, false, () -> {
+                UnifiedPlaylist.removeTrack(main, pl.id, idx);
+                Player.toast(R.string.pl_removed);
+                rebuild();
+            }));
+            GlassMenu.show(main, a, e);
+        }
+
+        void openMenu(RectF anchor) {
+            UnifiedPlaylist.Playlist pl = UnifiedPlaylist.get(main, playlistId);
+            if (pl == null) return;
+            List<GlassMenu.Entry> e = new ArrayList<>();
+            if (!pl.tracks.isEmpty()) {
+                e.add(new GlassMenu.Entry(main.getString(R.string.play), Icons.PLAY_SMALL, false, () -> UnifiedPlaylist.play(pl, 0, false)));
+                e.add(new GlassMenu.Entry(main.getString(R.string.shuffle), Icons.SHUFFLE, false, () -> UnifiedPlaylist.play(pl, (int) (Math.random() * pl.tracks.size()), true)));
+            }
+            e.add(new GlassMenu.Entry(main.getString(R.string.pl_edit), Icons.APPEARANCE, false, () -> main.editUnifiedPlaylistDialog(pl, this::rebuild)));
+            e.add(new GlassMenu.Entry(main.getString(R.string.upl_delete), Icons.CLOSE, false, () -> {
+                UnifiedPlaylist.delete(main, pl.id);
+                main.pop();
+            }));
+            GlassMenu.show(main, anchor, e);
+        }
+    }
+
+    /** Dedicated YouTube Music Album / Playlist / Artist detail page (matches Spotify DetailPage & full-bleed Artist hierarchy). */
     static final class YtmDetailPage extends Page {
         final Widgets.Item item;
         private final List<Widgets.Item> tracks = new ArrayList<>();
@@ -1324,66 +1579,76 @@ final class Pages {
 
         @Override boolean largeTop() { return false; }
 
+        private boolean isArtist() { return item != null && "ytm_artist".equals(item.type); }
+        private boolean wideArtist() { return (Ui.screenW - main.sideInset() - main.contentInsetPx()) / Ui.density >= 600; }
+
+        @Override void applyInsets() {
+            super.applyInsets();
+            if (isArtist() && !wideArtist()) content.setPadding(0, 0, main.sideInset(), main.bottomPadding());
+        }
+
         @Override void build() {
             MainActivity m = main;
-            final boolean isArtist = "ytm_artist".equals(item.type);
+            final boolean isArtist = isArtist();
             final boolean isAlbum = "ytm_album".equals(item.type);
 
-            LinearLayout head = new LinearLayout(m);
-            head.setOrientation(LinearLayout.VERTICAL);
-            head.setGravity(Gravity.CENTER_HORIZONTAL);
+            if (isArtist) {
+                applyInsets();
+                buildArtistHeader(m);
+            } else {
+                LinearLayout head = new LinearLayout(m);
+                head.setOrientation(LinearLayout.VERTICAL);
+                head.setGravity(Gravity.CENTER_HORIZONTAL);
 
-            int s = Math.min(Ui.dp(244), Ui.screenW - Ui.dp(120));
-            coverArt = new Img.ArtView(m, 14);
-            coverArt.circle = isArtist;
-            if (isArtist) coverArt.placeholderIcon = Icons.ARTIST;
-            coverArt.setElevation(Ui.dpf(10));
-            coverArt.setOutlineProvider(new android.view.ViewOutlineProvider() {
-                @Override public void getOutline(View v, android.graphics.Outline o) {
-                    if (isArtist) o.setOval(0, 0, v.getWidth(), v.getHeight());
-                    else o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(14));
-                }
-            });
-            if (item.image != null && !item.image.isEmpty()) coverArt.setUrl(item.image);
-            LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(s, s);
-            al.topMargin = Ui.dp(8);
-            head.addView(coverArt, al);
+                int s = Math.min(Ui.dp(244), Ui.screenW - Ui.dp(120));
+                coverArt = new Img.ArtView(m, 14);
+                coverArt.setElevation(Ui.dpf(10));
+                coverArt.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                    @Override public void getOutline(View v, android.graphics.Outline o) {
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(14));
+                    }
+                });
+                if (item.image != null && !item.image.isEmpty()) coverArt.setUrl(item.image);
+                LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(s, s);
+                al.topMargin = Ui.dp(8);
+                head.addView(coverArt, al);
 
-            titleView = Ui.text(m, Widgets.nonEmpty(item.title, ""), 22, Ui.bold, Ui.text());
-            titleView.setSingleLine(false);
-            titleView.setMaxLines(2);
-            titleView.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            tl.setMargins(Ui.dp(24), Ui.dp(18), Ui.dp(24), 0);
-            head.addView(titleView, tl);
+                titleView = Ui.text(m, Widgets.nonEmpty(item.title, ""), 22, Ui.bold, Ui.text());
+                titleView.setSingleLine(false);
+                titleView.setMaxLines(2);
+                titleView.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tl.setMargins(Ui.dp(24), Ui.dp(18), Ui.dp(24), 0);
+                head.addView(titleView, tl);
 
-            subView = Ui.text(m, isArtist ? m.getString(R.string.artist) : Widgets.nonEmpty(item.subtitle, ""), 16, Ui.medium, Ui.ACCENT);
-            subView.setSingleLine(false);
-            subView.setMaxLines(2);
-            subView.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            sl.setMargins(Ui.dp(24), Ui.dp(4), Ui.dp(24), 0);
-            head.addView(subView, sl);
+                subView = Ui.text(m, Widgets.nonEmpty(item.subtitle, ""), 16, Ui.medium, Ui.ACCENT);
+                subView.setSingleLine(false);
+                subView.setMaxLines(2);
+                subView.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                sl.setMargins(Ui.dp(24), Ui.dp(4), Ui.dp(24), 0);
+                head.addView(subView, sl);
 
-            metaView = Ui.text(m, "", 13, Ui.regular, Ui.text2());
-            metaView.setGravity(Gravity.CENTER);
-            metaView.setVisibility(GONE);
-            LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            ml.setMargins(Ui.dp(24), Ui.dp(4), Ui.dp(24), 0);
-            head.addView(metaView, ml);
+                metaView = Ui.text(m, "", 13, Ui.regular, Ui.text2());
+                metaView.setGravity(Gravity.CENTER);
+                metaView.setVisibility(GONE);
+                LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ml.setMargins(Ui.dp(24), Ui.dp(4), Ui.dp(24), 0);
+                head.addView(metaView, ml);
 
-            LinearLayout row = new LinearLayout(m);
-            row.setPadding(Ui.dp(16), Ui.dp(18), Ui.dp(16), Ui.dp(10));
-            row.addView(DetailPage.pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true, v -> playAll(0, false)),
-                    new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
-            row.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(12), 1));
-            row.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAll(0, true)),
-                    new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
-            head.addView(row, Widgets.MW);
-            content.addView(head, Widgets.MW);
+                LinearLayout row = new LinearLayout(m);
+                row.setPadding(Ui.dp(16), Ui.dp(18), Ui.dp(16), Ui.dp(10));
+                row.addView(DetailPage.pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true, v -> playAll(0, false)),
+                        new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
+                row.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(12), 1));
+                row.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAll(0, true)),
+                        new LinearLayout.LayoutParams(0, Ui.dp(48), 1f));
+                head.addView(row, Widgets.MW);
+                content.addView(head, Widgets.MW);
 
-            listSlot = slot();
-            shelvesSlot = slot();
+                listSlot = slot();
+                shelvesSlot = slot();
+            }
             listSlot.addView(Widgets.spinner(m, 140));
 
             String bid = item.id;
@@ -1401,28 +1666,53 @@ final class Pages {
                 if (d.title != null && !d.title.isEmpty()) {
                     item.title = d.title;
                     title = d.title;
-                    titleView.setText(d.title);
+                    if (titleView != null) titleView.setText(d.title);
                     m.syncHeader();
                 }
-                if (d.subtitle != null && !d.subtitle.isEmpty()) subView.setText(d.subtitle);
-                if (d.meta != null && !d.meta.isEmpty()) {
+                if (subView != null && d.subtitle != null && !d.subtitle.isEmpty()) {
+                    subView.setText(d.subtitle);
+                    if (!isArtist && d.artistBrowseId != null && !d.artistBrowseId.isEmpty()) {
+                        final String arBid = d.artistBrowseId;
+                        final String arName = d.subtitle.split("·|•")[0].trim();
+                        subView.setOnClickListener(v -> m.openUri("ytm:browse:" + arBid, arName));
+                    }
+                }
+                if (metaView != null && d.meta != null && !d.meta.isEmpty()) {
                     metaView.setText(d.meta);
                     metaView.setVisibility(VISIBLE);
                 }
                 if (d.image != null && !d.image.isEmpty()) {
                     item.image = d.image;
-                    coverArt.setUrl(d.image);
+                    if (coverArt != null) coverArt.setUrl(d.image);
                 }
                 tracks.addAll(d.tracks);
                 if (!tracks.isEmpty()) {
-                    if (isArtist) listSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
-                    for (int i = 0; i < tracks.size(); i++) {
-                        final int idx = i;
-                        Widgets.Item tr = tracks.get(i);
-                        listSlot.addView(Widgets.trackRow(m, tr, isAlbum ? (i + 1) : 0,
-                                v -> playAll(idx, false), v -> m.trackMenu(tr, v)), Widgets.MW);
-                    }
-                    if (!isArtist) {
+                    if (isArtist) {
+                        listSlot.addView(Widgets.section(m, m.getString(R.string.popular_songs)));
+                        int shown = Math.min(5, tracks.size());
+                        for (int i = 0; i < tracks.size(); i++) {
+                            final int idx = i;
+                            Widgets.Item tr = tracks.get(i);
+                            View r = Widgets.trackRow(m, tr, 0, v -> playAll(idx, false), v -> m.trackMenu(tr, v));
+                            if (i >= shown) r.setVisibility(GONE);
+                            listSlot.addView(r, Widgets.MW);
+                        }
+                        if (tracks.size() > shown) {
+                            TextView moreBtn = Ui.text(m, m.getString(R.string.show_all), 15, Ui.semibold, Ui.ACCENT);
+                            moreBtn.setPadding(Ui.dp(20), Ui.dp(10), Ui.dp(20), Ui.dp(10));
+                            moreBtn.setOnClickListener(v -> {
+                                for (int k = 0; k < listSlot.getChildCount(); k++) listSlot.getChildAt(k).setVisibility(VISIBLE);
+                                moreBtn.setVisibility(GONE);
+                            });
+                            listSlot.addView(moreBtn, Widgets.MW);
+                        }
+                    } else {
+                        for (int i = 0; i < tracks.size(); i++) {
+                            final int idx = i;
+                            Widgets.Item tr = tracks.get(i);
+                            listSlot.addView(Widgets.trackRow(m, tr, isAlbum ? (i + 1) : 0,
+                                    v -> playAll(idx, false), v -> m.trackMenu(tr, v)), Widgets.MW);
+                        }
                         long totalMs = 0;
                         for (Widgets.Item tr : tracks) if (tr.track != null) totalMs += tr.track.duration;
                         String foot = m.getString(R.string.n_tracks, tracks.size());
@@ -1435,14 +1725,104 @@ final class Pages {
                 for (Map.Entry<String, List<Widgets.Item>> se : d.shelves.entrySet()) {
                     List<Widgets.Item> sItems = se.getValue();
                     if (sItems == null || sItems.isEmpty()) continue;
-                    shelvesSlot.addView(Widgets.section(m, se.getKey()));
+                    shelvesSlot.addView(Widgets.section(m, se.getKey() + "  " + sItems.size()));
                     LinearLayout railRow = Widgets.rail(shelvesSlot, 10);
                     int sz = Widgets.squareDp();
+                    List<Widgets.Item> shelfPlayable = new ArrayList<>();
+                    for (Widgets.Item x : sItems) if (x.track != null) shelfPlayable.add(x);
                     for (Widgets.Item x : sItems) {
-                        Widgets.addToRail(railRow, Widgets.squareCard(m, x, sz, v -> m.openItem(x)), Ui.dp(sz));
+                        View.OnClickListener click = x.track != null
+                                ? (v -> m.playYtmList(shelfPlayable, Math.max(0, shelfPlayable.indexOf(x)), "ytm:browse:" + d.browseId, se.getKey()))
+                                : (v -> m.openItem(x));
+                        Widgets.addToRail(railRow, Widgets.squareCard(m, x, sz, click), Ui.dp(sz));
                     }
                 }
             });
+        }
+
+        /** Spotify-identical full-bleed Artist Hero (phone) or 2-column Artist split (unfolded foldable / tablet). */
+        private void buildArtistHeader(MainActivity m) {
+            int W = Ui.screenW - m.sideInset() - m.contentInsetPx();
+            if (wideArtist()) {
+                int colW = (int) Math.min(W * 0.36f, Math.min(Ui.dp(400), Ui.screenH * 0.55f));
+                LinearLayout split = new LinearLayout(m);
+                split.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout left = new LinearLayout(m);
+                left.setOrientation(LinearLayout.VERTICAL);
+                left.setPadding(Ui.dp(20), Ui.dp(8), Ui.dp(8), 0);
+                FrameLayout card = new FrameLayout(m);
+                coverArt = new Img.ArtView(m, 24);
+                coverArt.placeholderIcon = Icons.ARTIST;
+                if (item.image != null && !item.image.isEmpty()) coverArt.setUrl(item.image);
+                card.addView(coverArt, new FrameLayout.LayoutParams(colW, colW));
+                card.setElevation(Ui.dpf(4));
+                card.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                    @Override public void getOutline(View v, android.graphics.Outline o) {
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Ui.dpf(24));
+                    }
+                });
+                left.addView(card, new LinearLayout.LayoutParams(colW, colW));
+                titleView = Ui.text(m, Widgets.nonEmpty(item.title, ""), 30, Ui.heavy, Ui.text());
+                titleView.setSingleLine(false);
+                titleView.setMaxLines(3);
+                titleView.setPadding(Ui.dp(4), Ui.dp(18), 0, Ui.dp(14));
+                left.addView(titleView, new LinearLayout.LayoutParams(colW, ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout btns = new LinearLayout(m);
+                btns.addView(DetailPage.pillButton(m, Icons.PLAY_SMALL, m.getString(R.string.play), true, v -> playAll(0, false)),
+                        new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+                btns.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
+                btns.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAll(0, true)),
+                        new LinearLayout.LayoutParams(0, Ui.dp(46), 1f));
+                left.addView(btns, new LinearLayout.LayoutParams(colW, Ui.dp(46)));
+                split.addView(left, new LinearLayout.LayoutParams(colW + Ui.dp(28), ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout right = new LinearLayout(m);
+                right.setOrientation(LinearLayout.VERTICAL);
+                split.addView(right, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                content.addView(split, Widgets.MW);
+                slotHost = right;
+                listSlot = slot();
+                shelvesSlot = slot();
+                return;
+            }
+            int H = Math.min((int) (W * 0.92f), Ui.dp(460));
+            FrameLayout hero = new FrameLayout(m);
+            coverArt = new Img.ArtView(m, 0);
+            coverArt.placeholderIcon = Icons.ARTIST;
+            if (item.image != null && !item.image.isEmpty()) coverArt.setUrl(item.image);
+            hero.addView(coverArt, new FrameLayout.LayoutParams(W, H));
+            hero.addView(new Shade(m, 0, 0.45f), new FrameLayout.LayoutParams(W, H));
+            titleView = Ui.text(m, Widgets.nonEmpty(item.title, ""), 34, Ui.heavy, 0xFFFFFFFF);
+            titleView.setSingleLine(false);
+            titleView.setMaxLines(2);
+            FrameLayout.LayoutParams nl = new FrameLayout.LayoutParams(W - Ui.dp(110), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+            nl.setMargins(Ui.dp(20), 0, 0, Ui.dp(22));
+            hero.addView(titleView, nl);
+            FrameLayout play = new FrameLayout(m);
+            play.setBackground(Ui.round(Ui.ACCENT, 100));
+            play.setElevation(Ui.dpf(6));
+            play.addView(new Icons.IconView(m, Icons.PLAY_SMALL, 24, 0xFFFFFFFF), new FrameLayout.LayoutParams(Ui.dp(56), Ui.dp(56)));
+            FrameLayout.LayoutParams pl = new FrameLayout.LayoutParams(Ui.dp(56), Ui.dp(56), Gravity.BOTTOM | Gravity.END);
+            pl.setMargins(0, 0, Ui.dp(20), Ui.dp(20));
+            hero.addView(play, pl);
+            play.setOnClickListener(v -> playAll(0, false));
+            Ui.press(play, 0.9f);
+            content.addView(hero, new LinearLayout.LayoutParams(W, H));
+
+            LinearLayout row = new LinearLayout(m);
+            row.setPadding(Ui.dp(16), Ui.dp(16), Ui.dp(16), 0);
+            row.addView(DetailPage.pillButton(m, Icons.SHUFFLE, m.getString(R.string.shuffle), false, v -> playAll(0, true)),
+                    new LinearLayout.LayoutParams(0, Ui.dp(44), 1f));
+            row.addView(new View(m), new LinearLayout.LayoutParams(Ui.dp(10), 1));
+            row.addView(DetailPage.pillButton(m, Icons.YTM, m.getString(R.string.source_ytm), false, v -> {
+                String bid = YouTubeMusic.normalizeArtistBrowseId(item.id);
+                if (!bid.isEmpty()) {
+                    try { m.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://music.youtube.com/channel/" + bid))); } catch (Exception ignored) {}
+                }
+            }), new LinearLayout.LayoutParams(0, Ui.dp(44), 1f));
+            content.addView(row, Widgets.MW);
+
+            listSlot = slot();
+            shelvesSlot = slot();
         }
 
         private void playAll(int idx, boolean shuffle) {

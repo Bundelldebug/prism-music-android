@@ -207,6 +207,7 @@ final class Player {
     }
 
     static void next() {
+        if (UnifiedPlaylist.isActive()) { UnifiedPlaylist.next(); return; }
         if (local()) { LocalMusic.next(); return; }
         if (ytm()) { YouTubeMusic.next(); return; }
         if (SpotifyWeb.active()) {
@@ -219,6 +220,7 @@ final class Player {
     }
 
     static void prev() {
+        if (UnifiedPlaylist.isActive()) { UnifiedPlaylist.prev(); return; }
         if (local()) { LocalMusic.prev(); return; }
         if (ytm()) { YouTubeMusic.prev(); return; }
         if (position() > 3000) { seek(0); return; }
@@ -244,6 +246,7 @@ final class Player {
     static void toggleShuffle() {
         shuffle = !shuffle;
         optimistic();
+        if (UnifiedPlaylist.isActive()) { UnifiedPlaylist.setShuffle(shuffle); return; }
         if (local()) { LocalMusic.setShuffle(shuffle); return; }
         if (ytm()) { YouTubeMusic.setShuffle(shuffle); return; }
         command("PUT", "/me/player/shuffle?state=" + shuffle, null, null);
@@ -443,6 +446,7 @@ final class Player {
 
     private static void startPlay(JSONObject body, Track preview, String openUri, String fallbackBody) {
         final int seq = ++playSeq;
+        UnifiedPlaylist.clearActive();
         final boolean wasPlaying = playing && !local() && !ytm();
         LocalMusic.stopForOther();
         YouTubeMusic.stopForOther();

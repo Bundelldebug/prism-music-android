@@ -439,4 +439,11 @@
     <string name="bpa_categories">세부 설정</string>
     <string name="bpa_tuning_page">NPU 보정 프로파일 및 상세 튜닝</string>
     <string name="bpa_active_count">%1$d개 활성</string>
+    <string name="upl_title">공용 플레이리스트</string>
+    <string name="upl_subtitle">Spotify · YouTube Music · 로컬 곡을 하나로 묶기</string>
+    <string name="upl_create">새 공용 플레이리스트</string>
+    <string name="upl_add_track">공용 플레이리스트에 추가</string>
+    <string name="upl_added">공용 플레이리스트에 추가했어요</string>
+    <string name="upl_delete">공용 플레이리스트 삭제</string>
+    <string name="upl_empty">Spotify와 YouTube Music 곡을 함께 묶는 공용 플레이리스트를 만들어 보세요.</string>
 </resources>

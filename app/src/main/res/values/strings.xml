@@ -439,4 +439,11 @@
     <string name="bpa_categories">Advanced settings</string>
     <string name="bpa_tuning_page">NPU profiles &amp; detailed tuning</string>
     <string name="bpa_active_count">%1$d active</string>
+    <string name="upl_title">Shared playlists</string>
+    <string name="upl_subtitle">Mix Spotify, YouTube Music &amp; local tracks</string>
+    <string name="upl_create">New shared playlist</string>
+    <string name="upl_add_track">Add to shared playlist</string>
+    <string name="upl_added">Added to shared playlist</string>
+    <string name="upl_delete">Delete shared playlist</string>
+    <string name="upl_empty">Create a shared playlist to mix Spotify and YouTube Music songs together.</string>
 </resources>

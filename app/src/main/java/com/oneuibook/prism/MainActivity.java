@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.26";
+    static final String VERSION = "9.5.27";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -701,6 +701,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             Page p = currentPage();
             if (p instanceof Pages.DetailPage) ((Pages.DetailPage) p).openMenu(anchor);
             else if (p instanceof Pages.YtmDetailPage) ((Pages.YtmDetailPage) p).openMenu(anchor);
+            else if (p instanceof Pages.UnifiedPlaylistDetailPage) ((Pages.UnifiedPlaylistDetailPage) p).openMenu(anchor);
         }
     }
 
@@ -956,6 +957,10 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if ((src == null || src.isEmpty()) && Player.contextUri != null && !Player.contextUri.isEmpty()) {
             src = Player.contextUri;
         }
+        if (src != null && src.startsWith("upl:")) {
+            UnifiedPlaylist.Playlist upl = UnifiedPlaylist.get(this, src.substring(4));
+            if (upl != null) { push(new Pages.UnifiedPlaylistDetailPage(this, upl.id)); return; }
+        }
         if (Player.local()) {
             if (src != null && (src.startsWith("lalbum") || src.startsWith("lartist:"))) {
                 openUri(src, Player.playingSourceTitle != null ? Player.playingSourceTitle : t.album);
@@ -1008,11 +1013,12 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (uri.startsWith("ytm:browse:")) {
             String bid = uri.substring(11);
             Widgets.Item it = new Widgets.Item();
-            it.id = bid;
-            it.uri = uri;
+            boolean isAr = bid.startsWith("UC") || bid.startsWith("MPLA");
+            it.id = isAr ? YouTubeMusic.normalizeArtistBrowseId(bid) : bid;
+            it.uri = "ytm:browse:" + it.id;
             it.title = Widgets.nonEmpty(name, getString(R.string.source_ytm));
             it.type = (bid.startsWith("MPREb_") || bid.startsWith("OLAK")) ? "ytm_album"
-                    : ((bid.startsWith("UC") || bid.startsWith("MPLA")) ? "ytm_artist" : "ytm_playlist");
+                    : (isAr ? "ytm_artist" : "ytm_playlist");
             push(new Pages.YtmDetailPage(this, it));
             return;
         }
@@ -1023,6 +1029,20 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             @Override public void ok(JSONObject o) { openItem(Widgets.Item.of(o)); }
             @Override public void err(int c, String m) {
                 try { openItem(Widgets.Item.of(new JSONObject().put("type", type).put("id", id).put("uri", uri).put("name", name))); } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    /** Resolves a YouTube Music artist channel by name and opens YtmDetailPage when a track lacks artistUri. */
+    void openYtmArtistByName(String artistName) {
+        if (artistName == null || artistName.trim().isEmpty()) return;
+        YouTubeMusic.resolveArtistBrowseId(artistName, bid -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (bid != null && !bid.isEmpty()) {
+                openUri("ytm:browse:" + bid, artistName);
+            } else {
+                onSearch();
+                onQuery(artistName, true);
             }
         });
     }
@@ -1131,11 +1151,14 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                     YouTubeMusic.enqueueNext(tr);
                     Player.toast(R.string.added_to_queue);
                 }));
+                e.add(new GlassMenu.Entry(getString(R.string.upl_add_track), Icons.QUEUE, false, () -> addToUnifiedPlaylistDialog(UnifiedPlaylist.Entry.fromTrack(tr))));
                 if (tr.albumUri != null && tr.albumUri.startsWith("ytm:browse:")) {
                     e.add(new GlassMenu.Entry(getString(R.string.go_album), Icons.ALBUM, false, () -> openUri(tr.albumUri, tr.album)));
                 }
                 if (tr.artistUri != null && tr.artistUri.startsWith("ytm:browse:")) {
                     e.add(new GlassMenu.Entry(getString(R.string.go_artist), Icons.ARTIST, false, () -> openUri(tr.artistUri, tr.artist)));
+                } else if (tr.artist != null && !tr.artist.isEmpty() && !"YouTube Music".equals(tr.artist)) {
+                    e.add(new GlassMenu.Entry(getString(R.string.go_artist), Icons.ARTIST, false, () -> openYtmArtistByName(tr.artist)));
                 }
                 String vid = YouTubeMusic.videoIdOf(tr.uri);
                 if (!vid.isEmpty()) {
@@ -1149,6 +1172,9 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         }
         if (isLoc) {
             Player.Track tr = it.track;
+            if (tr != null) {
+                e.add(new GlassMenu.Entry(getString(R.string.upl_add_track), Icons.QUEUE, false, () -> addToUnifiedPlaylistDialog(UnifiedPlaylist.Entry.fromTrack(tr))));
+            }
             if (tr != null && tr.albumUri != null && !tr.albumUri.isEmpty()) {
                 e.add(new GlassMenu.Entry(getString(R.string.go_album), Icons.ALBUM, false, () -> openUri(tr.albumUri, tr.album)));
             }
@@ -1165,6 +1191,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                 })));
         if (it.uri != null && it.uri.startsWith("spotify:track:")) {
             e.add(new GlassMenu.Entry(getString(R.string.pl_add_track), Icons.QUEUE, false, () -> addToPlaylistDialog(it.uri)));
+            e.add(new GlassMenu.Entry(getString(R.string.upl_add_track), Icons.LIST, false, () -> addToUnifiedPlaylistDialog(UnifiedPlaylist.Entry.fromItem(it))));
         }
         JSONObject al = it.raw == null ? null : it.raw.optJSONObject("album");
         if (al != null && al.optString("uri", null) != null)
@@ -1378,5 +1405,89 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
                         .show();
             });
         });
+    }
+
+    /** Creates a cross-platform Unified Playlist (Spotify + YouTube Music + Local). */
+    void createUnifiedPlaylistDialog(java.util.function.Consumer<UnifiedPlaylist.Playlist> onCreated) {
+        android.widget.LinearLayout form = new android.widget.LinearLayout(this);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        android.widget.EditText nameIn = new android.widget.EditText(this);
+        nameIn.setHint(R.string.pl_name_hint);
+        nameIn.setSingleLine(true);
+        form.addView(nameIn, Widgets.MW);
+        android.widget.EditText descIn = new android.widget.EditText(this);
+        descIn.setHint(R.string.pl_desc_hint);
+        form.addView(descIn, Widgets.MW);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.upl_create)
+                .setView(form)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.create, (d, w) -> {
+                    String name = nameIn.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    UnifiedPlaylist.Playlist pl = UnifiedPlaylist.create(this, name, descIn.getText().toString().trim());
+                    if (pl != null) {
+                        Player.toast(R.string.pl_created);
+                        if (onCreated != null) onCreated.accept(pl);
+                    }
+                }).show();
+    }
+
+    void editUnifiedPlaylistDialog(UnifiedPlaylist.Playlist pl, Runnable onUpdated) {
+        if (pl == null) return;
+        android.widget.LinearLayout form = new android.widget.LinearLayout(this);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        form.setPadding(Ui.dp(22), Ui.dp(12), Ui.dp(22), Ui.dp(4));
+        android.widget.EditText nameIn = new android.widget.EditText(this);
+        nameIn.setHint(R.string.pl_name_hint);
+        nameIn.setSingleLine(true);
+        nameIn.setText(pl.name);
+        form.addView(nameIn, Widgets.MW);
+        android.widget.EditText descIn = new android.widget.EditText(this);
+        descIn.setHint(R.string.pl_desc_hint);
+        descIn.setText(pl.desc);
+        form.addView(descIn, Widgets.MW);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.pl_edit)
+                .setView(form)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.save, (d, w) -> {
+                    String name = nameIn.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    if (UnifiedPlaylist.rename(this, pl.id, name, descIn.getText().toString().trim())) {
+                        Player.toast(R.string.pl_updated);
+                        if (onUpdated != null) onUpdated.run();
+                    }
+                }).show();
+    }
+
+    /** Lets the user add any Spotify, YouTube Music, or Local track to a cross-platform Unified Playlist. */
+    void addToUnifiedPlaylistDialog(UnifiedPlaylist.Entry entry) {
+        if (entry == null || entry.uri == null || entry.uri.isEmpty()) { Player.toast(R.string.action_failed); return; }
+        List<UnifiedPlaylist.Playlist> pls = UnifiedPlaylist.list(this);
+        List<String> names = new ArrayList<>();
+        names.add("+ " + getString(R.string.upl_create));
+        for (UnifiedPlaylist.Playlist p : pls) {
+            names.add(p.name + "  (" + p.tracks.size() + ")");
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.upl_add_track)
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    if (which == 0) {
+                        createUnifiedPlaylistDialog(created -> {
+                            if (created != null && UnifiedPlaylist.addEntry(this, created.id, entry)) {
+                                Player.toast(R.string.upl_added);
+                            }
+                        });
+                        return;
+                    }
+                    UnifiedPlaylist.Playlist target = pls.get(which - 1);
+                    if (UnifiedPlaylist.addEntry(this, target.id, entry)) {
+                        Player.toast(R.string.upl_added);
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 }
