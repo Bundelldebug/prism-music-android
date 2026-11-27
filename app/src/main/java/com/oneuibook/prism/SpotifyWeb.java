@@ -67,6 +67,26 @@ final class SpotifyWeb {
                 candidate.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    static boolean isTrustedSdkOrigin(android.net.Uri org) {
+        if (org == null || !"https".equalsIgnoreCase(org.getScheme())) return false;
+        String host = org.getHost();
+        if (host == null) return false;
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        return "prism.local".equals(h)
+                || "scdn.co".equals(h) || h.endsWith(".scdn.co")
+                || "spotify.com".equals(h) || h.endsWith(".spotify.com")
+                || "spotifycdn.com".equals(h) || h.endsWith(".spotifycdn.com");
+    }
+
+    static boolean shouldAllowNavigation(boolean isMainFrame, android.net.Uri uri) {
+        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
+        String host = uri.getHost();
+        if (host == null) return false;
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        if (isMainFrame) return "prism.local".equals(h);
+        return isTrustedSdkOrigin(uri);
+    }
+
     private static final String HTML = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             // Block browser MediaSession BEFORE Spotify SDK loads so WebView never hijacks lockscreen / Now Bar / volume controls
             + "<script>try{Object.defineProperty(navigator,'mediaSession',{configurable:true,get:function(){return {"
@@ -76,7 +96,7 @@ final class SpotifyWeb {
             + "<link rel='preconnect' href='https://api.spotify.com' crossorigin>"
             + "<link rel='preconnect' href='https://dealer.spotify.com' crossorigin>"
             + "<link rel='preconnect' href='https://spclient.wg.spotify.com' crossorigin>"
-            + "<script src='" + SDK_URL + "'></script></head><body><script>\n"
+            + "<script>\n"
             + "(function(){ var __N = '__PRISM_BRIDGE_NONCE__';\n"
             + "window.onSpotifyWebPlaybackSDKReady = function() {\n"
             // disable SDK's own MediaSession so Android never routes background volume keys to a remote Spotify session
@@ -125,7 +145,7 @@ final class SpotifyWeb {
             + "  })();\n"
             + "};\n"
             + "})();\n"
-            + "</script></body></html>";
+            + "</script><script src='" + SDK_URL + "'></script></head><body></body></html>";
 
     /** The WebView's context: the current activity while one is open, the application after it closes. */
     private static android.content.MutableContextWrapper ctx;
@@ -175,9 +195,11 @@ final class SpotifyWeb {
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     static void start(Activity a, ViewGroup root) {
+        if (web != null && failed) stop();
         if (web != null) { attach(a, root); return; }
         if (!Spotify.loggedIn() || !Spotify.hasScope("streaming")) return;
         failed = false;
+        error = null;
         Spotify.prewarm();
         final File sdkFile = sdkCacheFile(a);
         if (!sdkFile.isFile() || System.currentTimeMillis() - sdkFile.lastModified() > SDK_TTL_MS) refreshSdkCache(sdkFile);
@@ -196,7 +218,8 @@ final class SpotifyWeb {
         s.setMediaPlaybackRequiresUserGesture(false);
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                return true; // Never allow top-level navigation away from local SDK host
+                if (req == null) return true;
+                return !shouldAllowNavigation(req.isForMainFrame(), req.getUrl());
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
                 if (req != null && req.getUrl() != null && SDK_URL.equals(req.getUrl().toString()) && sdkFile.isFile() && sdkFile.length() > 1024) {
@@ -207,12 +230,9 @@ final class SpotifyWeb {
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
-            // Spotify's streams are DRM-protected (Widevine): allow protected media for this page only
+            // Spotify's Web Playback SDK runs Widevine EME DRM inside its https://sdk.scdn.co iframe
             @Override public void onPermissionRequest(PermissionRequest r) {
-                android.net.Uri org = r.getOrigin();
-                if (org == null || !"https".equalsIgnoreCase(org.getScheme())) { r.deny(); return; }
-                String h = org.getHost() == null ? "" : org.getHost().toLowerCase(java.util.Locale.ROOT);
-                if (!"prism.local".equals(h) && !h.endsWith(".spotify.com")) { r.deny(); return; }
+                if (!isTrustedSdkOrigin(r.getOrigin())) { r.deny(); return; }
                 List<String> ok = new ArrayList<>();
                 for (String res : r.getResources())
                     if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(res)) ok.add(res);

@@ -1670,10 +1670,21 @@ public class PrismUiTest {
         assertTrue(Spotify.constantTimeEquals("abc123", "abc123"));
         assertTrue(!Spotify.constantTimeEquals("abc123", "abc124"));
 
-        // 3. SpotifyWeb Bridge nonce rejects forged/missing tokens
+        // 3. SpotifyWeb Bridge nonce rejects forged/missing tokens, allows sdk.scdn.co DRM & iframe, and registers ready callback before SDK script
         SpotifyWeb.Bridge br = new SpotifyWeb.Bridge();
         assertEquals("", br.token("forged-nonce"));
         assertEquals("", br.token(null));
+        assertTrue(SpotifyWeb.isTrustedSdkOrigin(android.net.Uri.parse("https://sdk.scdn.co/embedded/index.html")));
+        assertTrue(SpotifyWeb.isTrustedSdkOrigin(android.net.Uri.parse("https://prism.local/")));
+        assertTrue(SpotifyWeb.isTrustedSdkOrigin(android.net.Uri.parse("https://open.spotify.com/")));
+        assertTrue(!SpotifyWeb.isTrustedSdkOrigin(android.net.Uri.parse("http://sdk.scdn.co/embedded/index.html")));
+        assertTrue(!SpotifyWeb.isTrustedSdkOrigin(android.net.Uri.parse("https://evil.example.com/")));
+        assertTrue(SpotifyWeb.shouldAllowNavigation(false, android.net.Uri.parse("https://sdk.scdn.co/embedded/index.html")));
+        assertTrue(SpotifyWeb.shouldAllowNavigation(true, android.net.Uri.parse("https://prism.local/")));
+        assertTrue(!SpotifyWeb.shouldAllowNavigation(true, android.net.Uri.parse("https://sdk.scdn.co/")));
+        assertTrue(!SpotifyWeb.shouldAllowNavigation(false, android.net.Uri.parse("https://evil.example.com/")));
+        String sdkHtml = SpotifyWeb.buildHtml("Prism");
+        assertTrue(sdkHtml.indexOf("onSpotifyWebPlaybackSDKReady") < sdkHtml.indexOf("spotify-player.js"));
 
         // 4. YouTube Music WebView trusted origin allowlist
         assertTrue(YouTubeMusic.isTrustedGoogleOrYouTubeUrl("https://accounts.google.com/ServiceLogin"));

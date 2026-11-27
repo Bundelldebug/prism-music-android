@@ -465,7 +465,7 @@ final class Player {
         stamp = SystemClock.elapsedRealtime();
         optimistic();
         // play inside Prism (in-app Spotify Connect device) instead of handing off to the Spotify app
-        if (SpotifyWeb.web == null && activity instanceof MainActivity) ((MainActivity) activity).startSpotifyPlayer();
+        if ((SpotifyWeb.web == null || SpotifyWeb.failed) && activity instanceof MainActivity) ((MainActivity) activity).startSpotifyPlayer();
         SpotifyWeb.activate();
         SpotifyWeb.whenReady(() -> {
             if (seq != playSeq) return;
