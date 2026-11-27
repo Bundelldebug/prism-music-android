@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.24";
+    static final String VERSION = "9.5.25";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -632,7 +632,17 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             GlassMenu.show(this, anchor, e);
         } else if (icon == Icons.PROFILE) {
             List<GlassMenu.Entry> e = new ArrayList<>();
-            if (Spotify.loggedIn()) {
+            if (isYtmSource()) {
+                if (YouTubeMusic.signedIn(this)) {
+                    e.add(new GlassMenu.Entry(YouTubeMusic.accountLabel(this), Icons.YTM, false, () -> push(new Settings.YouTubeMusicAccountPage(this))));
+                    e.add(new GlassMenu.Entry(getString(R.string.logout), Icons.LOGOUT, false, () -> {
+                        YouTubeMusic.signOut(this);
+                        reloadAll();
+                    }));
+                } else {
+                    e.add(new GlassMenu.Entry(getString(R.string.ytm_sign_in), Icons.YTM, false, () -> YouTubeMusic.showSignInDialog(this, this::reloadAll)));
+                }
+            } else if (Spotify.loggedIn()) {
                 e.add(new GlassMenu.Entry(Widgets.nonEmpty(Spotify.userName, getString(R.string.connected)), Icons.PROFILE, false, () -> push(new Settings.AccountPage(this))));
                 e.add(new GlassMenu.Entry(getString(R.string.logout), Icons.LOGOUT, false, () -> {
                     Spotify.logout();
@@ -649,6 +659,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         } else if (icon == Icons.MORE) {
             Page p = currentPage();
             if (p instanceof Pages.DetailPage) ((Pages.DetailPage) p).openMenu(anchor);
+            else if (p instanceof Pages.YtmDetailPage) ((Pages.YtmDetailPage) p).openMenu(anchor);
         }
     }
 
@@ -877,6 +888,11 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (it == null) return;
         if (it.action != null) { it.action.run(); return; }
         if ("lalbum".equals(it.type) || "lartist".equals(it.type)) { push(new Pages.LocalListPage(this, it)); return; }
+        if ("ytm_album".equals(it.type) || "ytm_playlist".equals(it.type) || "ytm_artist".equals(it.type)
+                || (it.uri != null && it.uri.startsWith("ytm:browse:"))) {
+            push(new Pages.YtmDetailPage(this, it));
+            return;
+        }
         if ("track".equals(it.type) || "ltrack".equals(it.type) || "ytm_track".equals(it.type)) {
             List<Widgets.Item> one = new ArrayList<>();
             one.add(it);
@@ -908,6 +924,14 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
             return;
         }
         if (Player.ytm()) {
+            if (src != null && src.startsWith("ytm:browse:")) {
+                openUri(src, Widgets.nonEmpty(Player.playingSourceTitle, t.album));
+                return;
+            }
+            if (t.albumUri != null && t.albumUri.startsWith("ytm:browse:")) {
+                openUri(t.albumUri, Widgets.nonEmpty(t.album, t.name));
+                return;
+            }
             if (!isYtmSource()) setSource("ytm");
             if (tab != 0) { dock.select(0, true); switchTab(0); }
             tabs[0].popToRoot();
@@ -928,12 +952,23 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         openLibrarySection("playlists");
     }
 
-    /** Opens spotify:album:… / spotify:artist:… / spotify:playlist:… after fetching its header data. */
+    /** Opens spotify:album:… / spotify:artist:… / spotify:playlist:… / ytm:browse:… / lalbum:… */
     void openUri(String uri, String name) {
         if (uri == null) return;
         if (uri.startsWith("lalbum") || uri.startsWith("lartist:")) {
             List<Player.Track> l = LocalMusic.tracksFor(uri);
             if (!l.isEmpty()) openItem(LocalMusic.group(uri, l, uri.startsWith("lalbum")));
+            return;
+        }
+        if (uri.startsWith("ytm:browse:")) {
+            String bid = uri.substring(11);
+            Widgets.Item it = new Widgets.Item();
+            it.id = bid;
+            it.uri = uri;
+            it.title = Widgets.nonEmpty(name, getString(R.string.source_ytm));
+            it.type = (bid.startsWith("MPREb_") || bid.startsWith("OLAK")) ? "ytm_album"
+                    : ((bid.startsWith("UC") || bid.startsWith("MPLA")) ? "ytm_artist" : "ytm_playlist");
+            push(new Pages.YtmDetailPage(this, it));
             return;
         }
         String[] p = uri.split(":");
@@ -947,18 +982,44 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         });
     }
 
+    void playYtmList(List<Widgets.Item> items, int idx, String sourceUri, String sourceTitle) {
+        if (items == null || items.isEmpty()) return;
+        List<Player.Track> l = new ArrayList<>();
+        int target = 0;
+        for (int i = 0; i < items.size(); i++) {
+            Widgets.Item it = items.get(i);
+            if (it != null && it.track != null && YouTubeMusic.isYtm(it.track)) {
+                if (i == idx) target = l.size();
+                l.add(it.track);
+            }
+        }
+        if (!l.isEmpty()) YouTubeMusic.play(l, target, sourceUri, sourceTitle);
+    }
+
     void playList(List<Widgets.Item> items, int idx, String ctx) {
         if (items == null || items.isEmpty()) return;
         idx = Math.max(0, Math.min(idx, items.size() - 1));
-        if (items.get(0).track != null) {
-            List<Player.Track> l = new ArrayList<>();
-            for (Widgets.Item i : items) if (i.track != null) l.add(i.track);
-            if (!l.isEmpty() && YouTubeMusic.isYtm(l.get(0))) {
-                YouTubeMusic.play(l, idx, ctx);
+        Widgets.Item tapped = items.get(idx);
+        if (tapped != null && tapped.track != null) {
+            if (YouTubeMusic.isYtm(tapped.track)) {
+                playYtmList(items, idx, null, ctx);
                 return;
             }
-            String srcTitle = (!l.isEmpty() && idx < l.size()) ? l.get(idx).album : null;
-            LocalMusic.play(l, idx, ctx, srcTitle);
+            List<Player.Track> l = new ArrayList<>();
+            int target = 0;
+            for (int i = 0; i < items.size(); i++) {
+                Widgets.Item it = items.get(i);
+                if (it != null && it.track != null) {
+                    if (i == idx) target = l.size();
+                    l.add(it.track);
+                }
+            }
+            String srcTitle = (!l.isEmpty() && target < l.size()) ? l.get(target).album : null;
+            LocalMusic.play(l, target, ctx, srcTitle);
+            return;
+        }
+        if (tapped != null && ("ytm_album".equals(tapped.type) || "ytm_playlist".equals(tapped.type) || "ytm_artist".equals(tapped.type))) {
+            openItem(tapped);
             return;
         }
         Widgets.Item cur = items.get(idx);
@@ -1007,14 +1068,51 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     }
 
     void trackMenu(Widgets.Item it, View anchor) {
+        if (it == null || anchor == null) return;
         float[] o = Glass.abs(anchor);
         RectF a = new RectF(o[0], o[1], o[0] + anchor.getWidth(), o[1] + anchor.getHeight());
         List<GlassMenu.Entry> e = new ArrayList<>();
+        boolean isYtm = "ytm_track".equals(it.type) || YouTubeMusic.isYtm(it.track);
+        boolean isLoc = "ltrack".equals(it.type) || LocalMusic.isLocal(it.track);
         e.add(new GlassMenu.Entry(getString(R.string.play), Icons.PLAY_SMALL, false, () -> {
             List<Widgets.Item> one = new ArrayList<>();
             one.add(it);
             playList(one, 0, null);
         }));
+        if (isYtm) {
+            Player.Track tr = it.track;
+            if (tr != null) {
+                e.add(new GlassMenu.Entry(getString(R.string.add_to_queue), Icons.LIST, false, () -> {
+                    YouTubeMusic.enqueueNext(tr);
+                    Player.toast(R.string.added_to_queue);
+                }));
+                if (tr.albumUri != null && tr.albumUri.startsWith("ytm:browse:")) {
+                    e.add(new GlassMenu.Entry(getString(R.string.go_album), Icons.ALBUM, false, () -> openUri(tr.albumUri, tr.album)));
+                }
+                if (tr.artistUri != null && tr.artistUri.startsWith("ytm:browse:")) {
+                    e.add(new GlassMenu.Entry(getString(R.string.go_artist), Icons.ARTIST, false, () -> openUri(tr.artistUri, tr.artist)));
+                }
+                String vid = YouTubeMusic.videoIdOf(tr.uri);
+                if (!vid.isEmpty()) {
+                    e.add(new GlassMenu.Entry(getString(R.string.open_in_ytm), Icons.LINK, false, () -> {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/watch?v=" + vid))); } catch (Exception ignored) {}
+                    }));
+                }
+            }
+            GlassMenu.show(this, a, e);
+            return;
+        }
+        if (isLoc) {
+            Player.Track tr = it.track;
+            if (tr != null && tr.albumUri != null && !tr.albumUri.isEmpty()) {
+                e.add(new GlassMenu.Entry(getString(R.string.go_album), Icons.ALBUM, false, () -> openUri(tr.albumUri, tr.album)));
+            }
+            if (tr != null && tr.artistUri != null && !tr.artistUri.isEmpty()) {
+                e.add(new GlassMenu.Entry(getString(R.string.go_artist), Icons.ARTIST, false, () -> openUri(tr.artistUri, tr.artist)));
+            }
+            GlassMenu.show(this, a, e);
+            return;
+        }
         e.add(new GlassMenu.Entry(getString(R.string.add_to_queue), Icons.LIST, false, () ->
                 Spotify.send("POST", "/me/player/queue?uri=" + Spotify.enc(it.uri), null, new Spotify.Cb() {
                     @Override public void ok(JSONObject o2) { Player.toast(R.string.added_to_queue); }

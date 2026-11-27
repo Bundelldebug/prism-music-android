@@ -662,9 +662,11 @@ final class LocalMusic {
                     .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
             if (!session.isActive()) session.setActive(true);
+            String adLbl = Player.adStatusText(this);
+            String artistLine = !adLbl.isEmpty() ? adLbl : t.artist;
             session.setMetadata(new MediaMetadata.Builder()
                     .putString(MediaMetadata.METADATA_KEY_TITLE, t.name)
-                    .putString(MediaMetadata.METADATA_KEY_ARTIST, t.artist)
+                    .putString(MediaMetadata.METADATA_KEY_ARTIST, artistLine)
                     .putString(MediaMetadata.METADATA_KEY_ALBUM, t.album)
                     .putLong(MediaMetadata.METADATA_KEY_DURATION, t.duration)
                     .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art).build());
@@ -681,7 +683,7 @@ final class LocalMusic {
             Notification n = new Notification.Builder(this, CH)
                     .setSmallIcon(R.drawable.ic_stat_prism)
                     .setContentTitle(t.name)
-                    .setContentText(t.artist)
+                    .setContentText(artistLine)
                     .setLargeIcon(art)
                     .setContentIntent(open)
                     .setDeleteIntent(action("dismiss", 6))

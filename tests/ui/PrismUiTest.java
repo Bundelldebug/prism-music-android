@@ -1455,15 +1455,31 @@ public class PrismUiTest {
             assertEquals("ytm:kJQP7kiw5Fk", Player.track.id);
             assertTrue("playing immediately after play()", Player.playing);
 
-            // Ad state must NOT overwrite duration or pause track
-            YouTubeMusic.handleWebState(gen1, true, 5000L, 15000L, true);
+            // Ad state must NOT overwrite duration or pause track, AND must expose live ad status text
+            YouTubeMusic.handleWebState(gen1, true, 5000L, 15000L, true, 12, false);
             assertEquals(282000L, Player.track.duration);
+            assertTrue("adPlaying must be true during ad", Player.adPlaying);
+            assertEquals(12, Player.adRemainSec);
+            assertTrue("ad status label formatted", Player.adStatusText(app).contains("0:12"));
 
-            // Real playback past 1-minute mark (75s and 180s) updates progress & stays playing
-            YouTubeMusic.handleWebState(gen1, true, 75000L, 281565L, false);
+            // Skippable ad updates status text
+            YouTubeMusic.handleWebState(gen1, true, 10000L, 15000L, true, 5, true);
+            assertTrue("adSkippable must be true", Player.adSkippable);
+
+            // Real playback past 1-minute mark (75s and 180s) clears ad state, updates progress & stays playing
+            YouTubeMusic.handleWebState(gen1, true, 75000L, 281565L, false, 0, false);
+            assertEquals("adPlaying cleared when song starts", false, Player.adPlaying);
+            assertEquals("", Player.adStatusText(app));
             assertTrue("still playing past 1 minute (75s)", Player.playing);
             assertEquals(75000L, Player.progress);
             assertEquals(281565L, Player.track.duration);
+
+            // Ad-blocker URL matcher: blocks ad hosts/paths, NEVER blocks videoplayback or player API
+            assertTrue(YouTubeMusic.isAdUrl("https://googleads.g.doubleclick.net/pagead/id"));
+            assertTrue(YouTubeMusic.isAdUrl("https://m.youtube.com/pagead/interaction/?ai=123"));
+            assertTrue(YouTubeMusic.isAdUrl("https://m.youtube.com/api/stats/ads?foo=bar"));
+            assertEquals(false, YouTubeMusic.isAdUrl("https://rr1---sn-3u-bh2lk.googlevideo.com/videoplayback?expire=123"));
+            assertEquals(false, YouTubeMusic.isAdUrl("https://m.youtube.com/youtubei/v1/player?prettyPrint=false"));
 
             YouTubeMusic.handleWebState(gen1, true, 180000L, 281565L, false);
             assertTrue("still playing at 3 minutes (180s)", Player.playing);
@@ -1500,6 +1516,65 @@ public class PrismUiTest {
             // Stop when switching to another source
             YouTubeMusic.stopForOther();
             assertTrue(YouTubeMusic.playGen > gen2);
+        } finally {
+            YouTubeMusic.testFixtures = null;
+            YouTubeMusic.stopWeb();
+        }
+    }
+
+    @Test public void ytmAlbumOpensDetailInsteadOfPlayingTrack() throws Exception {
+        // Album card that contains BOTH browseEndpoint (MPREb_...) AND an overlay quick-play videoId!
+        // Regression test: MUST be classified as ytm_album (never ytm_track), and tapping it MUST open YtmDetailPage!
+        org.json.JSONObject twoRowAlbum = new org.json.JSONObject("{"
+                + "\"title\":{\"runs\":[{\"text\":\"LILAC\",\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"MPREb_YSzaOfn5zXc\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ALBUM\"}}}}}]},"
+                + "\"subtitle\":{\"runs\":[{\"text\":\"앨범\"},{\"text\":\" • \"},{\"text\":\"아이유(IU)\"}]},"
+                + "\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"MPREb_YSzaOfn5zXc\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ALBUM\"}}}},"
+                + "\"thumbnailOverlay\":{\"musicItemThumbnailOverlayRenderer\":{\"content\":{\"musicPlayButtonRenderer\":{\"playNavigationEndpoint\":{\"watchEndpoint\":{\"videoId\":\"v7bnOxV4jAc\"}}}}}}"
+                + "}");
+        Widgets.Item parsedAlbum = YouTubeMusic.parseTwoRowItemAny(twoRowAlbum);
+        assertNotNull(parsedAlbum);
+        assertEquals("ytm_album", parsedAlbum.type);
+        assertEquals("MPREb_YSzaOfn5zXc", parsedAlbum.id);
+        assertEquals("ytm:browse:MPREb_YSzaOfn5zXc", parsedAlbum.uri);
+        assertTrue("album must not have a direct track", parsedAlbum.track == null);
+
+        // Album list row with overlay videoId also parses as ytm_album
+        org.json.JSONObject rliAlbum = new org.json.JSONObject("{"
+                + "\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"MPREb_SjkPQ0Tt3Gn\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ALBUM\"}}}},"
+                + "\"flexColumns\":[{\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"Love poem\"}]}}},{\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"EP • 아이유\"}]}}}],"
+                + "\"overlay\":{\"musicItemThumbnailOverlayRenderer\":{\"content\":{\"musicPlayButtonRenderer\":{\"playNavigationEndpoint\":{\"watchEndpoint\":{\"videoId\":\"D1PvIWdJ8xo\"}}}}}}"
+                + "}");
+        Widgets.Item parsedRliAlbum = YouTubeMusic.parseListItemAny(rliAlbum);
+        assertNotNull(parsedRliAlbum);
+        assertEquals("ytm_album", parsedRliAlbum.type);
+        assertTrue(parsedRliAlbum.track == null);
+
+        // Actual track row parses as ytm_track AND preserves linked album/artist browseIds
+        org.json.JSONObject rliTrack = new org.json.JSONObject("{"
+                + "\"playlistItemData\":{\"videoId\":\"v7bnOxV4jAc\"},"
+                + "\"flexColumns\":["
+                + "  {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"라일락\",\"navigationEndpoint\":{\"watchEndpoint\":{\"videoId\":\"v7bnOxV4jAc\"}}}]}}},"
+                + "  {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"아이유\",\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"UCTUR0sVEkD8T5MlSHqgaI_Q\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ARTIST\"}}}}},{\"text\":\" • \"},{\"text\":\"LILAC\",\"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"MPREb_YSzaOfn5zXc\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ALBUM\"}}}}}]}}}"
+                + "]}");
+        Widgets.Item parsedTrack = YouTubeMusic.parseListItemAny(rliTrack);
+        assertNotNull(parsedTrack);
+        assertEquals("ytm_track", parsedTrack.type);
+        assertNotNull(parsedTrack.track);
+        assertEquals("ytm:browse:MPREb_YSzaOfn5zXc", parsedTrack.track.albumUri);
+        assertEquals("ytm:browse:UCTUR0sVEkD8T5MlSHqgaI_Q", parsedTrack.track.artistUri);
+
+        // Verify MainActivity.openItem(parsedAlbum) opens YtmDetailPage without starting track playback
+        YouTubeMusic.testFixtures = k -> java.util.Collections.singletonList(parsedTrack);
+        try {
+            Player.track = null;
+            Player.playing = false;
+            ActivityController<MainActivity> c = launch("ko-w393dp-h852dp-xxhdpi");
+            MainActivity a = c.get();
+            a.openItem(parsedAlbum);
+            idle(500);
+            assertTrue("openItem(ytm_album) must push YtmDetailPage", a.currentPage() instanceof Pages.YtmDetailPage);
+            assertTrue("opening album must NOT auto-play a song", Player.track == null && !Player.playing);
+            shot(a, "97_ytm_album_detail");
         } finally {
             YouTubeMusic.testFixtures = null;
             YouTubeMusic.stopWeb();

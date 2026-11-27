@@ -118,6 +118,7 @@ final class Sidebar extends FrameLayout {
             libBox.addView(row(Icons.HEART, m.getString(R.string.lib_liked), v -> m.push(new Pages.YtmListPage(m, m.getString(R.string.lib_liked), "VLLM"))), rowLp());
             libBox.addView(row(Icons.QUEUE, m.getString(R.string.lib_playlists), v -> m.push(new Pages.YtmListPage(m, m.getString(R.string.lib_playlists), "FEmusic_liked_playlists"))), rowLp());
             libBox.addView(row(Icons.ALBUM, m.getString(R.string.lib_albums), v -> m.push(new Pages.YtmListPage(m, m.getString(R.string.lib_albums), "FEmusic_liked_albums"))), rowLp());
+            libBox.addView(row(Icons.ARTIST, m.getString(R.string.lib_artists), v -> m.push(new Pages.YtmListPage(m, m.getString(R.string.lib_artists), "FEmusic_library_corpus_track_artists"))), rowLp());
             libBox.addView(row(Icons.CLOCK, m.getString(R.string.lib_recent), v -> m.push(new Pages.YtmListPage(m, m.getString(R.string.lib_recent), "FEmusic_history"))), rowLp());
             return;
         }

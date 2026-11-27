@@ -55,6 +55,42 @@ final class YouTubeMusic {
     static final String API_BASE = "https://music.youtube.com/youtubei/v1/";
     private static final String PREF_COOKIE = "ytm_cookie";
     private static final String PREF_ACCOUNT = "ytm_account";
+    static final String PREF_ADBLOCK = "ytm_adblock";
+
+    static boolean adBlockEnabled(Context c) {
+        Context ctx = c != null ? c : app;
+        return ctx == null || MainActivity.prefs(ctx).getBoolean(PREF_ADBLOCK, true);
+    }
+
+    /** Matches standard ad-network hosts & YouTube ad-only endpoints (never blocks actual playback/player endpoints). */
+    static boolean isAdUrl(String rawUrl) {
+        if (rawUrl == null || rawUrl.isEmpty()) return false;
+        String u = rawUrl.toLowerCase(Locale.US);
+        if (u.contains("googlevideo.com/videoplayback")) return false;
+        if (u.contains("/youtubei/v1/player") || u.contains("/youtubei/v1/browse") || u.contains("/youtubei/v1/search")) return false;
+        try {
+            android.net.Uri uri = android.net.Uri.parse(u);
+            String host = uri.getHost();
+            if (host != null) {
+                if (host.equals("doubleclick.net") || host.endsWith(".doubleclick.net")
+                        || host.equals("googlesyndication.com") || host.endsWith(".googlesyndication.com")
+                        || host.equals("googleadservices.com") || host.endsWith(".googleadservices.com")
+                        || host.equals("adservice.google.com") || host.endsWith(".adservice.google.com")
+                        || host.equals("imasdk.googleapis.com")) {
+                    return true;
+                }
+            }
+            String path = uri.getPath();
+            if (path != null) {
+                if (path.startsWith("/pagead/") || path.startsWith("/api/stats/ads")
+                        || path.startsWith("/get_midroll_info") || path.startsWith("/ptracking")
+                        || path.startsWith("/pcs/activeview")) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
 
     static final ExecutorService IO = Executors.newFixedThreadPool(4);
     static Context app;
@@ -71,6 +107,27 @@ final class YouTubeMusic {
         final List<Widgets.Item> topArtists = new ArrayList<>();
         final List<Widgets.Item> topAlbums = new ArrayList<>();
         final List<Widgets.Item> playlists = new ArrayList<>();
+    }
+
+    static final class DetailData {
+        String browseId;
+        String type; // ytm_album / ytm_playlist / ytm_artist
+        String title = "";
+        String subtitle = "";
+        String meta = "";
+        String image = "";
+        final List<Widgets.Item> tracks = new ArrayList<>();
+        final Map<String, List<Widgets.Item>> shelves = new LinkedHashMap<>();
+    }
+
+    static final class SearchBundle {
+        final List<Widgets.Item> tracks = new ArrayList<>();
+        final List<Widgets.Item> artists = new ArrayList<>();
+        final List<Widgets.Item> albums = new ArrayList<>();
+        final List<Widgets.Item> playlists = new ArrayList<>();
+        boolean isEmpty() {
+            return tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() && playlists.isEmpty();
+        }
     }
 
     static boolean isYtm(Player.Track t) {
@@ -466,10 +523,187 @@ final class YouTubeMusic {
                         .put("query", query.trim());
                 if (filterParams != null && !filterParams.isEmpty()) req.put("params", filterParams);
                 JSONObject res = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
-                if (res != null) extractTrackItemsRecursive(res, out, 30);
+                if (res != null) extractAnyItemsRecursive(res, out, 30);
             } catch (Exception ignored) {}
             Spotify.MAIN.post(() -> cb.accept(out));
         });
+    }
+
+    /** Full YouTube Music search separated into songs, artists, albums, and playlists. */
+    static void searchAll(String query, Consumer<SearchBundle> cb) {
+        if (query == null || query.trim().isEmpty()) {
+            Spotify.MAIN.post(() -> cb.accept(new SearchBundle()));
+            return;
+        }
+        if (testFixtures != null) {
+            SearchBundle b = new SearchBundle();
+            List<Widgets.Item> list = testFixtures.apply("search:" + query.trim());
+            if (list != null) {
+                for (Widgets.Item it : list) classifyIntoBundle(it, b);
+            }
+            Spotify.MAIN.post(() -> cb.accept(b));
+            return;
+        }
+        IO.execute(() -> {
+            SearchBundle b = new SearchBundle();
+            try {
+                JSONObject req = new JSONObject()
+                        .put("context", webRemixContext())
+                        .put("query", query.trim());
+                JSONObject res = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
+                if (res != null) {
+                    List<Widgets.Item> all = new ArrayList<>();
+                    extractAnyItemsRecursive(res, all, 45);
+                    for (Widgets.Item it : all) classifyIntoBundle(it, b);
+                }
+            } catch (Exception ignored) {}
+            Spotify.MAIN.post(() -> cb.accept(b));
+        });
+    }
+
+    private static void classifyIntoBundle(Widgets.Item it, SearchBundle b) {
+        if (it == null) return;
+        if (it.track != null || "ytm_track".equals(it.type)) {
+            if (!containsId(b.tracks, it.id)) b.tracks.add(it);
+        } else if ("ytm_artist".equals(it.type)) {
+            if (!containsId(b.artists, it.id)) b.artists.add(it);
+        } else if ("ytm_album".equals(it.type)) {
+            if (!containsId(b.albums, it.id)) b.albums.add(it);
+        } else if ("ytm_playlist".equals(it.type)) {
+            if (!containsId(b.playlists, it.id)) b.playlists.add(it);
+        }
+    }
+
+    /** Fetches structured album / playlist / artist details (header art, artist, tracklist, related shelves). */
+    static void fetchDetail(String browseId, String fallbackTitle, String fallbackSubtitle, String fallbackImage, String fallbackType, Consumer<DetailData> cb) {
+        if (browseId == null || browseId.isEmpty()) {
+            Spotify.MAIN.post(() -> cb.accept(null));
+            return;
+        }
+        if (testFixtures != null) {
+            DetailData d = new DetailData();
+            d.browseId = browseId;
+            d.type = fallbackType != null ? fallbackType : typeFromBrowseId(browseId, null);
+            d.title = fallbackTitle != null ? fallbackTitle : "";
+            d.subtitle = fallbackSubtitle != null ? fallbackSubtitle : "";
+            d.image = fallbackImage != null ? fallbackImage : "";
+            List<Widgets.Item> list = testFixtures.apply("browse:" + browseId);
+            if (list == null || list.isEmpty()) list = testFixtures.apply("charts");
+            if (list != null) {
+                for (Widgets.Item it : list) {
+                    if (it.track != null) d.tracks.add(it);
+                }
+            }
+            Spotify.MAIN.post(() -> cb.accept(d));
+            return;
+        }
+        IO.execute(() -> {
+            DetailData d = new DetailData();
+            d.browseId = browseId;
+            d.type = fallbackType != null ? fallbackType : typeFromBrowseId(browseId, null);
+            d.title = fallbackTitle != null ? fallbackTitle : "";
+            d.subtitle = fallbackSubtitle != null ? fallbackSubtitle : "";
+            d.image = fallbackImage != null ? fallbackImage : "";
+            try {
+                JSONObject req = new JSONObject()
+                        .put("context", webRemixContext())
+                        .put("browseId", browseId);
+                JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
+                if (res != null) {
+                    parseDetailResponse(res, d);
+                }
+            } catch (Exception ignored) {}
+            Spotify.MAIN.post(() -> cb.accept(d));
+        });
+    }
+
+    static void parseDetailResponse(JSONObject res, DetailData d) {
+        if (res == null || d == null) return;
+        // 1) Header metadata (musicResponsiveHeaderRenderer / musicDetailHeaderRenderer / musicImmersiveHeaderRenderer)
+        List<JSONObject> hdrs = new ArrayList<>();
+        collectByKey(res, "musicResponsiveHeaderRenderer", hdrs);
+        if (hdrs.isEmpty()) collectByKey(res, "musicDetailHeaderRenderer", hdrs);
+        if (hdrs.isEmpty()) collectByKey(res, "musicImmersiveHeaderRenderer", hdrs);
+        String headerArtist = "";
+        if (!hdrs.isEmpty()) {
+            JSONObject h = hdrs.get(0);
+            String ht = extractText(h.optJSONObject("title"));
+            if (!ht.isEmpty()) d.title = ht;
+            String hs = extractText(h.optJSONObject("subtitle"));
+            String strap = extractText(h.optJSONObject("straplineTextOne"));
+            if (!strap.isEmpty()) {
+                headerArtist = cleanSubtitleArtist(strap);
+                d.subtitle = hs.isEmpty() ? strap : (strap + " · " + hs);
+            } else if (!hs.isEmpty()) {
+                d.subtitle = hs;
+                headerArtist = cleanSubtitleArtist(hs);
+            }
+            String sec = extractText(h.optJSONObject("secondSubtitle"));
+            if (!sec.isEmpty()) d.meta = sec;
+            String img = extractBestThumb(h, "");
+            if (!img.isEmpty() && !img.endsWith("/hqdefault.jpg")) d.image = img;
+        }
+        if (headerArtist.isEmpty() || "YouTube Music".equals(headerArtist)) {
+            if ("ytm_artist".equals(d.type)) headerArtist = d.title;
+            else headerArtist = cleanSubtitleArtist(d.subtitle);
+        }
+
+        // 2) Extract shelves & tracks
+        Map<String, List<Widgets.Item>> rawShelves = new LinkedHashMap<>();
+        extractShelvesAny(res, rawShelves);
+        boolean isArtist = "ytm_artist".equals(d.type);
+        for (Map.Entry<String, List<Widgets.Item>> e : rawShelves.entrySet()) {
+            List<Widgets.Item> tracksInShelf = new ArrayList<>();
+            List<Widgets.Item> entitiesInShelf = new ArrayList<>();
+            for (Widgets.Item it : e.getValue()) {
+                if (it.track != null) tracksInShelf.add(it);
+                else entitiesInShelf.add(it);
+            }
+            if (!tracksInShelf.isEmpty() && d.tracks.isEmpty()) {
+                for (Widgets.Item tr : tracksInShelf) {
+                    decorateAlbumTrack(tr, d, headerArtist);
+                    if (!containsId(d.tracks, tr.id)) d.tracks.add(tr);
+                }
+            } else if (!entitiesInShelf.isEmpty()) {
+                d.shelves.put(e.getKey(), entitiesInShelf);
+            } else if (!tracksInShelf.isEmpty() && !isArtist) {
+                for (Widgets.Item tr : tracksInShelf) {
+                    decorateAlbumTrack(tr, d, headerArtist);
+                    if (!containsId(d.tracks, tr.id)) d.tracks.add(tr);
+                }
+            }
+        }
+        // Fallback: album pages sometimes place tracks directly in musicShelfRenderer without shelf headers
+        if (d.tracks.isEmpty()) {
+            List<Widgets.Item> all = new ArrayList<>();
+            extractAnyItemsRecursive(res, all, 100);
+            for (Widgets.Item it : all) {
+                if (it.track != null) {
+                    decorateAlbumTrack(it, d, headerArtist);
+                    if (!containsId(d.tracks, it.id)) d.tracks.add(it);
+                }
+            }
+        }
+    }
+
+    private static void decorateAlbumTrack(Widgets.Item it, DetailData d, String headerArtist) {
+        if (it == null || it.track == null) return;
+        Player.Track t = it.track;
+        if ((t.artist == null || t.artist.isEmpty() || "YouTube Music".equals(t.artist))
+                && headerArtist != null && !headerArtist.isEmpty() && !"YouTube Music".equals(headerArtist)) {
+            t.artist = headerArtist;
+            it.subtitle = headerArtist;
+        }
+        if ("ytm_album".equals(d.type)) {
+            if (t.album == null || t.album.isEmpty()) t.album = d.title;
+            if (t.albumUri == null || t.albumUri.isEmpty()) t.albumUri = "ytm:browse:" + d.browseId;
+            if (d.image != null && !d.image.isEmpty()
+                    && (t.art == null || t.art.isEmpty() || t.art.contains("i.ytimg.com/vi/"))) {
+                t.art = d.image;
+                t.artSmall = d.image;
+                it.image = d.image;
+            }
+        }
     }
 
     /** Real-time autocomplete suggestions via YouTube/Google Suggest API (no login needed). */
@@ -509,21 +743,7 @@ final class YouTubeMusic {
 
     // ---------------------------------------------------------------- JSON shelf/track extraction
     private static void extractShelves(JSONObject root, Map<String, List<Widgets.Item>> out) {
-        List<JSONObject> shelves = new ArrayList<>();
-        collectByKey(root, "musicCarouselShelfRenderer", shelves);
-        collectByKey(root, "musicShelfRenderer", shelves);
-        for (JSONObject shelf : shelves) {
-            String title = extractText(shelf.optJSONObject("header"));
-            if (title.isEmpty()) title = extractText(shelf.optJSONObject("title"));
-            if (title.isEmpty()) title = "YouTube Music";
-            List<Widgets.Item> items = new ArrayList<>();
-            extractTrackItemsRecursive(shelf, items, 18);
-            if (!items.isEmpty()) {
-                List<Widgets.Item> existing = out.get(title);
-                if (existing == null) out.put(title, items);
-                else existing.addAll(items);
-            }
-        }
+        extractShelvesAny(root, out);
     }
 
     private static void extractShelvesAny(JSONObject root, Map<String, List<Widgets.Item>> out) {
@@ -569,19 +789,91 @@ final class YouTubeMusic {
         }
     }
 
-    private static Widgets.Item parseListItemAny(JSONObject rli) {
+    /** Extracts browseEndpoint's pageType (e.g. MUSIC_PAGE_TYPE_ALBUM / ARTIST / PLAYLIST). */
+    private static String pageTypeOf(JSONObject browseEndpoint) {
+        if (browseEndpoint == null) return "";
+        JSONObject cfg = browseEndpoint.optJSONObject("browseEndpointContextSupportedConfigs");
+        JSONObject mc = cfg == null ? null : cfg.optJSONObject("browseEndpointContextMusicConfig");
+        return mc == null ? "" : mc.optString("pageType", "");
+    }
+
+    private static String typeFromBrowseId(String browseId, String pageType) {
+        if (pageType != null && !pageType.isEmpty()) {
+            if ("MUSIC_PAGE_TYPE_ALBUM".equals(pageType)) return "ytm_album";
+            if ("MUSIC_PAGE_TYPE_ARTIST".equals(pageType) || "MUSIC_PAGE_TYPE_USER_CHANNEL".equals(pageType)) return "ytm_artist";
+            if ("MUSIC_PAGE_TYPE_PLAYLIST".equals(pageType)) return "ytm_playlist";
+        }
+        if (browseId == null) return "ytm_playlist";
+        if (browseId.startsWith("MPREb_") || browseId.startsWith("OLAK")) return "ytm_album";
+        if (browseId.startsWith("UC") || browseId.startsWith("MPLA")) return "ytm_artist";
+        return "ytm_playlist";
+    }
+
+    private static boolean isPlayableTrackPageType(String pageType, String browseId) {
+        if ("MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE".equals(pageType)
+                || "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE".equals(pageType)) {
+            return true;
+        }
+        return browseId != null && browseId.startsWith("MPED");
+    }
+
+    /**
+     * Parses a musicResponsiveListItemRenderer with browseEndpoint checked FIRST so albums, playlists, and artists
+     * never get misclassified as tracks when they contain a quick-play overlay or menu videoId.
+     */
+    static Widgets.Item parseListItemAny(JSONObject rli) {
+        if (rli == null) return null;
+        JSONObject nav = rli.optJSONObject("navigationEndpoint");
+        JSONObject be = nav == null ? null : nav.optJSONObject("browseEndpoint");
+        JSONArray cols = rli.optJSONArray("flexColumns");
+        if (be == null && cols != null && cols.length() > 0) {
+            JSONObject c0Nav = firstRunNavEndpoint(cols.optJSONObject(0));
+            if (c0Nav != null) be = c0Nav.optJSONObject("browseEndpoint");
+        }
+        if (be != null) {
+            String bid = be.optString("browseId", "");
+            String pt = pageTypeOf(be);
+            if (!bid.isEmpty() && !bid.startsWith("FE") && !isPlayableTrackPageType(pt, bid)) {
+                String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
+                String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
+                if (!title.isEmpty()) {
+                    return buildBrowseItem(bid, pt, title, sub, extractBestThumb(rli, ""));
+                }
+            }
+        }
         Widgets.Item tr = parseListItem(rli);
         if (tr != null) return tr;
         String bid = findBrowseId(rli);
         if (bid.isEmpty()) return null;
-        JSONArray cols = rli.optJSONArray("flexColumns");
         String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
         String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
         if (title.isEmpty()) return null;
-        return buildBrowseItem(bid, title, sub, extractBestThumb(rli, ""));
+        return buildBrowseItem(bid, "", title, sub, extractBestThumb(rli, ""));
     }
 
-    private static Widgets.Item parseTwoRowItemAny(JSONObject two) {
+    /**
+     * Parses a musicTwoRowItemRenderer (Home/Explore/Recap/Library cards) checking its primary navigationEndpoint
+     * FIRST so album/playlist/artist cards open their detail screen instead of playing an embedded preview videoId!
+     */
+    static Widgets.Item parseTwoRowItemAny(JSONObject two) {
+        if (two == null) return null;
+        JSONObject nav = two.optJSONObject("navigationEndpoint");
+        JSONObject be = nav == null ? null : nav.optJSONObject("browseEndpoint");
+        if (be == null) {
+            JSONObject tNav = firstRunNavEndpoint(two.optJSONObject("title"));
+            if (tNav != null) be = tNav.optJSONObject("browseEndpoint");
+        }
+        if (be != null) {
+            String bid = be.optString("browseId", "");
+            String pt = pageTypeOf(be);
+            if (!bid.isEmpty() && !bid.startsWith("FE") && !isPlayableTrackPageType(pt, bid)) {
+                String title = extractText(two.optJSONObject("title"));
+                String sub = extractText(two.optJSONObject("subtitle"));
+                if (!title.isEmpty()) {
+                    return buildBrowseItem(bid, pt, title, sub, extractBestThumb(two, ""));
+                }
+            }
+        }
         Widgets.Item tr = parseTwoRowItem(two);
         if (tr != null) return tr;
         String bid = findBrowseId(two);
@@ -589,14 +881,26 @@ final class YouTubeMusic {
         String title = extractText(two.optJSONObject("title"));
         String sub = extractText(two.optJSONObject("subtitle"));
         if (title.isEmpty()) return null;
-        return buildBrowseItem(bid, title, sub, extractBestThumb(two, ""));
+        return buildBrowseItem(bid, "", title, sub, extractBestThumb(two, ""));
     }
 
-    private static Widgets.Item buildBrowseItem(String browseId, String title, String subtitle, String thumb) {
+    private static JSONObject firstRunNavEndpoint(JSONObject node) {
+        if (node == null) return null;
+        JSONObject textObj = node.optJSONObject("text");
+        if (textObj == null) {
+            JSONObject fcr = node.optJSONObject("musicResponsiveListItemFlexColumnRenderer");
+            if (fcr != null) textObj = fcr.optJSONObject("text");
+        }
+        if (textObj == null) textObj = node;
+        JSONArray runs = textObj.optJSONArray("runs");
+        if (runs == null || runs.length() == 0) return null;
+        JSONObject r0 = runs.optJSONObject(0);
+        return r0 == null ? null : r0.optJSONObject("navigationEndpoint");
+    }
+
+    private static Widgets.Item buildBrowseItem(String browseId, String pageType, String title, String subtitle, String thumb) {
         Widgets.Item it = new Widgets.Item();
-        if (browseId.startsWith("MPREb_")) it.type = "ytm_album";
-        else if (browseId.startsWith("UC") || browseId.startsWith("MPLA")) it.type = "ytm_artist";
-        else it.type = "ytm_playlist";
+        it.type = typeFromBrowseId(browseId, pageType);
         it.id = browseId;
         it.uri = "ytm:browse:" + browseId;
         it.title = title;
@@ -613,7 +917,9 @@ final class YouTubeMusic {
             if (b.equals("VLLM") || b.startsWith("VL")) return b;
             java.util.Iterator<String> it = o.keys();
             while (it.hasNext()) {
-                String f = findBrowseId(o.opt(it.next()));
+                String k = it.next();
+                if ("menu".equals(k)) continue;
+                String f = findBrowseId(o.opt(k));
                 if (!f.isEmpty()) return f;
             }
         } else if (node instanceof JSONArray) {
@@ -638,58 +944,96 @@ final class YouTubeMusic {
         }
     }
 
-    private static void extractTrackItemsRecursive(Object node, List<Widgets.Item> out, int limit) {
-        if (out.size() >= limit || node == null) return;
-        if (node instanceof JSONObject) {
-            JSONObject o = (JSONObject) node;
-            JSONObject rli = o.optJSONObject("musicResponsiveListItemRenderer");
-            if (rli != null) {
-                Widgets.Item it = parseListItem(rli);
-                if (it != null && !containsId(out, it.id)) out.add(it);
-                return;
-            }
-            JSONObject two = o.optJSONObject("musicTwoRowItemRenderer");
-            if (two != null) {
-                Widgets.Item it = parseTwoRowItem(two);
-                if (it != null && !containsId(out, it.id)) out.add(it);
-                return;
-            }
-            java.util.Iterator<String> it = o.keys();
-            while (it.hasNext() && out.size() < limit) extractTrackItemsRecursive(o.opt(it.next()), out, limit);
-        } else if (node instanceof JSONArray) {
-            JSONArray a = (JSONArray) node;
-            for (int i = 0; i < a.length() && out.size() < limit; i++) extractTrackItemsRecursive(a.opt(i), out, limit);
-        }
-    }
-
     private static boolean containsId(List<Widgets.Item> list, String id) {
         if (id == null) return false;
         for (Widgets.Item x : list) if (id.equals(x.id)) return true;
         return false;
     }
 
+    /** Extracts linked artist & album browseIds/names from track subtitle runs so "Go to album/artist" works on YTM. */
+    private static void enrichTrackLinks(Object node, Player.Track tr) {
+        if (node == null || tr == null) return;
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            JSONArray runs = o.optJSONArray("runs");
+            if (runs != null) {
+                for (int i = 0; i < runs.length(); i++) {
+                    JSONObject r = runs.optJSONObject(i);
+                    if (r == null) continue;
+                    JSONObject nav = r.optJSONObject("navigationEndpoint");
+                    JSONObject be = nav == null ? null : nav.optJSONObject("browseEndpoint");
+                    if (be == null) continue;
+                    String bid = be.optString("browseId", "");
+                    String pt = pageTypeOf(be);
+                    String txt = r.optString("text", "").trim();
+                    if (bid.isEmpty() || txt.isEmpty()) continue;
+                    if ("MUSIC_PAGE_TYPE_ALBUM".equals(pt) || bid.startsWith("MPREb_")) {
+                        if (tr.albumUri == null || tr.albumUri.isEmpty()) {
+                            tr.albumUri = "ytm:browse:" + bid;
+                            if (tr.album == null || tr.album.isEmpty()) tr.album = txt;
+                        }
+                    } else if ("MUSIC_PAGE_TYPE_ARTIST".equals(pt) || bid.startsWith("UC")) {
+                        if (tr.artistUri == null || tr.artistUri.isEmpty()) {
+                            tr.artistUri = "ytm:browse:" + bid;
+                        }
+                    }
+                }
+                return;
+            }
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if ("menu".equals(k) || "overlay".equals(k) || "thumbnailOverlay".equals(k)) continue;
+                enrichTrackLinks(o.opt(k), tr);
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) enrichTrackLinks(a.opt(i), tr);
+        }
+    }
+
     private static Widgets.Item parseListItem(JSONObject rli) {
-        String vid = findVideoId(rli);
-        if (vid.isEmpty()) return null;
+        String vid = "";
+        JSONObject pid = rli.optJSONObject("playlistItemData");
+        if (pid != null) vid = pid.optString("videoId", "");
         JSONArray cols = rli.optJSONArray("flexColumns");
+        if (vid.isEmpty() && cols != null && cols.length() > 0) {
+            JSONObject c0Nav = firstRunNavEndpoint(cols.optJSONObject(0));
+            JSONObject we = c0Nav == null ? null : c0Nav.optJSONObject("watchEndpoint");
+            if (we != null) vid = we.optString("videoId", "");
+        }
+        if (vid.isEmpty()) vid = findVideoId(rli);
+        if (vid.isEmpty()) return null;
         String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
         String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
         if (title.isEmpty()) return null;
         String artist = cleanSubtitleArtist(sub);
         long durMs = parseDurationFromText(sub);
+        if (durMs <= 0) {
+            String fixed = extractText(rli.optJSONArray("fixedColumns"));
+            durMs = parseDurationFromText(fixed);
+        }
         String thumb = extractBestThumb(rli, vid);
-        return buildItem(vid, title, artist, "", thumb, durMs);
+        Widgets.Item it = buildItem(vid, title, artist, "", thumb, durMs);
+        enrichTrackLinks(cols, it.track);
+        return it;
     }
 
     private static Widgets.Item parseTwoRowItem(JSONObject two) {
-        String vid = findVideoId(two);
+        String vid = "";
+        JSONObject nav = two.optJSONObject("navigationEndpoint");
+        JSONObject we = nav == null ? null : nav.optJSONObject("watchEndpoint");
+        if (we != null) vid = we.optString("videoId", "");
+        if (vid.isEmpty()) vid = findVideoId(two);
         if (vid.isEmpty()) return null;
         String title = extractText(two.optJSONObject("title"));
         String sub = extractText(two.optJSONObject("subtitle"));
         if (title.isEmpty()) return null;
         String artist = cleanSubtitleArtist(sub);
         String thumb = extractBestThumb(two, vid);
-        return buildItem(vid, title, artist, "", thumb, 0);
+        Widgets.Item it = buildItem(vid, title, artist, "", thumb, 0);
+        enrichTrackLinks(two.optJSONObject("subtitle"), it.track);
+        return it;
     }
 
     static Widgets.Item buildItem(String videoId, String title, String artist, String album, String thumb, long durationMs) {
@@ -861,6 +1205,8 @@ final class YouTubeMusic {
             + "window.__prismSwitchUntil=0;"
             + "window.__prismVol=100;"
             + "window.__prismPan=0;"
+            + "window.__prismAdBlock=true;"
+            + "window.__prismWasAd=false;"
             + "function suppressMS(){"
             + "  try{if(navigator.mediaSession){"
             + "    navigator.mediaSession.metadata=null;"
@@ -885,6 +1231,14 @@ final class YouTubeMusic {
             + "  }catch(e){}"
             + "}"
             + "window.__prismSetBalance=function(volPct,pan){window.__prismVol=volPct;window.__prismPan=pan;applyPan();};"
+            + "window.__prismSetAdBlock=function(on){window.__prismAdBlock=!!on;};"
+            + "window.__prismSkipAd=function(){"
+            + "  try{"
+            + "    var b=document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button,.ytp-ad-skip-button-modern');"
+            + "    if(b&&b.offsetParent!==null&&!b.disabled){b.click();return true;}"
+            + "  }catch(e){}"
+            + "  return false;"
+            + "};"
             + "window.__prismSyncTarget=function(vid,startSec,gen,want){"
             + "  window.__prismTargetVid=vid||'';"
             + "  window.__prismGen=gen||0;"
@@ -959,11 +1313,25 @@ final class YouTubeMusic {
             + "  try{if(p&&p.getCurrentTime)pCt=p.getCurrentTime()||0;}catch(e){}"
             + "  var vDur=(v&&isFinite(v.duration))?v.duration:0;"
             + "  var vCt=(v&&isFinite(v.currentTime))?v.currentTime:0;"
+            + "  var adRem=ad&&vDur>0?Math.max(0,Math.ceil(vDur-vCt)):0;"
+            + "  var skipBtn=ad?document.querySelector('.ytp-skip-ad-button,.ytp-ad-skip-button,.ytp-ad-skip-button-modern'):null;"
+            + "  var canSkip=!!(skipBtn&&skipBtn.offsetParent!==null&&!skipBtn.disabled);"
+            + "  if(ad){"
+            + "    window.__prismWasAd=true;"
+            + "    if(window.__prismAdBlock){"
+            + "      if(canSkip){try{skipBtn.click();}catch(e){}}"
+            + "      try{if(v){v.muted=true;if(isFinite(vDur)&&vDur>0.5&&vCt<vDur-0.25){v.playbackRate=16;v.currentTime=Math.max(vCt,vDur-0.15);}}}catch(e){}"
+            + "    }"
+            + "  }else if(window.__prismWasAd){"
+            + "    window.__prismWasAd=false;"
+            + "    try{if(v){v.playbackRate=1;v.muted=false;v.volume=Math.max(0,Math.min(1,window.__prismVol/100));}}catch(e){}"
+            + "    try{if(p&&p.unMute)p.unMute();if(p&&p.setVolume)p.setVolume(window.__prismVol);}catch(e){}"
+            + "  }"
             + "  var target=window.__prismTargetVid;"
             + "  if(window.__prismWantPlay&&window.__prismNudgeLeft>0){"
-            + "    if((v&&(v.paused||v.muted))||pState===-1||pState===5||pState===2){"
-            + "      try{if(p&&p.unMute)p.unMute();if(p&&p.setVolume)p.setVolume(window.__prismVol);if(p&&p.playVideo)p.playVideo();}catch(e){}"
-            + "      try{if(v){v.muted=false;if(v.paused)v.play().catch(function(){});}}catch(e){}"
+            + "    if((v&&(v.paused||(!ad&&v.muted)))||pState===-1||pState===5||pState===2){"
+            + "      try{if(!ad&&p&&p.unMute)p.unMute();if(!ad&&p&&p.setVolume)p.setVolume(window.__prismVol);if(p&&p.playVideo)p.playVideo();}catch(e){}"
+            + "      try{if(v){if(!ad)v.muted=false;if(v.paused)v.play().catch(function(){});}}catch(e){}"
             + "      window.__prismNudgeLeft--;"
             + "    }else if(!ad&&v&&!v.paused&&vCt>0.15){"
             + "      window.__prismNudgeLeft=0;"
@@ -989,7 +1357,7 @@ final class YouTubeMusic {
             + "  if(!ad&&window.__prismSawTarget&&(pState===0||(v&&v.ended&&dur>5)||(dur>10&&ct>=dur-0.35&&playing))){"
             + "    fireEnded();return;"
             + "  }"
-            + "  try{PrismYtm.onState(window.__prismGen,playing,Math.round(ct*1000),Math.round(dur*1000),ad);}catch(e){}"
+            + "  try{PrismYtm.onState(window.__prismGen,playing,Math.round(ct*1000),Math.round(dur*1000),ad,adRem,canSkip);}catch(e){}"
             + "}"
             + "setInterval(tick,350);"
             + "tick();"
@@ -1063,6 +1431,13 @@ final class YouTubeMusic {
             cm.setAcceptThirdPartyCookies(web, true);
         } catch (Throwable ignored) {}
         web.setWebViewClient(new WebViewClient() {
+            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, android.webkit.WebResourceRequest request) {
+                if (request != null && request.getUrl() != null && adBlockEnabled(app) && isAdUrl(request.getUrl().toString())) {
+                    return new android.webkit.WebResourceResponse("text/plain", "utf-8", new java.io.ByteArrayInputStream(new byte[0]));
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+
             @Override public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
                 if (request == null || request.getUrl() == null) return true;
                 String u = request.getUrl().toString();
@@ -1107,13 +1482,33 @@ final class YouTubeMusic {
         final int g = playGen;
         final double sk = pendingSeekSec;
         final boolean wp = wantPlaying;
-        view.evaluateJavascript(BRIDGE_JS + "window.__prismSyncTarget&&window.__prismSyncTarget('" + vid + "'," + sk + "," + g + "," + wp + ");", null);
+        final boolean ab = adBlockEnabled(app);
+        view.evaluateJavascript(BRIDGE_JS
+                + "window.__prismSetAdBlock&&window.__prismSetAdBlock(" + ab + ");"
+                + "window.__prismSyncTarget&&window.__prismSyncTarget('" + vid + "'," + sk + "," + g + "," + wp + ");", null);
         applyChannelBalance();
     }
 
+    static void syncAdBlock() {
+        final boolean ab = adBlockEnabled(app);
+        Spotify.MAIN.post(() -> {
+            if (web != null) {
+                web.evaluateJavascript("window.__prismSetAdBlock&&window.__prismSetAdBlock(" + ab + ");", null);
+            }
+        });
+    }
+
+    static void skipAd() {
+        Spotify.MAIN.post(() -> {
+            if (web != null) {
+                web.evaluateJavascript("window.__prismSkipAd&&window.__prismSkipAd();", null);
+            }
+        });
+    }
+
     static final class WebBridge {
-        @JavascriptInterface public void onState(int gen, boolean isPlaying, long posMs, long durMs, boolean adShowing) {
-            Spotify.MAIN.post(() -> handleWebState(gen, isPlaying, posMs, durMs, adShowing));
+        @JavascriptInterface public void onState(int gen, boolean isPlaying, long posMs, long durMs, boolean adShowing, int adRemainSec, boolean adSkippable) {
+            Spotify.MAIN.post(() -> handleWebState(gen, isPlaying, posMs, durMs, adShowing, adRemainSec, adSkippable));
         }
 
         @JavascriptInterface public void onEnded(int gen) {
@@ -1121,13 +1516,29 @@ final class YouTubeMusic {
         }
     }
 
-    /** Package-visible state handler (also directly exercised by Robolectric regression tests). */
+    /** Convenience overload for tests and callers without ad countdown metadata. */
     static void handleWebState(int gen, boolean isPlaying, long posMs, long durMs, boolean adShowing) {
+        handleWebState(gen, isPlaying, posMs, durMs, adShowing, 0, false);
+    }
+
+    /** Package-visible state handler (also directly exercised by Robolectric regression tests). */
+    static void handleWebState(int gen, boolean isPlaying, long posMs, long durMs, boolean adShowing, int adRemainSec, boolean adSkippable) {
         if (gen != playGen || !isYtm(Player.track)) return;
+        boolean adChanged = (Player.adPlaying != adShowing)
+                || (adShowing && (Player.adRemainSec != Math.max(0, adRemainSec) || Player.adSkippable != adSkippable));
+        Player.adPlaying = adShowing;
+        Player.adRemainSec = adShowing ? Math.max(0, adRemainSec) : 0;
+        Player.adSkippable = adShowing && adSkippable;
         if (!adShowing && durMs > 1000L && Player.track != null) {
             Player.track.duration = durMs;
         }
-        if (adShowing) return;
+        if (adShowing) {
+            if (adChanged) {
+                Player.notifyAll0();
+                if (app != null) LocalMusic.PlaybackService.update(app);
+            }
+            return;
+        }
         if (isPlaying && posMs > 100L) {
             if (everStartedGen != gen) {
                 everStartedGen = gen;
@@ -1139,7 +1550,7 @@ final class YouTubeMusic {
         boolean newPlaying = isPlaying || (!allowPauseSync && wantPlaying);
         if (!isPlaying && allowPauseSync) wantPlaying = false;
         long prevPos = Player.position();
-        boolean changed = (newPlaying != Player.playing) || (posMs >= 0 && Math.abs(posMs - prevPos) > 1200L);
+        boolean changed = adChanged || (newPlaying != Player.playing) || (posMs >= 0 && Math.abs(posMs - prevPos) > 1200L);
         Player.playing = newPlaying;
         if (posMs >= 0) {
             Player.progress = posMs;
@@ -1159,12 +1570,16 @@ final class YouTubeMusic {
     }
 
     static void play(List<Player.Track> list, int idx, String sourceTitle) {
+        play(list, idx, null, sourceTitle);
+    }
+
+    static void play(List<Player.Track> list, int idx, String sourceUri, String sourceTitle) {
         if (list == null || list.isEmpty()) return;
         if (!Player.local() && !Player.ytm() && Player.playing && Spotify.loggedIn()) {
             Spotify.send("PUT", "/me/player/pause", null, null);
         }
         LocalMusic.stopForOther();
-        Player.playingSourceUri = "ytm:queue";
+        Player.playingSourceUri = (sourceUri != null && !sourceUri.isEmpty()) ? sourceUri : "ytm:queue";
         Player.playingSourceTitle = (sourceTitle == null || sourceTitle.isEmpty()) ? "YouTube Music" : sourceTitle;
         original.clear();
         original.addAll(list);
@@ -1173,6 +1588,20 @@ final class YouTubeMusic {
         index = Math.max(0, Math.min(idx, list.size() - 1));
         if (Player.shuffle) shuffleRest();
         start(0);
+    }
+
+    /** Appends a track right after the currently playing track in the YTM queue (or starts it if queue is empty). */
+    static void enqueueNext(Player.Track t) {
+        if (t == null) return;
+        if (queue.isEmpty()) {
+            List<Player.Track> one = new ArrayList<>();
+            one.add(t);
+            play(one, 0, null, t.name);
+            return;
+        }
+        int ins = Math.min(queue.size(), index + 1);
+        queue.add(ins, t);
+        original.add(t);
     }
 
     private static void shuffleRest() {
@@ -1208,6 +1637,7 @@ final class YouTubeMusic {
         loadRetryDone = false;
 
         boolean changed = Player.track == null || !t.id.equals(Player.track.id);
+        Player.clearAdState();
         Player.track = t;
         Player.playing = true;
         Player.progress = seekTo;
@@ -1284,6 +1714,7 @@ final class YouTubeMusic {
     static void stopForOther() {
         playGen++;
         wantPlaying = false;
+        Player.clearAdState();
         if (web != null) {
             web.evaluateJavascript("window.__prismPause&&window.__prismPause();", null);
         }
@@ -1331,6 +1762,7 @@ final class YouTubeMusic {
     }
 
     static void seek(long ms) {
+        if (Player.adPlaying) return;
         long clamped = Math.max(0L, ms);
         Player.progress = clamped;
         Player.stamp = SystemClock.elapsedRealtime();

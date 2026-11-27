@@ -176,7 +176,14 @@ final class NowPlaying extends FrameLayout {
         chip.setOnClickListener(v -> deviceMenu(v));
         content.addView(chip);
         audioBadge = new AudioBadge(m);
-        audioBadge.setOnClickListener(v -> audioInfoSheet(v));
+        audioBadge.setOnClickListener(v -> {
+            if (Player.adPlaying && Player.ytm()) {
+                if (Player.adSkippable) YouTubeMusic.skipAd();
+                else Player.toast(R.string.ytm_ad_playing);
+                return;
+            }
+            audioInfoSheet(v);
+        });
         audioBadge.setVisibility(GONE);
         content.addView(audioBadge);
 
@@ -1284,6 +1291,11 @@ final class NowPlaying extends FrameLayout {
         star.set(Player.liked ? Icons.HEART_FILL : Icons.HEART, getVisibility() == VISIBLE);
         repeatBtn.set("track".equals(Player.repeat) ? Icons.REPEAT_ONE : Icons.REPEAT, getVisibility() == VISIBLE);
         star.setVisibility(Player.local() ? INVISIBLE : VISIBLE);
+        if (Player.track != null) {
+            String adLbl = Player.adStatusText(getContext());
+            artist.setText(!adLbl.isEmpty() ? adLbl : Player.track.artist);
+            artist.setTextColor(!adLbl.isEmpty() ? 0xFFFFD56B : 0xB3FFFFFF);
+        }
         chipText.setText(Player.outputName(getContext()));
         refreshAudioBadge();
         showTotal = Settings.pref(getContext(), "show_total", false);
@@ -1339,6 +1351,18 @@ final class NowPlaying extends FrameLayout {
             }
         }
         chipIcon.set(AudioInfo.deviceIcon(spec), false);
+        String adLbl = Player.adStatusText(getContext());
+        if (!adLbl.isEmpty()) {
+            boolean changed = !adLbl.equals(lastBadgeLabel) || lastBadgeTier != AudioInfo.TIER_GOLD;
+            lastBadgeLabel = adLbl;
+            lastBadgeTier = AudioInfo.TIER_GOLD;
+            if (changed) {
+                audioBadge.update(adLbl, AudioInfo.TIER_GOLD);
+                if (!GlassMenu.isSourceHidden(audioBadge)) audioBadge.setVisibility(VISIBLE);
+                content.requestLayout();
+            }
+            return;
+        }
         String fmt = spec.formatLine();
         String shortFmt = fmt.replace(" · ", " ").replace(" / ", "/").replace("USB Bit-Perfect", "USB BP");
         String label = "";

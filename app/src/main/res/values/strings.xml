@@ -267,7 +267,7 @@
     <string name="pl_relogin_scope">Playlist edit permission is needed. Please sign in to Spotify again in Settings.</string>
     <string name="create">Create</string>
     <string name="npu_group">NPU Audio Enhancement</string>
-    <string name="npu_title">Spotify NPU Audio Enhancer</string>
+    <string name="npu_title">NPU Audio Enhancer</string>
     <string name="npu_supported">Supported SoC detected · %1$s</string>
     <string name="npu_unsupported">Unsupported SoC (%1$s) · Requires Snapdragon 8 Gen 2 / Dimensity 8400·9300 / Exynos 2400 / Tensor G4 or newer</string>
     <string name="npu_active">Active · %1$s (%2$s)</string>
@@ -405,7 +405,7 @@
     <string name="bpa_buf_low">Low (20 ms)</string>
     <string name="bpa_buf_std">Standard (45 ms)</string>
     <string name="bpa_buf_safe">Stable (90 ms)</string>
-    <string name="bpa_dsp_section">Audiophile DSP &amp; Filter</string>
+    <string name="bpa_dsp_section">Sound Fine-Tuning</string>
     <string name="bpa_dither">Dithering</string>
     <string name="bpa_dither_off">Off</string>
     <string name="bpa_dither_tpdf">TPDF</string>
@@ -414,10 +414,25 @@
     <string name="bpa_filter_sharp">Sharp Roll-off</string>
     <string name="bpa_filter_slow">Slow Roll-off</string>
     <string name="bpa_filter_min">Minimum Phase</string>
-    <string name="bpa_replaygain">ReplayGain auto leveling</string>
+    <string name="bpa_replaygain">Volume leveling (ReplayGain)</string>
     <string name="bpa_crossfeed">Headphone crossfeed</string>
     <string name="bpa_mono">Mono downmix</string>
     <string name="bpa_balance">Channel balance (L / R)</string>
     <string name="bpa_balance_center">Center</string>
-    <string name="bpa_dac_specs">DAC hardware profile</string>
+    <string name="bpa_dac_specs">DAC hardware</string>
+    <string name="open_in_ytm">Open in YouTube Music</string>
+    <string name="ytm_lib_signin">Sign in with Google to view your YouTube Music library.</string>
+    <string name="recap_official_playlists">Official Recap playlists</string>
+    <string name="bpa_step_source">Source</string>
+    <string name="bpa_step_engine">Audio processing</string>
+    <string name="bpa_step_output">Output device</string>
+    <string name="bpa_proc_bp">USB Bit-Perfect Bypass</string>
+    <string name="bpa_proc_direct">USB Direct</string>
+    <string name="bpa_proc_default">System audio output</string>
+    <string name="ytm_ad_playing">Ad playing</string>
+    <string name="ytm_ad_playing_time">Ad playing · %1$s</string>
+    <string name="ytm_ad_skip">Skip ad</string>
+    <string name="ytm_ad_skip_time">Skip ad · %1$s</string>
+    <string name="ytm_adblock">YouTube Music ad blocker</string>
+    <string name="ytm_adblock_note">Blocks ad-network requests during YouTube Music playback and automatically mutes or skips ads when possible.</string>
 </resources>

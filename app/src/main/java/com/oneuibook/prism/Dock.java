@@ -744,12 +744,14 @@ final class Dock extends FrameLayout {
             float avail = rightLimit - tx;
             if (Player.track != null && avail >= Ui.dpf(24)) {
                 title.setColor(Ui.alpha(Ui.text(), show));
-                sub.setColor(Ui.alpha(Ui.text2(), show));
+                String adLbl = Player.adStatusText(getContext());
+                boolean showAd = !adLbl.isEmpty();
+                sub.setColor(Ui.alpha(showAd ? 0xFFE69A00 : Ui.text2(), show));
                 String timeStr = Player.track.duration > 0 ? (Ui.time(Player.position()) + " / " + Ui.time(Player.track.duration)) : "";
                 float timeW = (!timeStr.isEmpty() && avail > Ui.dpf(180)) ? (sub.measureText(timeStr) + Ui.dpf(12)) : 0f;
                 float textAvail = Math.max(Ui.dpf(24), avail - timeW);
                 CharSequence t = TextUtils.ellipsize(Player.track.name, title, textAvail, TextUtils.TruncateAt.END);
-                CharSequence s = TextUtils.ellipsize(Player.track.artist, sub, textAvail, TextUtils.TruncateAt.END);
+                CharSequence s = TextUtils.ellipsize(showAd ? adLbl : Player.track.artist, sub, textAvail, TextUtils.TruncateAt.END);
                 c.drawText(t, 0, t.length(), tx, mini.centerY() - Ui.dpf(2.5f), title);
                 c.drawText(s, 0, s.length(), tx, mini.centerY() + Ui.dpf(13.5f), sub);
                 if (timeW > 0f) {
@@ -783,9 +785,11 @@ final class Dock extends FrameLayout {
         float avail = playCx - btnW / 2f - tx - Ui.dpf(4);
         if (avail > Ui.dpf(20) && Player.track != null) {
             title.setColor(Ui.alpha(Ui.text(), show));
-            sub.setColor(Ui.alpha(Ui.text2(), show));
+            String adLbl = Player.adStatusText(getContext());
+            boolean showAd = !adLbl.isEmpty();
+            sub.setColor(Ui.alpha(showAd ? 0xFFE69A00 : Ui.text2(), show));
             CharSequence t = TextUtils.ellipsize(Player.track.name, title, avail, TextUtils.TruncateAt.END);
-            CharSequence s = TextUtils.ellipsize(Player.track.artist, sub, avail, TextUtils.TruncateAt.END);
+            CharSequence s = TextUtils.ellipsize(showAd ? adLbl : Player.track.artist, sub, avail, TextUtils.TruncateAt.END);
             c.drawText(t, 0, t.length(), tx, mini.centerY() - Ui.dpf(2.5f), title);
             c.drawText(s, 0, s.length(), tx, mini.centerY() + Ui.dpf(13.5f), sub);
         }

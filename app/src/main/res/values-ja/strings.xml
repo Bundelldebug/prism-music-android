@@ -267,7 +267,7 @@
     <string name="pl_relogin_scope">プレイリスト編集権限が必要です。設定から Spotify に再ログインしてください。</string>
     <string name="create">作成</string>
     <string name="npu_group">NPU 高音質化</string>
-    <string name="npu_title">Spotify NPU 高音質化</string>
+    <string name="npu_title">NPU 高音質化</string>
     <string name="npu_supported">対応チップセット検出 · %1$s</string>
     <string name="npu_unsupported">非対応チップセット (%1$s) · Snapdragon 8 Gen 2 / Dimensity 8400・9300 / Exynos 2400 / Tensor G4 以降が必要</string>
     <string name="npu_active">有効 · %1$s (%2$s)</string>
@@ -359,7 +359,7 @@
     <string name="ytm_account">YouTube Music アカウント</string>
     <string name="ytm_sign_in">Google でログイン</string>
     <string name="ytm_signed_in">Google アカウント連携済み</string>
-    <string name="ytm_guest_note">ログインなしでも YouTube Music の検索・再生・MV視聴が可能です。Google ログインでライブラリを同期できます。</string>
+    <string name="ytm_guest_note">ログインなしでも YouTube Music の探索・検索・再生が可能です。Google ログインでライブラリとリキャップを同期できます。</string>
     <string name="ytm_quick_picks">クイックピック</string>
     <string name="ytm_charts">人気チャート</string>
     <string name="ytm_videos">ミュージックビデオ</string>
@@ -373,6 +373,7 @@
     <string name="search_clear">消去</string>
     <string name="recap_title">リキャップ</string>
     <string name="recap_spotify">Spotify リキャップ</string>
+    <string name="recap_ytm">YouTube Music リキャップ</string>
     <string name="recap_local">ローカル リキャップ</string>
     <string name="recap_plays">%1$d回再生</string>
     <string name="recap_hours">合計 %1$.1f時間再生</string>
@@ -404,7 +405,7 @@
     <string name="bpa_buf_low">低遅延 (20 ms)</string>
     <string name="bpa_buf_std">標準 (45 ms)</string>
     <string name="bpa_buf_safe">安定 (90 ms)</string>
-    <string name="bpa_dsp_section">オーディオファイル DSP・フィルター</string>
+    <string name="bpa_dsp_section">サウンド詳細調整</string>
     <string name="bpa_dither">ディザリング</string>
     <string name="bpa_dither_off">オフ</string>
     <string name="bpa_dither_tpdf">TPDF</string>
@@ -413,10 +414,25 @@
     <string name="bpa_filter_sharp">シャープロールオフ</string>
     <string name="bpa_filter_slow">スローロールオフ</string>
     <string name="bpa_filter_min">ミニマムフェーズ</string>
-    <string name="bpa_replaygain">ReplayGain 自動音量均一化</string>
+    <string name="bpa_replaygain">音量均一化 (ReplayGain)</string>
     <string name="bpa_crossfeed">ヘッドホン クロスフィード</string>
     <string name="bpa_mono">モノラルダウンミックス</string>
     <string name="bpa_balance">左右チャンネルバランス</string>
     <string name="bpa_balance_center">中央</string>
-    <string name="bpa_dac_specs">DAC ハードウェアプロファイル</string>
+    <string name="bpa_dac_specs">DAC ハードウェア</string>
+    <string name="open_in_ytm">YouTube Music で開く</string>
+    <string name="ytm_lib_signin">Google アカウントにログインするとライブラリを表示できます。</string>
+    <string name="recap_official_playlists">公式リキャップ プレイリスト</string>
+    <string name="bpa_step_source">ソース</string>
+    <string name="bpa_step_engine">オーディオ処理</string>
+    <string name="bpa_step_output">出力機器</string>
+    <string name="bpa_proc_bp">USB ビットパーフェクト バイパス</string>
+    <string name="bpa_proc_direct">USB ダイレクト</string>
+    <string name="bpa_proc_default">システム標準出力</string>
+    <string name="ytm_ad_playing">広告を再生中</string>
+    <string name="ytm_ad_playing_time">広告を再生中 · %1$s</string>
+    <string name="ytm_ad_skip">広告をスキップ</string>
+    <string name="ytm_ad_skip_time">広告をスキップ · %1$s</string>
+    <string name="ytm_adblock">YouTube Music 広告ブロック</string>
+    <string name="ytm_adblock_note">YouTube Music 再生時の広告ネットワーク通信をブロックし、広告が表示された場合はミュート・自動スキップを試みます。</string>
 </resources>

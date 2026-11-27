@@ -212,7 +212,7 @@ final class Widgets {
         v.setOrientation(LinearLayout.VERTICAL);
         FrameLayout frame = new FrameLayout(c);
         Img.ArtView art = new Img.ArtView(c, rad);
-        art.circle = "artist".equals(it.type);
+        art.circle = "artist".equals(it.type) || "lartist".equals(it.type) || "ytm_artist".equals(it.type);
         if (art.circle) art.placeholderIcon = Icons.ARTIST;
         art.setUrl(it.image);
         frame.addView(art, new FrameLayout.LayoutParams(s, s));
@@ -295,10 +295,12 @@ final class Widgets {
         flp.setMargins(Ui.dp(12), 0, Ui.dp(12), Ui.dp(12));
         tile.addView(t, flp);
         v.addView(tile, new LinearLayout.LayoutParams(s, s));
-        TextView cap = Ui.text(c, caption, 13f, Ui.semibold, Ui.text());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Ui.dp(8);
-        v.addView(cap, lp);
+        if (caption != null && !caption.isEmpty() && !caption.equals(label)) {
+            TextView cap = Ui.text(c, caption, 13f, Ui.semibold, Ui.text());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(8);
+            v.addView(cap, lp);
+        }
         v.setOnClickListener(click);
         Ui.press(v, 0.96f);
         return v;
@@ -329,9 +331,13 @@ final class Widgets {
         sl.topMargin = Ui.dp(2.5f);
         col.addView(s, sl);
         r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Icons.IconView m = new Icons.IconView(c, Icons.MORE, 18, Ui.text2());
-        r.addView(m, new LinearLayout.LayoutParams(Ui.dp(40), Ui.dp(40)));
-        if (more != null) m.setOnClickListener(more);
+        if (more != null) {
+            Icons.IconView m = new Icons.IconView(c, Icons.MORE, 18, Ui.text2());
+            r.addView(m, new LinearLayout.LayoutParams(Ui.dp(40), Ui.dp(40)));
+            m.setOnClickListener(more);
+        } else {
+            r.setPadding(Ui.dp(16), Ui.dp(7), Ui.dp(16), Ui.dp(7));
+        }
         r.setBackground(ripple());
         r.setOnClickListener(click);
         if (Ui.gStyle) Ui.press(r, 0.99f);

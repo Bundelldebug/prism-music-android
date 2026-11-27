@@ -49,6 +49,8 @@ final class Player {
 
     static Track track;
     static boolean playing, shuffle, liked, hasDevice;
+    static boolean adPlaying, adSkippable;
+    static int adRemainSec;
     static String repeat = "off";
     static long progress, stamp;
     static String deviceName, deviceType, deviceId;
@@ -99,6 +101,25 @@ final class Player {
 
     static boolean local() { return LocalMusic.isLocal(track); }
     static boolean ytm() { return YouTubeMusic.isYtm(track); }
+
+    /** Formatted live label while a YouTube Music ad is playing (empty during normal music playback). */
+    static String adStatusText(android.content.Context c) {
+        if (!adPlaying || !ytm() || c == null) return "";
+        if (adSkippable) {
+            return adRemainSec > 0
+                    ? c.getString(R.string.ytm_ad_skip_time, Ui.time(adRemainSec * 1000L))
+                    : c.getString(R.string.ytm_ad_skip);
+        }
+        return adRemainSec > 0
+                ? c.getString(R.string.ytm_ad_playing_time, Ui.time(adRemainSec * 1000L))
+                : c.getString(R.string.ytm_ad_playing);
+    }
+
+    static void clearAdState() {
+        adPlaying = false;
+        adRemainSec = 0;
+        adSkippable = false;
+    }
     /** Tracks the active playlist/album URI & display title so Queue can jump straight back to it. */
     static String playingSourceUri, playingSourceTitle;
 

@@ -181,6 +181,10 @@ final class Settings {
                         YouTubeMusic.showSignInDialog(m, () -> { m.reloadAll(); rebuild(); }));
             }
             content.addView(st, Widgets.MW);
+            Widgets.Group pb = new Widgets.Group(m, m.getString(R.string.set_playback));
+            toggleRow(pb, Icons.YTM, m.getString(R.string.ytm_adblock), YouTubeMusic.PREF_ADBLOCK, true, YouTubeMusic::syncAdBlock);
+            content.addView(pb, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.ytm_adblock_note)));
             content.addView(Widgets.caption(m, m.getString(R.string.ytm_guest_note)));
         }
     }
@@ -439,7 +443,6 @@ final class Settings {
             Widgets.Group g = new Widgets.Group(m, m.getString(R.string.set_home_sections));
             toggleRow(g, Icons.RECAP, m.getString(R.string.home_recap), "home_recap", true, m::reloadContent);
             toggleRow(g, Icons.ARTIST, m.getString(R.string.home_artists), "home_artists", true, m::reloadContent);
-            toggleRow(g, Icons.ALBUM, m.getString(R.string.home_new), "home_new", true, m::reloadContent);
             content.addView(g, Widgets.MW);
 
             // device music: albums tagged "Name Disc 1", "Name Disc 2"… shown as one album
@@ -516,6 +519,7 @@ final class Settings {
             a.row(Icons.LINK, Ui.ACCENT, m.getString(R.string.open_spotify_app), null, true, v -> Player.openInSpotify("spotify:"));
             content.addView(a, Widgets.MW);
             Widgets.Group fx = new Widgets.Group(m, m.getString(R.string.set_player_screen));
+            toggleRow(fx, Icons.YTM, m.getString(R.string.ytm_adblock), YouTubeMusic.PREF_ADBLOCK, true, YouTubeMusic::syncAdBlock);
             toggleRow(fx, Icons.ALBUM, m.getString(R.string.shrink_paused), "shrink_paused", true, null);
             toggleRow(fx, Icons.CLOCK, m.getString(R.string.show_total), "show_total", false, Player::notifyAll0);
             fx.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.eq_title), m.getString(Eq.on(m) ? R.string.eq_state_on : R.string.eq_state_off), true, v -> m.push(new EqPage(m)));
@@ -742,10 +746,10 @@ final class Settings {
 
             String srcFmt = BitPerfect.sourceRate > 0
                     ? (BitPerfect.sourceBits + "-bit / " + String.format(java.util.Locale.US, "%.1f kHz", BitPerfect.sourceRate / 1000f))
-                    : (Player.local() ? "FLAC / PCM" : (Player.ytm() ? "YouTube Music" : "Spotify Stream"));
+                    : (Player.local() ? m.getString(R.string.source_local) : (Player.ytm() ? "YouTube Music" : "Spotify"));
             String procLabel = BitPerfect.isActive()
-                    ? (BitPerfect.activeBitPerfect ? "USB Bit-Perfect Bypass" : "USB Direct Hi-Res")
-                    : (npuOn ? ("NPU DSP · " + BitPerfect.filter(m).toUpperCase(java.util.Locale.US)) : "Standard AudioFlinger");
+                    ? (BitPerfect.activeBitPerfect ? m.getString(R.string.bpa_proc_bp) : m.getString(R.string.bpa_proc_direct))
+                    : (npuOn ? ("NPU DSP · " + BitPerfect.filter(m).toUpperCase(java.util.Locale.US)) : m.getString(R.string.bpa_proc_default));
             String outName = spec.deviceName.isEmpty() ? m.getString(R.string.this_device) : spec.deviceName;
             String outFmt = spec.formatLine().isEmpty() ? (spec.bits + "bit / " + spec.khzText()) : spec.formatLine();
 
@@ -753,11 +757,11 @@ final class Settings {
                     : (tier == AudioInfo.TIER_BLUE ? 0xFF38BDF8
                     : (tier == AudioInfo.TIER_GOLD ? 0xFFD4A017 : Ui.ACCENT));
 
-            col.addView(pathStep(m, Icons.NOTE, Ui.text2(), "1. Source", srcFmt), Widgets.MW);
+            col.addView(pathStep(m, Icons.NOTE, Ui.text2(), m.getString(R.string.bpa_step_source), srcFmt), Widgets.MW);
             col.addView(pathConnector(m), Widgets.MW);
-            col.addView(pathStep(m, Icons.WAVE, tierColor, "2. Engine", procLabel), Widgets.MW);
+            col.addView(pathStep(m, Icons.WAVE, tierColor, m.getString(R.string.bpa_step_engine), procLabel), Widgets.MW);
             col.addView(pathConnector(m), Widgets.MW);
-            col.addView(pathStep(m, AudioInfo.deviceIcon(spec), Ui.ACCENT, "3. Output", outName + " · " + outFmt), Widgets.MW);
+            col.addView(pathStep(m, AudioInfo.deviceIcon(spec), Ui.ACCENT, m.getString(R.string.bpa_step_output), outName + " · " + outFmt), Widgets.MW);
             return col;
         }
 
@@ -1031,7 +1035,7 @@ final class Settings {
             MainActivity m = main;
             Widgets.Group g = new Widgets.Group(m, null);
             g.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.version), MainActivity.VERSION, false, null);
-            g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.music_service), "Spotify Web API", false, null);
+            g.row(Icons.NOTE, Ui.ACCENT, m.getString(R.string.music_service), "Spotify · YouTube Music · " + m.getString(R.string.source_local), false, null);
             g.row(Icons.LYRICS, Ui.ACCENT, m.getString(R.string.lyrics_source), "LRCLIB · NetEase · QQ · Kugou · SimpMusic · lyrics.ovh", false, null);
             content.addView(g, Widgets.MW);
             // updates from the GitHub releases
