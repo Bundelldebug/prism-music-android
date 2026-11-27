@@ -51,6 +51,21 @@ final class SpotifyWeb {
 
     private static final String SDK_URL = "https://sdk.scdn.co/spotify-player.js";
     private static final long SDK_TTL_MS = 24L * 60 * 60 * 1000;
+    private static volatile String bridgeNonce = newNonce();
+
+    private static String newNonce() {
+        byte[] b = new byte[16];
+        new java.security.SecureRandom().nextBytes(b);
+        return android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP | android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING);
+    }
+
+    static boolean verifyBridgeNonce(String candidate) {
+        String cur = bridgeNonce;
+        if (cur == null || candidate == null) return false;
+        return java.security.MessageDigest.isEqual(
+                cur.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                candidate.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
 
     private static final String HTML = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             // Block browser MediaSession BEFORE Spotify SDK loads so WebView never hijacks lockscreen / Now Bar / volume controls
@@ -62,15 +77,16 @@ final class SpotifyWeb {
             + "<link rel='preconnect' href='https://dealer.spotify.com' crossorigin>"
             + "<link rel='preconnect' href='https://spclient.wg.spotify.com' crossorigin>"
             + "<script src='" + SDK_URL + "'></script></head><body><script>\n"
+            + "(function(){ var __N = '__PRISM_BRIDGE_NONCE__';\n"
             + "window.onSpotifyWebPlaybackSDKReady = function() {\n"
             // disable SDK's own MediaSession so Android never routes background volume keys to a remote Spotify session
             + "  var player = new Spotify.Player({ name: '__PRISM_DEVICE_NAME__', volume: 1.0, enableMediaSession: false,\n"
-            + "    getOAuthToken: function(cb) { cb(Prism.token()); } });\n"
+            + "    getOAuthToken: function(cb) { cb(Prism.token(__N)); } });\n"
             + "  window.prismPlayer = player;\n"
-            + "  player.addListener('ready', function(e) { Prism.onReady(e.device_id); });\n"
-            + "  player.addListener('not_ready', function(e) { Prism.onNotReady(e.device_id); });\n"
+            + "  player.addListener('ready', function(e) { Prism.onReady(__N, e.device_id); });\n"
+            + "  player.addListener('not_ready', function(e) { Prism.onNotReady(__N, e.device_id); });\n"
             + "  ['initialization_error','authentication_error','account_error','playback_error'].forEach(function(n) {\n"
-            + "    player.addListener(n, function(e) { Prism.onError(n + ': ' + e.message); });\n"
+            + "    player.addListener(n, function(e) { Prism.onError(__N, n + ': ' + e.message); });\n"
             + "  });\n"
             + "  player.addListener('player_state_changed', function(s) {\n"
             + "    if (!s) return;\n"
@@ -78,7 +94,7 @@ final class SpotifyWeb {
             + "    var al = t && t.album;\n"
             + "    var ars = (t && t.artists) ? t.artists.map(function(a){ return {name: a.name || '', uri: a.uri || ''}; }) : [];\n"
             + "    var imgs = (al && al.images) ? al.images.map(function(im){ return {url: im.url || '', width: im.width || 0}; }) : [];\n"
-            + "    Prism.onState(JSON.stringify({\n"
+            + "    Prism.onState(__N, JSON.stringify({\n"
             + "      paused: !!s.paused, position: s.position || 0, duration: s.duration || (t && t.duration_ms) || 0,\n"
             + "      shuffle: !!s.shuffle, repeat_mode: s.repeat_mode || 0,\n"
             + "      context_uri: (s.context && s.context.uri) || '',\n"
@@ -97,7 +113,7 @@ final class SpotifyWeb {
             + "  if (window.prismVol < 0.99 && window.prismPlayer) { window.prismVol = 1; try { window.prismPlayer.setVolume(1.0); } catch (e) {} }\n"
             + "};\n"
             + "window.prismFade = function(to, ms, tag) {\n"
-            + "  var p = window.prismPlayer; if (!p) { Prism.faded(tag); return; }\n"
+            + "  var p = window.prismPlayer; if (!p) { Prism.faded(__N, tag); return; }\n"
             + "  var from = window.prismVol, t0 = performance.now(); window.prismFadeId = (window.prismFadeId || 0) + 1; var id = window.prismFadeId;\n"
             + "  (function step() {\n"
             + "    if (id !== window.prismFadeId) return;\n"
@@ -105,9 +121,10 @@ final class SpotifyWeb {
             + "    window.prismVol = v;\n"
             // fire-and-forget: waiting on each setVolume promise stretched a 120ms ramp to several hundred ms
             + "    try { p.setVolume(Math.max(0.0001, v)); } catch (e) {}\n"
-            + "    if (k < 1) setTimeout(step, 16); else Prism.faded(tag);\n"
+            + "    if (k < 1) setTimeout(step, 16); else Prism.faded(__N, tag);\n"
             + "  })();\n"
             + "};\n"
+            + "})();\n"
             + "</script></body></html>";
 
     /** The WebView's context: the current activity while one is open, the application after it closes. */
@@ -164,13 +181,23 @@ final class SpotifyWeb {
         Spotify.prewarm();
         final File sdkFile = sdkCacheFile(a);
         if (!sdkFile.isFile() || System.currentTimeMillis() - sdkFile.lastModified() > SDK_TTL_MS) refreshSdkCache(sdkFile);
+        bridgeNonce = newNonce();
         ctx = new android.content.MutableContextWrapper(a);
         web = new WebView(ctx);
         WebSettings s = web.getSettings();
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setAllowFileAccessFromFileURLs(false);
+        s.setAllowUniversalAccessFromFileURLs(false);
+        s.setSaveFormData(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         web.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                return true; // Never allow top-level navigation away from local SDK host
+            }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
                 if (req != null && req.getUrl() != null && SDK_URL.equals(req.getUrl().toString()) && sdkFile.isFile() && sdkFile.length() > 1024) {
                     try { return new WebResourceResponse("application/javascript", "utf-8", new FileInputStream(sdkFile)); }
@@ -182,6 +209,10 @@ final class SpotifyWeb {
         web.setWebChromeClient(new WebChromeClient() {
             // Spotify's streams are DRM-protected (Widevine): allow protected media for this page only
             @Override public void onPermissionRequest(PermissionRequest r) {
+                android.net.Uri org = r.getOrigin();
+                if (org == null || !"https".equalsIgnoreCase(org.getScheme())) { r.deny(); return; }
+                String h = org.getHost() == null ? "" : org.getHost().toLowerCase(java.util.Locale.ROOT);
+                if (!"prism.local".equals(h) && !h.endsWith(".spotify.com")) { r.deny(); return; }
                 List<String> ok = new ArrayList<>();
                 for (String res : r.getResources())
                     if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(res)) ok.add(res);
@@ -238,7 +269,8 @@ final class SpotifyWeb {
                 .replace("\n", "")
                 .replace("<", "")
                 .replace(">", "");
-        return HTML.replace("__PRISM_DEVICE_NAME__", safe);
+        return HTML.replace("__PRISM_DEVICE_NAME__", safe)
+                .replace("__PRISM_BRIDGE_NONCE__", bridgeNonce);
     }
 
     static void stop() {
@@ -366,13 +398,17 @@ final class SpotifyWeb {
     }
 
     static final class Bridge {
-        @JavascriptInterface public void faded(String tag) { }
+        @JavascriptInterface public void faded(String nonce, String tag) {
+            if (!verifyBridgeNonce(nonce)) return;
+        }
 
-        @JavascriptInterface public String token() {
+        @JavascriptInterface public String token(String nonce) {
+            if (!verifyBridgeNonce(nonce)) return "";
             try { return Spotify.token(); } catch (Exception e) { return ""; }
         }
 
-        @JavascriptInterface public void onReady(String id) {
+        @JavascriptInterface public void onReady(String nonce, String id) {
+            if (!verifyBridgeNonce(nonce)) return;
             Spotify.MAIN.post(() -> {
                 deviceId = id;
                 activate();
@@ -384,18 +420,21 @@ final class SpotifyWeb {
             });
         }
 
-        @JavascriptInterface public void onNotReady(String id) {
+        @JavascriptInterface public void onNotReady(String nonce, String id) {
+            if (!verifyBridgeNonce(nonce)) return;
             Spotify.MAIN.post(() -> { if (id.equals(deviceId)) deviceId = null; });
         }
 
-        @JavascriptInterface public void onError(String msg) {
+        @JavascriptInterface public void onError(String nonce, String msg) {
+            if (!verifyBridgeNonce(nonce)) return;
             Spotify.MAIN.post(() -> {
                 error = msg;
                 if (msg.startsWith("initialization") || msg.startsWith("account") || msg.startsWith("authentication")) failed = true;
             });
         }
 
-        @JavascriptInterface public void onState(String json) {
+        @JavascriptInterface public void onState(String nonce, String json) {
+            if (!verifyBridgeNonce(nonce)) return;
             Spotify.MAIN.post(() -> {
                 try {
                     JSONObject o = new JSONObject(json);

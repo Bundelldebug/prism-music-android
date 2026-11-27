@@ -82,12 +82,13 @@ final class Spotify {
     static boolean configured() { return clientId().length() > 0; }
     static boolean hasScope(String s) { return (" " + prefs.getString("granted_scope", "") + " ").contains(" " + s + " "); }
 
-    static boolean loggedIn() { return prefs.getString("refresh_token", null) != null; }
+    static boolean loggedIn() { return SecureVault.has(prefs, "refresh_token"); }
 
     static void login(Activity a) {
         String verifier = random(64);
         String state = random(16);
-        prefs.edit().putString("pkce_verifier", verifier).putString("pkce_state", state).apply();
+        SecureVault.put(prefs, "pkce_verifier", verifier);
+        prefs.edit().putString("pkce_state", state).apply();
         String url = "https://accounts.spotify.com/authorize?response_type=code"
                 + "&client_id=" + enc(clientId())
                 + "&scope=" + enc(SCOPES)
@@ -102,29 +103,42 @@ final class Spotify {
 
     static void logout() {
         prefs.edit().remove("access_token").remove("refresh_token").remove("expires_at")
+                .remove("pkce_verifier").remove("pkce_state")
                 .remove("user_id").remove("user_name").remove("user_image").remove("user_product").remove("user_country").apply();
         userName = userImage = product = country = null;
         clearAllCache();
     }
 
+    static boolean constantTimeEquals(String a, String b) {
+        if (a == null || b == null) return false;
+        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static boolean isAllowedApiUrl(String url) {
+        return url != null && url.startsWith("https://api.spotify.com/");
+    }
+
     /** Handles prismmusic://callback?code=…&state=… */
     static void handleRedirect(Uri uri, Runnable done, java.util.function.Consumer<String> fail) {
         String err = uri.getQueryParameter("error");
+        String expectedState = prefs.getString("pkce_state", null);
+        String verifier = SecureVault.get(prefs, "pkce_verifier");
+        // Immediately consume one-time PKCE state/verifier to prevent replay attacks
+        prefs.edit().remove("pkce_verifier").remove("pkce_state").apply();
         if (err != null) { fail.accept(err); return; }
         String code = uri.getQueryParameter("code");
         String state = uri.getQueryParameter("state");
-        if (code == null || state == null || !state.equals(prefs.getString("pkce_state", null))) {
+        if (code == null || state == null || verifier == null || verifier.isEmpty() || !constantTimeEquals(state, expectedState)) {
             fail.accept("state mismatch");
             return;
         }
-        String verifier = prefs.getString("pkce_verifier", "");
+        final String fv = verifier;
         IO.execute(() -> {
             try {
                 String body = "grant_type=authorization_code&code=" + enc(code) + "&redirect_uri=" + enc(REDIRECT)
-                        + "&client_id=" + enc(clientId()) + "&code_verifier=" + enc(verifier);
+                        + "&client_id=" + enc(clientId()) + "&code_verifier=" + enc(fv);
                 JSONObject t = tokenRequest(body);
                 storeToken(t);
-                prefs.edit().remove("pkce_verifier").remove("pkce_state").apply();
                 loadProfileSync();
                 MAIN.post(done);
             } catch (Exception e) {
@@ -135,6 +149,7 @@ final class Spotify {
 
     private static JSONObject tokenRequest(String form) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL("https://accounts.spotify.com/api/token").openConnection();
+        c.setInstanceFollowRedirects(false);
         c.setRequestMethod("POST");
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
@@ -152,9 +167,9 @@ final class Spotify {
     }
 
     private static void storeToken(JSONObject t) {
+        SecureVault.put(prefs, "access_token", t.optString("access_token"));
+        if (t.has("refresh_token")) SecureVault.put(prefs, "refresh_token", t.optString("refresh_token"));
         SharedPreferences.Editor e = prefs.edit();
-        e.putString("access_token", t.optString("access_token"));
-        if (t.has("refresh_token")) e.putString("refresh_token", t.optString("refresh_token"));
         if (t.has("scope")) e.putString("granted_scope", t.optString("scope"));
         e.putLong("expires_at", System.currentTimeMillis() + t.optLong("expires_in", 3600) * 1000L - 60000L);
         e.apply();
@@ -164,9 +179,9 @@ final class Spotify {
 
     static String token() throws Exception {
         synchronized (LOCK) {
-            String at = prefs.getString("access_token", null);
+            String at = SecureVault.get(prefs, "access_token");
             if (at != null && System.currentTimeMillis() < prefs.getLong("expires_at", 0)) return at;
-            String rt = prefs.getString("refresh_token", null);
+            String rt = SecureVault.get(prefs, "refresh_token");
             if (rt == null) throw new ApiError(401, "not logged in", "login");
             JSONObject t = tokenRequest("grant_type=refresh_token&refresh_token=" + enc(rt) + "&client_id=" + enc(clientId()));
             storeToken(t);
@@ -227,7 +242,9 @@ final class Spotify {
                     paceRequest();
                 }
                 String url = path.startsWith("http") ? path : API + path;
+                if (!isAllowedApiUrl(url)) throw new ApiError(403, "disallowed api host", "security");
                 HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setInstanceFollowRedirects(false);
                 c.setRequestMethod(method);
                 c.setConnectTimeout(8000);
                 c.setReadTimeout(12000);

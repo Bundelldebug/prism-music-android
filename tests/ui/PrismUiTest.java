@@ -1647,6 +1647,47 @@ public class PrismUiTest {
         UnifiedPlaylist.delete(app, upl.id);
     }
 
+    @Test public void securityHardeningChecks() {
+        android.content.Context ctx = RuntimeEnvironment.getApplication();
+        android.content.SharedPreferences sp = MainActivity.prefs(ctx);
+
+        // 1. SecureVault AES-GCM encrypt/decrypt and transparent migration from legacy plaintext
+        sp.edit().putString("refresh_token", "legacy_spotify_rt_12345").apply();
+        assertEquals("legacy_spotify_rt_12345", SecureVault.get(sp, "refresh_token"));
+        String enc = sp.getString("refresh_token", "");
+        assertTrue(SecureVault.isEncryptedValue(enc));
+        assertTrue(!enc.contains("legacy_spotify_rt_12345"));
+
+        SecureVault.put(sp, "ytm_cookie", "SAPISID=ytm_secret_val");
+        assertTrue(SecureVault.isEncryptedValue(sp.getString("ytm_cookie", "")));
+        assertEquals("SAPISID=ytm_secret_val", YouTubeMusic.cookie(ctx));
+        sp.edit().remove("refresh_token").remove("ytm_cookie").apply();
+
+        // 2. Spotify API URL allowlist & constant-time state check
+        assertTrue(Spotify.isAllowedApiUrl("https://api.spotify.com/v1/me/player"));
+        assertTrue(!Spotify.isAllowedApiUrl("http://api.spotify.com/v1/me/player"));
+        assertTrue(!Spotify.isAllowedApiUrl("https://evil.example.com/v1/me"));
+        assertTrue(Spotify.constantTimeEquals("abc123", "abc123"));
+        assertTrue(!Spotify.constantTimeEquals("abc123", "abc124"));
+
+        // 3. SpotifyWeb Bridge nonce rejects forged/missing tokens
+        SpotifyWeb.Bridge br = new SpotifyWeb.Bridge();
+        assertEquals("", br.token("forged-nonce"));
+        assertEquals("", br.token(null));
+
+        // 4. YouTube Music WebView trusted origin allowlist
+        assertTrue(YouTubeMusic.isTrustedGoogleOrYouTubeUrl("https://accounts.google.com/ServiceLogin"));
+        assertTrue(YouTubeMusic.isTrustedGoogleOrYouTubeUrl("https://music.youtube.com/"));
+        assertTrue(!YouTubeMusic.isTrustedGoogleOrYouTubeUrl("http://music.youtube.com/"));
+        assertTrue(!YouTubeMusic.isTrustedGoogleOrYouTubeUrl("https://evil.example.com/phish"));
+
+        // 5. Updater GitHub Releases HTTPS allowlist
+        assertTrue(Updater.isTrustedReleaseUrl("https://github.com/Bundelldebug/prism-music-android/releases/download/v9.5.28/PrismMusic_Android.apk"));
+        assertTrue(Updater.isTrustedReleaseUrl("https://objects.githubusercontent.com/release/PrismMusic_Android.apk"));
+        assertTrue(!Updater.isTrustedReleaseUrl("http://github.com/Bundelldebug/prism-music-android/releases/download/v9.5.28/PrismMusic_Android.apk"));
+        assertTrue(!Updater.isTrustedReleaseUrl("https://evil.example.com/PrismMusic_Android.apk"));
+    }
+
     private static Bitmap captureScaled(MainActivity act, float scale) {
         View root = act.getWindow().getDecorView();
         int w = Math.max(1, Math.round(root.getWidth() * scale));

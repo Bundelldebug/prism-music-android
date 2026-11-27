@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.27";
+    static final String VERSION = "9.5.28";
 
     FrameLayout root;
     Glass.Backdrop backdrop;

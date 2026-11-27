@@ -151,7 +151,33 @@ final class YouTubeMusic {
     static String cookie(Context c) {
         Context ctx = c != null ? c : app;
         if (ctx == null) return "";
-        return MainActivity.prefs(ctx).getString(PREF_COOKIE, "");
+        String v = SecureVault.get(MainActivity.prefs(ctx), PREF_COOKIE);
+        return v == null ? "" : v;
+    }
+
+    static boolean isTrustedGoogleOrYouTubeUrl(String url) {
+        if (url == null || !url.startsWith("https://")) return false;
+        try {
+            android.net.Uri u = android.net.Uri.parse(url);
+            String host = u.getHost();
+            if (host == null) return false;
+            String h = host.toLowerCase(Locale.ROOT);
+            return "youtube.com".equals(h) || h.endsWith(".youtube.com")
+                    || "google.com".equals(h) || h.endsWith(".google.com")
+                    || "gstatic.com".equals(h) || h.endsWith(".gstatic.com")
+                    || "googleapis.com".equals(h) || h.endsWith(".googleapis.com");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void hardenWebSettings(WebSettings ws) {
+        ws.setAllowFileAccess(false);
+        ws.setAllowContentAccess(false);
+        ws.setAllowFileAccessFromFileURLs(false);
+        ws.setAllowUniversalAccessFromFileURLs(false);
+        ws.setSaveFormData(false);
+        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     }
 
     static String accountLabel(Context c) {
@@ -180,6 +206,7 @@ final class YouTubeMusic {
         FrameLayout box = new FrameLayout(a);
         WebView wv = new WebView(a);
         WebSettings ws = wv.getSettings();
+        hardenWebSettings(ws);
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         CookieManager.getInstance().setAcceptCookie(true);
@@ -188,6 +215,10 @@ final class YouTubeMusic {
         final AlertDialog[] dlg = new AlertDialog[1];
         final boolean[] completed = {false};
         wv.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest req) {
+                String u = req != null && req.getUrl() != null ? req.getUrl().toString() : null;
+                return !isTrustedGoogleOrYouTubeUrl(u);
+            }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (completed[0]) return;
@@ -198,10 +229,9 @@ final class YouTubeMusic {
                     String merged = (c1 != null && (c1.contains("SAPISID=") || c1.contains("__Secure-3PAPISID="))) ? c1 : (c2 != null ? c2 : "");
                     if (merged.contains("SAPISID=") || merged.contains("__Secure-3PAPISID=")) {
                         completed[0] = true;
-                        MainActivity.prefs(a).edit()
-                                .putString(PREF_COOKIE, merged)
-                                .putString(PREF_ACCOUNT, a.getString(R.string.ytm_signed_in))
-                                .apply();
+                        SharedPreferences sp = MainActivity.prefs(a);
+                        SecureVault.put(sp, PREF_COOKIE, merged);
+                        sp.edit().putString(PREF_ACCOUNT, a.getString(R.string.ytm_signed_in)).apply();
                         stopWeb();
                         if (dlg[0] != null && dlg[0].isShowing()) dlg[0].dismiss();
                         Toast.makeText(a, R.string.ytm_signed_in, Toast.LENGTH_SHORT).show();
@@ -276,6 +306,7 @@ final class YouTubeMusic {
 
     private static JSONObject postJson(String url, JSONObject body, String userAgent, boolean sendAuth) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setInstanceFollowRedirects(false);
         c.setRequestMethod("POST");
         c.setConnectTimeout(7000);
         c.setReadTimeout(12000);
@@ -1740,6 +1771,7 @@ final class YouTubeMusic {
         webCtx = new MutableContextWrapper(base);
         web = new YtmWebView(webCtx);
         WebSettings ws = web.getSettings();
+        hardenWebSettings(ws);
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setDatabaseEnabled(true);

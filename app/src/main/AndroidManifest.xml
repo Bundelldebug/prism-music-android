@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.oneuibook.prism"
-    android:versionCode="250"
-    android:versionName="9.5.27">
+    android:versionCode="251"
+    android:versionName="9.5.28">
 
     <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="35" />
 
@@ -33,6 +33,8 @@
         android:hardwareAccelerated="true"
         android:supportsRtl="true"
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:localeConfig="@xml/locales_config">
 
         <activity

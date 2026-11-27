@@ -85,10 +85,78 @@ final class Updater {
         try (InputStream s = in) {
             ByteArrayOutputStream b = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
-            int n;
-            while ((n = s.read(buf)) > 0) b.write(buf, 0, n);
+            int n, total = 0;
+            while ((n = s.read(buf)) > 0) {
+                total += n;
+                if (total > 1024 * 1024) throw new IllegalStateException("Response too large");
+                b.write(buf, 0, n);
+            }
             return b.toString("UTF-8");
         }
+    }
+
+    /** Validates that release download URLs strictly belong to this project's GitHub Releases over HTTPS. */
+    static boolean isTrustedReleaseUrl(String url) {
+        if (url == null || !url.startsWith("https://")) return false;
+        try {
+            Uri u = Uri.parse(url);
+            String host = u.getHost();
+            if (host == null) return false;
+            String h = host.toLowerCase(java.util.Locale.ROOT);
+            if ("github.com".equals(h)) {
+                String p = u.getPath();
+                return p != null && p.toLowerCase(java.util.Locale.ROOT).startsWith("/" + REPO.toLowerCase(java.util.Locale.ROOT) + "/");
+            }
+            return "objects.githubusercontent.com".equals(h) || "release-assets.githubusercontent.com".equals(h);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Verifies downloaded APK package name and signing certificate SHA-256 against the currently installed app. */
+    static boolean verifyDownloadedApk(Context app, Uri apkUri, java.io.File fallbackFile) {
+        try {
+            android.content.pm.PackageManager pm = app.getPackageManager();
+            String path = null;
+            if (fallbackFile != null && fallbackFile.isFile()) {
+                path = fallbackFile.getAbsolutePath();
+            } else if (apkUri != null && "file".equals(apkUri.getScheme())) {
+                path = apkUri.getPath();
+            }
+            if (path == null) return false;
+            int flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES;
+            android.content.pm.PackageInfo arch = pm.getPackageArchiveInfo(path, flags);
+            if (arch == null || !app.getPackageName().equals(arch.packageName)) return false;
+            android.content.pm.PackageInfo cur = pm.getPackageInfo(app.getPackageName(), flags);
+            java.util.Set<String> expected = certDigests(cur);
+            java.util.Set<String> actual = certDigests(arch);
+            if (expected.isEmpty() || actual.isEmpty()) return false;
+            for (String d : actual) {
+                if (expected.contains(d)) return true;
+            }
+            return false;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static java.util.Set<String> certDigests(android.content.pm.PackageInfo pi) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (pi == null || pi.signingInfo == null) return out;
+        android.content.pm.Signature[] sigs = pi.signingInfo.hasMultipleSigners()
+                ? pi.signingInfo.getApkContentsSigners()
+                : pi.signingInfo.getSigningCertificateHistory();
+        if (sigs == null) return out;
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            for (android.content.pm.Signature s : sigs) {
+                byte[] d = md.digest(s.toByteArray());
+                StringBuilder sb = new StringBuilder();
+                for (byte b : d) sb.append(String.format(java.util.Locale.US, "%02x", b & 0xff));
+                out.add(sb.toString());
+            }
+        } catch (Throwable ignored) {}
+        return out;
     }
 
     /** "9.5.1" > "9.5.0"; non-numeric parts count as 0. */
@@ -286,11 +354,11 @@ final class Updater {
 
     private static long pending = -1;
 
-    /** Downloads the release APK, then opens the system installer on it. */
+    /** Downloads the release APK, verifies package + signing certificate, then opens the system installer. */
     static void install(Activity a, Release r) {
-        if (r.apkUrl == null || r.apkUrl.isEmpty()) {
-            // no APK attached: the release page still lets the user get it
-            try { a.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(r.pageUrl))); } catch (Exception ignored) {}
+        if (!isTrustedReleaseUrl(r.apkUrl)) {
+            String safePage = isTrustedReleaseUrl(r.pageUrl) ? r.pageUrl : ("https://github.com/" + REPO + "/releases");
+            try { a.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(safePage))); } catch (Exception ignored) {}
             return;
         }
         if (!a.getPackageManager().canRequestPackageInstalls()) {
@@ -302,11 +370,13 @@ final class Updater {
             return;
         }
         DownloadManager dm = a.getSystemService(DownloadManager.class);
-        String name = "Prism-" + r.version + ".apk";
-        java.io.File old = new java.io.File(a.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), name);
-        if (old.exists()) old.delete();
+        if (dm == null) { Toast.makeText(a, R.string.upd_failed, Toast.LENGTH_LONG).show(); return; }
+        String safeVer = r.version == null ? "latest" : r.version.replaceAll("[^A-Za-z0-9._-]", "");
+        String name = "Prism-" + safeVer + ".apk";
+        final java.io.File destFile = new java.io.File(a.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), name);
+        if (destFile.exists()) destFile.delete();
         DownloadManager.Request q = new DownloadManager.Request(Uri.parse(r.apkUrl))
-                .setTitle(a.getString(R.string.app_name) + " " + r.version)
+                .setTitle(a.getString(R.string.app_name) + " " + safeVer)
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
                 .setDestinationInExternalFilesDir(a, android.os.Environment.DIRECTORY_DOWNLOADS, name);
@@ -320,6 +390,11 @@ final class Updater {
                 try { app.unregisterReceiver(this); } catch (Exception ignored) {}
                 Uri apk = dm.getUriForDownloadedFile(id);
                 if (apk == null) { Toast.makeText(app, R.string.upd_failed, Toast.LENGTH_LONG).show(); return; }
+                if (!verifyDownloadedApk(app, apk, destFile)) {
+                    try { destFile.delete(); } catch (Exception ignored) {}
+                    Toast.makeText(app, "업데이트 APK 서명 검증에 실패해 설치를 중단했습니다.", Toast.LENGTH_LONG).show();
+                    return;
+                }
                 Intent in = new Intent(Intent.ACTION_VIEW)
                         .setDataAndType(apk, "application/vnd.android.package-archive")
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
