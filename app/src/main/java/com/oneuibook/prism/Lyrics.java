@@ -168,9 +168,17 @@ final class Lyrics {
                 r = lookup(ctx, t, wantKoSub);
                 dirty = r != null;
             }
-            if (r != null && useNamu && needsKoreanTranslation(r) && !hasTranslations(r)) {
-                if (enrichFromNamuwiki(r, primaryArtist(t.artist), t.name == null ? "" : t.name.trim(), cleanTitle(t.name == null ? "" : t.name.trim()))) {
-                    dirty = true;
+            String namuArtist = primaryArtist(t.artist);
+            String namuTitle = t.name == null ? "" : t.name.trim();
+            String namuClean = cleanTitle(namuTitle);
+            if (useNamu) {
+                if (r == null) {
+                    r = lookupNamuwikiPlain(namuArtist, namuTitle, namuClean, wantKoSub);
+                    if (r != null) dirty = true;
+                } else if (needsKoreanTranslation(r) && !hasTranslations(r)) {
+                    if (enrichFromNamuwiki(r, namuArtist, namuTitle, namuClean)) {
+                        dirty = true;
+                    }
                 }
             }
             if (dirty && r != null) writeDisk(t.id, r);
@@ -624,29 +632,38 @@ final class Lyrics {
         }
     }
 
-    // ---- Optional real-time Namuwiki Korean translation lookup (default OFF; honest app UA, never bypasses challenges) ----
-    private static final Pattern HTML_TR = Pattern.compile("(?is)<tr[^>]*>(.*?)</tr>");
-    private static final Pattern HTML_TD = Pattern.compile("(?is)<td[^>]*>(.*?)</td>");
-    private static final Pattern HTML_BREAK = Pattern.compile("(?i)<(?:br\\s*/?|/p|/div|/li)>");
+    // ---- Optional real-time Namuwiki song article lyrics & Korean translation lookup (default OFF; honest app UA) ----
+    private static final Pattern HTML_TR = Pattern.compile("(?is)<tr\\b[^>]*>(.*?)</tr>");
+    private static final Pattern HTML_TD = Pattern.compile("(?is)<td\\b[^>]*>(.*?)</td>");
+    private static final Pattern HTML_DETAILS_LYRICS = Pattern.compile("(?is)<summary\\b[^>]*>[^<]*가사[^<]*</summary>(.*?)</details>");
+    private static final Pattern HTML_RUBY_ANNO = Pattern.compile("(?is)<(?:rt|rp)\\b[^>]*>.*?</(?:rt|rp)>");
+    private static final Pattern HTML_BREAK = Pattern.compile("(?i)<(?:br\\b[^>]*|/p\\s*|/div\\s*|/li\\s*)>");
     private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
-    private static final Pattern HTML_SCRIPT_STYLE = Pattern.compile("(?is)<(?:script|style|noscript)[^>]*>.*?</(?:script|style|noscript)>");
+    private static final Pattern HTML_SCRIPT_STYLE = Pattern.compile("(?is)<(?:script|style|noscript)\\b[^>]*>.*?</(?:script|style|noscript)>");
     private static final Pattern HTML_ENTITY_NUM = Pattern.compile("&#(x?[0-9a-fA-F]+);");
+
+    private static List<String> namuCandidates(String artist, String origTitle, String clean) {
+        String base = !clean.isEmpty() ? clean : origTitle;
+        List<String> out = new ArrayList<>(5);
+        if (base == null || base.isEmpty()) return out;
+        if (artist != null && !artist.isEmpty()) out.add(base + "(" + artist + ")");
+        out.add(base);
+        out.add(base + "(노래)");
+        out.add(base + "(곡)");
+        if (origTitle != null && !origTitle.isEmpty() && !origTitle.equals(base)) out.add(origTitle);
+        return out;
+    }
 
     private static boolean enrichFromNamuwiki(Result r, String artist, String origTitle, String clean) {
         if (r == null || r.lines.isEmpty()) return false;
-        String base = !clean.isEmpty() ? clean : origTitle;
-        if (base == null || base.isEmpty()) return false;
-        List<String> candidates = new ArrayList<>(3);
-        candidates.add(base);
-        if (artist != null && !artist.isEmpty()) candidates.add(base + "(" + artist + ")");
-        candidates.add(base + "(노래)");
+        List<String> candidates = namuCandidates(artist, origTitle, clean);
         int tried = 0;
         for (String doc : candidates) {
-            if (tried >= 2) break;
+            if (tried >= 4) break;
             tried++;
             try {
                 String url = "https://namu.wiki/w/" + Spotify.enc(doc).replace("+", "%20");
-                String html = getText(url, 4000);
+                String html = getText(url, 5500);
                 if (html == null || html.isEmpty()) continue;
                 // Respect anti-bot / Cloudflare challenge responses: stop immediately without bypassing.
                 if (isNamuChallengePage(html)) return false;
@@ -660,6 +677,41 @@ final class Lyrics {
         return false;
     }
 
+    /** Fallback when no synced lyrics provider returned anything: reads the song article's lyrics directly from Namuwiki. */
+    private static Result lookupNamuwikiPlain(String artist, String origTitle, String clean, boolean wantKoSub) {
+        List<String> candidates = namuCandidates(artist, origTitle, clean);
+        int tried = 0;
+        for (String doc : candidates) {
+            if (tried >= 4) break;
+            tried++;
+            try {
+                String url = "https://namu.wiki/w/" + Spotify.enc(doc).replace("+", "%20");
+                String html = getText(url, 5500);
+                if (html == null || html.isEmpty()) continue;
+                if (isNamuChallengePage(html)) return null;
+                List<String[]> pairs = parseNamuwikiHtml(html);
+                if (pairs.size() >= 4) {
+                    Result res = new Result();
+                    res.synced = false;
+                    res.source = "Namuwiki";
+                    for (String[] pair : pairs) {
+                        res.lines.add(new Line(-1, 0, pair[0], wantKoSub ? pair[1] : null, null));
+                    }
+                    return res;
+                }
+                List<String> plain = parseNamuwikiPlainLines(html);
+                if (plain.size() >= 4) {
+                    Result res = new Result();
+                    res.synced = false;
+                    res.source = "Namuwiki";
+                    for (String ln : plain) res.lines.add(new Line(-1, ln));
+                    return res;
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
     static boolean isNamuChallengePage(String html) {
         if (html == null || html.isEmpty()) return true;
         String head = html.length() > 4000 ? html.substring(0, 4000).toLowerCase(Locale.ROOT) : html.toLowerCase(Locale.ROOT);
@@ -668,13 +720,50 @@ final class Lyrics {
         return !hasHangul(html);
     }
 
+    /** Extracts the best collapsible "[ 가사 보기 ]" block from a Namuwiki song article (preferring full over TV Ver.). */
+    private static String extractNamuLyricsBlock(String body) {
+        Matcher dm = HTML_DETAILS_LYRICS.matcher(body);
+        String best = null;
+        int bestLen = 0;
+        while (dm.find()) {
+            String block = dm.group(1);
+            if (block == null) continue;
+            // Prefer the longest lyrics foldout (skips short TV Ver. / chorus snippets)
+            if (block.length() > bestLen) {
+                best = block;
+                bestLen = block.length();
+            }
+        }
+        return best;
+    }
+
+    /** Extracts plain lyrics lines from a Namuwiki song article's lyrics box (supports Korean-only songs too). */
+    static List<String> parseNamuwikiPlainLines(String html) {
+        List<String> out = new ArrayList<>();
+        if (html == null || html.isEmpty()) return out;
+        String body = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
+        String block = extractNamuLyricsBlock(body);
+        if (block == null) return out;
+        for (String line : splitCellLines(block)) {
+            if (line.length() >= 2 && line.length() <= 180 && !isMetaLine(line)) out.add(line);
+        }
+        return out;
+    }
+
     /** Extracts (original, Korean translation) line pairs from a Namuwiki song article's HTML. */
     static List<String[]> parseNamuwikiHtml(String html) {
         List<String[]> pairs = new ArrayList<>();
         if (html == null || html.isEmpty()) return pairs;
         String body = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
 
-        // 1) 2-column / 3-column lyric tables (most common Namuwiki format: orig cell + Korean translation cell)
+        // 1) Modern Namuwiki collapsible "[ 가사 보기 ]" lyrics block (handles both 2-line EN/KO and 3-line JP/pronunciation/KO)
+        String lyricsBlock = extractNamuLyricsBlock(body);
+        if (lyricsBlock != null) {
+            extractPairsFromSequentialLines(splitCellLines(lyricsBlock), pairs);
+            if (pairs.size() >= 2) return pairs;
+        }
+
+        // 2) Legacy 2-column / 3-column lyric tables (orig cell + Korean translation cell)
         Matcher trm = HTML_TR.matcher(body);
         while (trm.find()) {
             String row = trm.group(1);
@@ -682,14 +771,13 @@ final class Lyrics {
             Matcher tdm = HTML_TD.matcher(row);
             while (tdm.find()) cells.add(tdm.group(1));
             if (cells.size() < 2) continue;
-            // Find first non-Korean original lyric cell and corresponding Korean translation cell
             List<String> origLines = null, koLines = null;
             for (String cell : cells) {
                 List<String> lines = splitCellLines(cell);
                 if (lines.isEmpty()) continue;
                 boolean ko = majorityHangul(lines);
                 if (!ko && origLines == null && hasLetters(lines)) origLines = lines;
-                else if (ko && koLines == null && !isMetaCell(lines)) koLines = lines;
+                else if (ko && !isMetaCell(lines)) koLines = lines; // keep last Korean cell (translation over pronunciation)
             }
             if (origLines != null && koLines != null) {
                 int n = Math.min(origLines.size(), koLines.size());
@@ -705,19 +793,44 @@ final class Lyrics {
         }
         if (pairs.size() >= 2) return pairs;
 
-        // 2) Interleaved / alternating lines inside a lyric block (only when no lyric table was found)
-        int startIdx = body.indexOf("가사");
-        String slice = startIdx > 0 ? body.substring(startIdx, Math.min(body.length(), startIdx + 60000)) : body;
-        List<String> lines = splitCellLines(slice);
-        for (int i = 0; i + 1 < lines.size(); i++) {
-            String a = lines.get(i), b = lines.get(i + 1);
-            if (a.length() < 2 || b.length() < 2 || a.length() > 160 || b.length() > 160) continue;
-            if (!hasHangul(a) && hasLettersStr(a) && hasHangul(b) && !isMetaLine(b) && !isMetaLine(a)) {
-                pairs.add(new String[]{a, b});
+        // 3) Fallback: search from the LAST occurrence of "가사" heading (skipping the Table of Contents)
+        int startIdx = body.lastIndexOf("가사 보기");
+        if (startIdx < 0) startIdx = body.lastIndexOf(">가사<");
+        if (startIdx < 0) startIdx = body.indexOf("가사");
+        String slice = startIdx > 0 ? body.substring(startIdx, Math.min(body.length(), startIdx + 90000)) : body;
+        extractPairsFromSequentialLines(splitCellLines(slice), pairs);
+        return pairs;
+    }
+
+    /**
+     * Parses sequential Namuwiki lyric lines into (original, Korean translation) pairs.
+     * Supports both 2-line blocks (English -> Korean translation) and 3-line Japanese blocks
+     * (Japanese original -> Korean phonetic reading -> Korean translation, taking the last Hangul line).
+     */
+    private static void extractPairsFromSequentialLines(List<String> lines, List<String[]> out) {
+        int i = 0;
+        while (i < lines.size()) {
+            String a = lines.get(i);
+            if (a.length() < 2 || a.length() > 180 || hasHangul(a) || !hasLettersStr(a) || isMetaLine(a)) {
+                i++;
+                continue;
+            }
+            // Collect 1..2 immediately following Hangul lines (2 lines = phonetic reading + meaning translation)
+            int j = i + 1;
+            String bestKo = null;
+            while (j < lines.size() && j <= i + 2) {
+                String cand = lines.get(j);
+                if (cand.length() < 2 || cand.length() > 180 || !hasHangul(cand) || isMetaLine(cand)) break;
+                bestKo = cand; // overwrite phonetic line with meaning translation line when 2 Korean lines follow
+                j++;
+            }
+            if (bestKo != null) {
+                out.add(new String[]{a, bestKo});
+                i = j;
+            } else {
                 i++;
             }
         }
-        return pairs;
     }
 
     /** Matches extracted Namuwiki (original, Korean) pairs to synced Result lines and returns match count. */
@@ -772,7 +885,9 @@ final class Lyrics {
     }
 
     private static List<String> splitCellLines(String html) {
-        String s = HTML_BREAK.matcher(html).replaceAll("\n");
+        // Strip <rt>/<rp> furigana annotations BEFORE stripping tags so Japanese kanji stays exact for matching
+        String s = HTML_RUBY_ANNO.matcher(html).replaceAll("");
+        s = HTML_BREAK.matcher(s).replaceAll("\n");
         s = HTML_TAG.matcher(s).replaceAll("");
         s = decodeHtmlEntities(s);
         List<String> out = new ArrayList<>();
@@ -845,6 +960,7 @@ final class Lyrics {
 
     private static String getTextWithHeader(String url, String hKey, String hVal, int timeout) throws Exception {
         HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
+        h.setInstanceFollowRedirects(true);
         h.setConnectTimeout(4500);
         h.setReadTimeout(timeout);
         h.setRequestProperty("User-Agent", "Prism/9.5 (Android)");

@@ -403,20 +403,20 @@ final class NowPlaying extends FrameLayout {
         // Keep >= 36dp center clearance above navInset on 16:10 cover screens so 44dp active circles & 54dp glass pill NEVER clip!
         bottomY = H - Ui.navInset - Ui.dpf(Ui.cover() ? 36 : 38);
         if (oneui) {
-            // G style: generous cover on 16:10 wide cover screens too, then output chip -> title/artist -> wave -> controls -> volume
-            float s1 = Ui.dpf(Ui.cover() ? 20 : 24);
-            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.405f : 0.38f));
-            float topPad = top + Ui.dpf(Ui.cover() ? 24 : 36);
+            // G style: generous breathing room between cover, output chip, title/artist, wave, controls, and volume
+            float s1 = Ui.dpf(Ui.cover() ? 22 : 28);
+            float size = Math.min(W - s1 * 2, H * (Ui.cover() ? 0.385f : 0.37f));
+            float topPad = top + Ui.dpf(Ui.cover() ? 26 : 42);
             artBig.set((W - size) / 2f, topPad, (W + size) / 2f, topPad + size);
             float sm = Ui.dpf(64);
-            artSmall.set(side, top + Ui.dpf(40), side + sm, top + Ui.dpf(40) + sm);
-            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 18 : 26);
-            titleBigY = devY + Ui.dpf(Ui.cover() ? 24 : 36);
+            artSmall.set(side, top + Ui.dpf(42), side + sm, top + Ui.dpf(42) + sm);
+            float devY = artBig.bottom + Ui.dpf(Ui.cover() ? 22 : 30);
+            titleBigY = devY + Ui.dpf(Ui.cover() ? 28 : 40);
             titleSmallY = artSmall.centerY() - Ui.dpf(23);
-            seekY = titleBigY + Ui.dpf(Ui.cover() ? 76 : 92);
-            timesY = seekY + Ui.dpf(Ui.cover() ? 18 : 22);
-            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 44 : 52), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 16 : 22));
-            panelRect.set(0, artSmall.bottom + Ui.dpf(18), W, seekY - Ui.dpf(26));
+            seekY = titleBigY + Ui.dpf(Ui.cover() ? 82 : 98);
+            timesY = seekY + Ui.dpf(Ui.cover() ? 20 : 24);
+            ctrlY = Math.max(timesY + Ui.dpf(Ui.cover() ? 48 : 58), (timesY + bottomY) / 2f - Ui.dpf(Ui.cover() ? 14 : 20));
+            panelRect.set(0, artSmall.bottom + Ui.dpf(20), W, seekY - Ui.dpf(26));
             return;
         }
         float aSide = Ui.dpf(Ui.cover() ? 20 : 28);
@@ -1303,6 +1303,7 @@ final class NowPlaying extends FrameLayout {
         artScale.to(Player.playing || !shrink ? 1f : 0.86f);
         lastElapsedSec = -1L;
         lastRemainSec = -1L;
+        if (activeQueueWave != null) activeQueueWave.syncPlaying();
         tick();
         ensureTicker();
     }
@@ -1490,6 +1491,80 @@ final class NowPlaying extends FrameLayout {
         });
     }
 
+    private QueueWaveView activeQueueWave;
+
+    /** Live animated 4-bar white equalizer shown at the right edge of the currently playing queue row. */
+    private static final class QueueWaveView extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private boolean running;
+        private final Runnable frame = new Runnable() {
+            @Override public void run() {
+                if (!running || !isAttachedToWindow()) { running = false; return; }
+                invalidate();
+                if (Player.playing) postDelayed(this, 33);
+                else running = false;
+            }
+        };
+
+        QueueWaveView(Context c) {
+            super(c);
+            p.setColor(0xFFFFFFFF);
+        }
+
+        void syncPlaying() {
+            if (Player.playing && isAttachedToWindow()) {
+                if (!running) {
+                    running = true;
+                    removeCallbacks(frame);
+                    post(frame);
+                }
+            } else {
+                running = false;
+                removeCallbacks(frame);
+                invalidate();
+            }
+        }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            syncPlaying();
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            running = false;
+            removeCallbacks(frame);
+            super.onDetachedFromWindow();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            int bars = 4;
+            float bw = Ui.dpf(2.4f);
+            float gap = Ui.dpf(2.2f);
+            float totalW = bars * bw + (bars - 1) * gap;
+            float x0 = (w - totalW) * 0.5f;
+            float maxH = Math.min(h * 0.72f, Ui.dpf(15f));
+            float minH = Ui.dpf(3.2f);
+            float cy = h * 0.5f;
+            double t = SystemClock.uptimeMillis() / 1000.0;
+            float[] freqs = {5.4f, 7.1f, 6.2f, 4.9f};
+            float[] phases = {0.0f, 1.4f, 2.7f, 0.8f};
+            float[] idle = {0.32f, 0.55f, 0.42f, 0.28f};
+            p.setColor(Player.playing ? 0xFFFFFFFF : 0xB8FFFFFF);
+            for (int i = 0; i < bars; i++) {
+                float k = Player.playing
+                        ? (0.5f + 0.5f * (float) Math.sin(t * freqs[i] + phases[i]) * (0.78f + 0.22f * (float) Math.cos(t * 2.3 + i)))
+                        : idle[i];
+                float bh = minH + (maxH - minH) * Ui.clamp(k, 0f, 1f);
+                float bx = x0 + i * (bw + gap);
+                r.set(bx, cy - bh * 0.5f, bx + bw, cy + bh * 0.5f);
+                c.drawRoundRect(r, bw * 0.5f, bw * 0.5f, p);
+            }
+        }
+    }
+
     private View queueRow(Context c, String name, String artist, String art, boolean isCurrent) {
         LinearLayout r = new LinearLayout(c);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -1503,15 +1578,20 @@ final class NowPlaying extends FrameLayout {
         col.addView(Ui.text(c, name, 15, isCurrent ? Ui.bold : Ui.medium, 0xFFFFFFFF), Widgets.MW);
         col.addView(Ui.text(c, artist, 13, isCurrent ? Ui.medium : Ui.regular, isCurrent ? 0xDDFFFFFF : 0x99FFFFFF), Widgets.MW);
         r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        r.addView(new Icons.IconView(c, isCurrent ? Icons.WAVE : Icons.DRAG, isCurrent ? 18 : 20,
-                isCurrent ? Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.55f) : 0x66FFFFFF),
-                new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26)));
+        if (isCurrent) {
+            QueueWaveView wave = new QueueWaveView(c);
+            activeQueueWave = wave;
+            r.addView(wave, new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26)));
+        } else {
+            r.addView(new Icons.IconView(c, Icons.DRAG, 20, 0x66FFFFFF),
+                    new LinearLayout.LayoutParams(Ui.dp(26), Ui.dp(26)));
+        }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(Ui.dp(16), Ui.dp(2), Ui.dp(16), Ui.dp(2));
         r.setLayoutParams(lp);
         if (isCurrent) {
-            android.graphics.drawable.GradientDrawable border = Ui.round(Ui.alpha(Ui.ACCENT, 0.16f), 14);
-            border.setStroke(Math.max(2, Ui.dp(1.6f)), Ui.mix(Ui.ACCENT, 0xFFFFFFFF, 0.48f));
+            android.graphics.drawable.GradientDrawable border = Ui.round(0x1FFFFFFF, 14);
+            border.setStroke(Math.max(2, Ui.dp(1.5f)), 0xEEFFFFFF);
             r.setBackground(border);
         }
         return r;

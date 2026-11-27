@@ -301,7 +301,8 @@ final class Pages {
         FrameLayout wrap = new FrameLayout(m);
         wrap.setClipChildren(false);
         wrap.setClipToPadding(false);
-        wrap.setPadding(Ui.dp(18), Ui.dp(4), Ui.dp(18), Ui.dp(18));
+        int side = Ui.dp(Ui.gStyle ? 20 : 18);
+        wrap.setPadding(side, Ui.dp(Ui.gStyle ? 6 : 4), side, Ui.dp(Ui.gStyle ? 22 : 18));
 
         final float radDp = Ui.gStyle ? 24f : 20f;
         LinearLayout card = new LinearLayout(m) {

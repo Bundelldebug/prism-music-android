@@ -85,7 +85,8 @@ final class Widgets {
         TextView t = Ui.text(c, title, 20.5f, Ui.bold, Ui.text());
         t.setLetterSpacing(-0.022f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(Ui.dp(18), Ui.dp(24), Ui.dp(18), Ui.dp(11));
+        int side = Ui.dp(Ui.gStyle ? 22 : 18);
+        lp.setMargins(side, Ui.dp(Ui.gStyle ? 28 : 24), side, Ui.dp(Ui.gStyle ? 14 : 11));
         t.setLayoutParams(lp);
         return t;
     }
@@ -94,23 +95,26 @@ final class Widgets {
         TextView t = Ui.text(c, text, 13, Ui.regular, Ui.text2());
         t.setSingleLine(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(Ui.dp(20), Ui.dp(4), Ui.dp(20), Ui.dp(8));
+        int side = Ui.dp(Ui.gStyle ? 24 : 20);
+        lp.setMargins(side, Ui.dp(Ui.gStyle ? 8 : 4), side, Ui.dp(Ui.gStyle ? 12 : 8));
         t.setLayoutParams(lp);
         return t;
     }
 
     /** Horizontal rail: returns the inner LinearLayout (already wrapped in a scroller added to parent). */
     static LinearLayout rail(LinearLayout parent, int spacingDp) {
+        int gap = Ui.gStyle ? spacingDp + 4 : spacingDp;
+        int pad = Ui.gStyle ? 20 : 16;
         HorizontalScrollView hs = new HorizontalScrollView(parent.getContext());
         hs.setHorizontalScrollBarEnabled(false);
         hs.setOverScrollMode(View.OVER_SCROLL_NEVER);
         hs.setClipToPadding(false);
         LinearLayout row = new LinearLayout(parent.getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(Ui.dp(16), 0, Ui.dp(16 - spacingDp), 0);
+        row.setPadding(Ui.dp(pad), 0, Ui.dp(Math.max(4, pad - gap)), 0);
         hs.addView(row);
         parent.addView(hs, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        row.setTag(spacingDp);
+        row.setTag(gap);
         return row;
     }
 
@@ -310,7 +314,9 @@ final class Widgets {
     static View trackRow(Context c, Item it, int index, View.OnClickListener click, View.OnClickListener more) {
         LinearLayout r = new LinearLayout(c);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(Ui.dp(16), Ui.dp(7), Ui.dp(6), Ui.dp(7));
+        int hPad = Ui.dp(Ui.gStyle ? 20 : 16);
+        int vPad = Ui.dp(Ui.gStyle ? 10 : 7);
+        r.setPadding(hPad, vPad, Ui.dp(Ui.gStyle ? 10 : 6), vPad);
         if (index > 0) {
             TextView n = Ui.text(c, String.valueOf(index), 14, Ui.semibold, Ui.text2());
             n.setGravity(Gravity.CENTER);
@@ -322,13 +328,13 @@ final class Widgets {
         }
         LinearLayout col = new LinearLayout(c);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(Ui.dp(13), 0, Ui.dp(4), 0);
+        col.setPadding(Ui.dp(Ui.gStyle ? 15 : 13), 0, Ui.dp(6), 0);
         TextView t = Ui.text(c, it.title, 15, Ui.medium, Ui.text());
         t.setLetterSpacing(-0.01f);
         col.addView(t, MW);
         TextView s = Ui.text(c, it.subtitle, 12.5f, Ui.regular, Ui.text2());
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sl.topMargin = Ui.dp(2.5f);
+        sl.topMargin = Ui.dp(Ui.gStyle ? 3.5f : 2.5f);
         col.addView(s, sl);
         r.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (more != null) {
@@ -336,7 +342,7 @@ final class Widgets {
             r.addView(m, new LinearLayout.LayoutParams(Ui.dp(40), Ui.dp(40)));
             m.setOnClickListener(more);
         } else {
-            r.setPadding(Ui.dp(16), Ui.dp(7), Ui.dp(16), Ui.dp(7));
+            r.setPadding(hPad, vPad, hPad, vPad);
         }
         r.setBackground(ripple());
         r.setOnClickListener(click);
@@ -445,20 +451,21 @@ final class Widgets {
             setOrientation(VERTICAL);
             if (header != null) {
                 TextView h = Ui.text(c, header, Ui.gStyle ? 13.5f : 14f, Ui.gStyle ? Ui.semibold : Ui.regular, Ui.text2());
-                h.setPadding(Ui.dp(Ui.gStyle ? 28 : 33), Ui.dp(Ui.gStyle ? 22 : 24), Ui.dp(28), Ui.dp(8));
+                h.setPadding(Ui.dp(Ui.gStyle ? 28 : 33), Ui.dp(Ui.gStyle ? 26 : 24), Ui.dp(28), Ui.dp(Ui.gStyle ? 10 : 8));
                 addView(h, MW);
             } else {
                 View sp = new View(c);
-                addView(sp, new LayoutParams(1, Ui.dp(Ui.gStyle ? 16 : 14)));
+                addView(sp, new LayoutParams(1, Ui.dp(Ui.gStyle ? 20 : 14)));
             }
             card = new LinearLayout(c);
             card.setOrientation(VERTICAL);
+            if (Ui.gStyle) card.setPadding(0, Ui.dp(4), 0, Ui.dp(4));
             GradientDrawable cardBg = Ui.round(Ui.card(), Ui.cardRadius());
             cardBg.setStroke(Math.max(1, Ui.dp(0.6f)), Ui.dark ? 0x18FFFFFF : 0x0E000000);
             card.setBackground(cardBg);
             card.setClipToOutline(true);
             LayoutParams lp = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.leftMargin = lp.rightMargin = Ui.dp(16);
+            lp.leftMargin = lp.rightMargin = Ui.dp(Ui.gStyle ? 18 : 16);
             addView(card, lp);
         }
 
@@ -468,14 +475,14 @@ final class Widgets {
                 View sep = new View(c);
                 sep.setBackgroundColor(Ui.separator());
                 LayoutParams sl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(0.5f)));
-                sl.leftMargin = icon != 0 ? Ui.dp(Ui.gStyle ? 64 : 52) : Ui.dp(Ui.gStyle ? 20 : 16);
-                if (Ui.gStyle) sl.rightMargin = Ui.dp(20);
+                sl.leftMargin = icon != 0 ? Ui.dp(Ui.gStyle ? 68 : 52) : Ui.dp(Ui.gStyle ? 22 : 16);
+                if (Ui.gStyle) sl.rightMargin = Ui.dp(22);
                 card.addView(sep, sl);
             }
             LinearLayout r = new LinearLayout(c);
             r.setGravity(Gravity.CENTER_VERTICAL);
-            r.setPadding(Ui.dp(Ui.gStyle ? 18 : 16), 0, Ui.dp(Ui.gStyle ? 16 : 14), 0);
-            r.setMinimumHeight(Ui.dp(Ui.gStyle ? 56 : 53));
+            r.setPadding(Ui.dp(Ui.gStyle ? 20 : 16), Ui.dp(Ui.gStyle ? 6 : 0), Ui.dp(Ui.gStyle ? 18 : 14), Ui.dp(Ui.gStyle ? 6 : 0));
+            r.setMinimumHeight(Ui.dp(Ui.gStyle ? 60 : 53));
             if (icon != 0) {
                 if (Ui.gStyle) {
                     FrameLayout badge = new FrameLayout(c);

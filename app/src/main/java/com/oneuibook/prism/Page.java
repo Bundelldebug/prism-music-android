@@ -165,13 +165,12 @@ abstract class Page extends FrameLayout {
         bigTitle.setLineSpacing(0, 1.05f);
         if (gRoot) {
             boolean wideScreen = main.sideInset() > 0 || main.tabletUi();
-            // One UI 8.5/9.x Expanding App Bar: balanced top breathing room without excessive dead space;
-            // unfolded foldable / tablet keeps compact left-aligned title so it never collides with rail or top tabs
+            // One UI 8.5/9.x Expanding App Bar: comfortable breathing room in G style
             bigTitle.setGravity(wideScreen ? android.view.Gravity.START : android.view.Gravity.CENTER);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int topM = Ui.dp(wideScreen ? 10 : (Ui.cover() ? 16 : 30));
-            int botM = Ui.dp(wideScreen ? 6 : (Ui.cover() ? 10 : 16));
-            lp.setMargins(Ui.dp(22), topM, Ui.dp(22), botM);
+            int topM = Ui.dp(wideScreen ? 14 : (Ui.cover() ? 20 : 34));
+            int botM = Ui.dp(wideScreen ? 10 : (Ui.cover() ? 14 : 20));
+            lp.setMargins(Ui.dp(24), topM, Ui.dp(24), botM);
             content.addView(bigTitle, lp);
             return;
         }

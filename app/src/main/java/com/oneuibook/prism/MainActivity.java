@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.25";
+    static final String VERSION = "9.5.26";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -271,15 +271,56 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         dock.morphFrom(g);
     }
 
+    private boolean autoAodRxRegistered;
+    private final android.content.BroadcastReceiver autoAodScreenOffRx = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent intent) {
+            if (!Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) return;
+            if (!Settings.pref(MainActivity.this, AodOverlay.PREF_AUTO_SCREEN_OFF, false)) return;
+            if (aod == null || aod.isOpen()) return;
+            try {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    @SuppressWarnings("deprecation")
+                    android.os.PowerManager.WakeLock wl = pm.newWakeLock(
+                            android.os.PowerManager.SCREEN_DIM_WAKE_LOCK | android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                            "prism:auto_aod");
+                    wl.acquire(1800L);
+                }
+            } catch (Throwable ignored) {}
+            root.post(() -> { if (aod != null && !aod.isOpen()) aod.open(true); });
+        }
+    };
+
+    void syncAutoAodReceiver() {
+        boolean want = Settings.pref(this, AodOverlay.PREF_AUTO_SCREEN_OFF, false);
+        if (want && !autoAodRxRegistered) {
+            try {
+                android.content.IntentFilter f = new android.content.IntentFilter(Intent.ACTION_SCREEN_OFF);
+                if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(autoAodScreenOffRx, f, Context.RECEIVER_EXPORTED);
+                else registerReceiver(autoAodScreenOffRx, f);
+                autoAodRxRegistered = true;
+            } catch (Throwable ignored) {}
+        } else if (!want && autoAodRxRegistered) {
+            try { unregisterReceiver(autoAodScreenOffRx); } catch (Throwable ignored) {}
+            autoAodRxRegistered = false;
+        }
+    }
+
     @Override protected void onResume() {
         super.onResume();
         Player.activity = this;
         Player.start(this);
+        syncAutoAodReceiver();
     }
 
     @Override protected void onPause() {
         super.onPause();
-        if (aod != null && aod.isOpen()) aod.closeImmediate();
+        boolean keepAutoAod = aod != null && aod.isAutoLockActive();
+        if (!keepAutoAod && aod != null && aod.isOpen()) aod.closeImmediate();
+        if (!keepAutoAod && autoAodRxRegistered) {
+            try { unregisterReceiver(autoAodScreenOffRx); } catch (Throwable ignored) {}
+            autoAodRxRegistered = false;
+        }
         if (Player.playing && Player.track != null && Player.onThisPhone()) {
             LocalMusic.PlaybackService.claimControl(getApplicationContext());
         }
@@ -679,6 +720,10 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
     }
 
     @Override protected void onDestroy() {
+        if (autoAodRxRegistered) {
+            try { unregisterReceiver(autoAodScreenOffRx); } catch (Throwable ignored) {}
+            autoAodRxRegistered = false;
+        }
         if (Player.activity == this) Player.activity = null;
         if (isFinishing() && !Player.playing) NpuAudio.release();
         // closing the app (Recents swipe / back) while Spotify plays in-app: the player keeps running in this process

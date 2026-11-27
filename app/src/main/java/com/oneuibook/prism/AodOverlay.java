@@ -46,7 +46,13 @@ final class AodOverlay extends FrameLayout {
     private final Icons.IconView prevBtn, playBtn, nextBtn;
     private final ProgressBar bar;
 
+    static final String PREF_AUTO_SCREEN_OFF = "aod_on_screen_off";
+    static final long AOD_TICK_MS = 5000L; // 5-second power-saving refresh interval for progress bar & clock
+    private static final long AOD_SHIFT_MS = 60000L;
+
     private boolean shown;
+    private boolean autoLockActive;
+    private long openedAtMs;
     private float dimP;
     private ValueAnimator dimAnim;
     private int shiftStep;
@@ -59,7 +65,7 @@ final class AodOverlay extends FrameLayout {
     private Bitmap frozenArt;
     private int[] frozenPal = Img.palette(null);
 
-    // 16-point smooth oval orbit inside ±6dp: each step moves only ~1.8–2.4dp over 1.8s (imperceptible)
+    // 16-point smooth oval orbit inside ±6dp: low-power discrete micro-shift every 60s
     private static final float[] SHIFT_DX = {
             0f, 2.0f, 3.8f, 5.2f, 6.0f, 5.5f, 4.0f, 2.0f,
             0f, -2.0f, -4.0f, -5.5f, -6.0f, -5.2f, -3.8f, -2.0f
@@ -72,6 +78,8 @@ final class AodOverlay extends FrameLayout {
     private final BroadcastReceiver screenOffRx = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent intent) {
             if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                // Ignore the initiating SCREEN_OFF event during the first 1.5s when auto-launched from power-off
+                if (autoLockActive && (android.os.SystemClock.uptimeMillis() - openedAtMs < 1500L)) return;
                 closeImmediate();
             }
         }
@@ -83,7 +91,7 @@ final class AodOverlay extends FrameLayout {
             if (!shown) return;
             syncClock();
             syncProgress();
-            postDelayed(this, 1000);
+            postDelayed(this, AOD_TICK_MS);
         }
     };
 
@@ -91,13 +99,14 @@ final class AodOverlay extends FrameLayout {
         @Override public void run() {
             if (!shown) return;
             shiftStep = (shiftStep + 1) % SHIFT_DX.length;
+            // Short 240ms low-power shift so LTPO OLED immediately drops back to idle refresh rate
             cluster.animate()
                     .translationX(Ui.dpf(SHIFT_DX[shiftStep]))
                     .translationY(Ui.dpf(SHIFT_DY[shiftStep]))
-                    .setDuration(1800)
+                    .setDuration(240)
                     .setInterpolator(Ui.ONEUI_SINE_80)
                     .start();
-            postDelayed(this, 24000);
+            postDelayed(this, AOD_SHIFT_MS);
         }
     };
 
@@ -155,12 +164,9 @@ final class AodOverlay extends FrameLayout {
     }
 
     private static void enableMarquee(TextView t) {
+        // Static ellipsize in AOD saves substantial OLED/GPU refresh power vs continuous 60fps marquee scrolling
         t.setSingleLine(true);
-        t.setEllipsize(TextUtils.TruncateAt.MARQUEE);
-        t.setMarqueeRepeatLimit(-1);
-        t.setHorizontalFadingEdgeEnabled(true);
-        t.setFadingEdgeLength(Ui.dp(18));
-        t.setSelected(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
     }
 
     /**
@@ -209,10 +215,15 @@ final class AodOverlay extends FrameLayout {
     }
 
     boolean isOpen() { return shown; }
+    boolean isAutoLockActive() { return shown && autoLockActive; }
 
-    void open() {
+    void open() { open(false); }
+
+    void open(boolean fromScreenOff) {
         if (shown) return;
         shown = true;
+        autoLockActive = fromScreenOff;
+        openedAtMs = android.os.SystemClock.uptimeMillis();
         setVisibility(VISIBLE);
         bringToFront();
         shiftStep = 0;
@@ -225,29 +236,30 @@ final class AodOverlay extends FrameLayout {
         Player.listeners.add(playerL);
         Player.trackListeners.add(playerL);
         registerScreenOff();
-        if (main.np != null) main.np.setAodFreeze(true, 0f);
-        applyWindowMode(true);
+        if (main.np != null) main.np.setAodFreeze(true, 1f);
+        applyWindowMode(true, fromScreenOff);
         hintView.animate().cancel();
-        hintView.setAlpha(0.75f);
-        animateDim(1f, 520, null);
+        hintView.setAlpha(0.65f);
+        animateDim(1f, fromScreenOff ? 220 : 420, null);
         removeCallbacks(tick);
         removeCallbacks(shift);
         post(tick);
-        postDelayed(shift, 24000);
-        hintView.animate().alpha(0.28f).setStartDelay(3200).setDuration(1000).start();
+        postDelayed(shift, AOD_SHIFT_MS);
+        hintView.animate().alpha(0.22f).setStartDelay(2600).setDuration(800).start();
     }
 
     void close() {
         if (!shown) return;
         shown = false;
+        autoLockActive = false;
         removeCallbacks(tick);
         removeCallbacks(shift);
         cluster.animate().cancel();
         Player.listeners.remove(playerL);
         Player.trackListeners.remove(playerL);
         unregisterScreenOff();
-        applyWindowMode(false);
-        animateDim(0f, 380, () -> {
+        applyWindowMode(false, false);
+        animateDim(0f, 340, () -> {
             if (!shown) {
                 if (main.np != null) main.np.setAodFreeze(false, 0f);
                 setVisibility(GONE);
@@ -259,6 +271,7 @@ final class AodOverlay extends FrameLayout {
     void closeImmediate() {
         if (!shown && getVisibility() != VISIBLE) return;
         shown = false;
+        autoLockActive = false;
         if (dimAnim != null) dimAnim.cancel();
         removeCallbacks(tick);
         removeCallbacks(shift);
@@ -266,7 +279,7 @@ final class AodOverlay extends FrameLayout {
         Player.listeners.remove(playerL);
         Player.trackListeners.remove(playerL);
         unregisterScreenOff();
-        applyWindowMode(false);
+        applyWindowMode(false, false);
         dimP = 0f;
         if (main.np != null) main.np.setAodFreeze(false, 0f);
         setVisibility(GONE);
@@ -330,31 +343,9 @@ final class AodOverlay extends FrameLayout {
     @Override protected void onDraw(Canvas c) {
         float k = Ui.clamp(dimP, 0f, 1f);
         if (k <= 0.001f) return;
-        boolean playerOpenBehind = main.np != null && main.np.getVisibility() == VISIBLE && main.np.openP > 0.8f;
-        if (playerOpenBehind) {
-            // Keep the frozen player artwork backdrop visible underneath, gently dimmed (not flat pure black)
-            int scrimA = Math.round(145 * k); // ~57% dim scrim
-            c.drawColor(scrimA << 24);
-        } else {
-            // Launched while NowPlaying is closed: draw a frozen blurred artwork/palette backdrop + gentle dim
-            int w = getWidth(), h = getHeight();
-            int sc = c.saveLayerAlpha(0, 0, w, h, Math.round(255 * k));
-            if (frozenArt != null) {
-                float scale = Math.max(w / (float) frozenArt.getWidth(), h / (float) frozenArt.getHeight()) * 1.25f;
-                bgM.reset();
-                bgM.postTranslate(-frozenArt.getWidth() / 2f, -frozenArt.getHeight() / 2f);
-                bgM.postScale(scale, scale);
-                bgM.postTranslate(w / 2f, h / 2f);
-                c.drawColor(frozenPal[0]);
-                c.drawBitmap(frozenArt, bgM, bgPaint);
-            } else {
-                bgPaint.setShader(new LinearGradient(0, 0, w, h, frozenPal[0], frozenPal[3], Shader.TileMode.CLAMP));
-                c.drawRect(0, 0, w, h, bgPaint);
-                bgPaint.setShader(null);
-            }
-            c.drawColor(0x96000000);
-            c.restoreToCount(sc);
-        }
+        // True OLED power optimization: pure black background turns off >80% of display pixels in AOD
+        int bgA = Math.round(255 * k);
+        c.drawColor(bgA << 24);
     }
 
     private void applyPlayerLook() {
@@ -366,12 +357,16 @@ final class AodOverlay extends FrameLayout {
         artistView.setGravity(grav);
         prevBtn.sizeDp = nextBtn.sizeDp = o ? 26f : 36f;
         playBtn.sizeDp = o ? 32f : 42f;
-        for (Icons.IconView v : new Icons.IconView[]{prevBtn, nextBtn}) v.setBackground(o ? Ui.round(0x18FFFFFF, 100) : null);
-        playBtn.setBackground(o ? Ui.round(0x28FFFFFF, 100) : null);
+        for (Icons.IconView v : new Icons.IconView[]{prevBtn, nextBtn}) v.setBackground(o ? Ui.round(0x14FFFFFF, 100) : null);
+        playBtn.setBackground(o ? Ui.round(0x22FFFFFF, 100) : null);
         cluster.requestLayout();
     }
 
-    private void applyWindowMode(boolean enter) {
+    private void applyWindowMode(boolean enter, boolean showOnLock) {
+        try {
+            main.setShowWhenLocked(enter && showOnLock);
+            main.setTurnScreenOn(enter && showOnLock);
+        } catch (Throwable ignored) {}
         Window w = main.getWindow();
         if (w == null) return;
         if (enter) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -379,8 +374,8 @@ final class AodOverlay extends FrameLayout {
         WindowManager.LayoutParams lp = w.getAttributes();
         boolean autoBright = Settings.pref(main, "aod_auto_bright", false);
         boolean dim = Settings.pref(main, "aod_dim", true);
-        // When auto-brightness is enabled, let Android's ambient brightness control screen brightness naturally
-        lp.screenBrightness = (enter && !autoBright && dim) ? 0.14f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        // Ultra-low OLED AOD brightness (8%) when dim mode is enabled and auto-brightness is off
+        lp.screenBrightness = (enter && !autoBright && dim) ? 0.08f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
         w.setAttributes(lp);
         WindowInsetsController c = w.getInsetsController();
         if (c != null) {

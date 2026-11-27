@@ -526,6 +526,7 @@ final class Settings {
             content.addView(fx, Widgets.MW);
             Widgets.Group aodG = new Widgets.Group(m, m.getString(R.string.aod_title));
             aodG.row(Icons.AOD, Ui.ACCENT, m.getString(R.string.aod_open), null, true, v -> m.openAod());
+            toggleRow(aodG, Icons.AOD, m.getString(R.string.aod_auto_screen_off), AodOverlay.PREF_AUTO_SCREEN_OFF, false, m::syncAutoAodReceiver);
             toggleRow(aodG, Icons.APPEARANCE, m.getString(R.string.aod_auto_bright), "aod_auto_bright", false, null);
             toggleRow(aodG, Icons.APPEARANCE, m.getString(R.string.aod_dim), "aod_dim", true, null);
             content.addView(aodG, Widgets.MW);
@@ -598,143 +599,29 @@ final class Settings {
             mg.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.bpa_supported_socs), m.getString(R.string.bpa_supported_socs_sub), true, v -> m.push(new SupportedChipsetsPage(m)));
             content.addView(mg, Widgets.MW);
 
-            // 3) USB DAC & Hardware Output Suite (New audiophile controls!)
-            Widgets.Group dacG = new Widgets.Group(m, m.getString(R.string.bpa_dac_section));
-            dacG.row(Icons.DAC, Ui.ACCENT, m.getString(R.string.bpa_dac_specs), BitPerfect.dacProfileSummary(m), false, null);
-            toggleRow(dacG, Icons.DEVICE, m.getString(R.string.bp_title), BitPerfect.PREF, false, () -> {
-                if (!BitPerfect.enabled(m)) BitPerfect.clear(m);
-                LocalMusic.reopen();
-                Spotify.MAIN.postDelayed(() -> { if (isAttachedToWindow()) rebuild(); }, 400);
-            });
-            // Output Mode pills (Auto BP / USB Direct / Fixed Volume / 32-bit Float)
-            dacG.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_output_mode)), Widgets.MW);
-            dacG.card.addView(pillSelectorRow(m, BitPerfect.OUTPUT_MODES, BitPerfect.OUTPUT_MODE_LABELS, BitPerfect.outputMode(m), true, val -> {
-                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_OUTPUT_MODE, val).apply();
-                LocalMusic.reopen();
-                rebuild();
-            }), Widgets.MW);
-            // Target Sample Rate horizontal scroll chips
-            dacG.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_sample_rate)), Widgets.MW);
-            dacG.card.addView(sampleRateRow(m), Widgets.MW);
-            // USB Buffer Latency selector
-            dacG.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_buffer)), Widgets.MW);
-            String[] bufKeys = {"20", "45", "90"};
-            dacG.card.addView(pillSelectorRow(m, bufKeys, BitPerfect.BUFFER_LABELS, String.valueOf(BitPerfect.bufferMs(m)), true, val -> {
-                MainActivity.prefs(m).edit().putInt(BitPerfect.PREF_BUFFER_MS, Integer.parseInt(val)).apply();
-                rebuild();
-            }), Widgets.MW);
-            content.addView(dacG, Widgets.MW);
-
-            // 4) Audiophile DSP & Filter Suite (Dithering, Oversampling Filter, ReplayGain, Crossfeed, Mono, L/R Balance)
-            Widgets.Group dspG = new Widgets.Group(m, m.getString(R.string.bpa_dsp_section));
-            dspG.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_dither)), Widgets.MW);
-            dspG.card.addView(pillSelectorRow(m, BitPerfect.DITHERS, BitPerfect.DITHER_LABELS, BitPerfect.dither(m), true, val -> {
-                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_DITHER, val).apply();
-                NpuAudio.apply(m, true);
-                rebuild();
-            }), Widgets.MW);
-            dspG.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_filter)), Widgets.MW);
-            dspG.card.addView(pillSelectorRow(m, BitPerfect.FILTERS, BitPerfect.FILTER_LABELS, BitPerfect.filter(m), true, val -> {
-                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_FILTER, val).apply();
-                NpuAudio.apply(m, true);
-                rebuild();
-            }), Widgets.MW);
-            toggleRow(dspG, Icons.WAVE, m.getString(R.string.bpa_replaygain), BitPerfect.PREF_REPLAYGAIN, false, () -> {
-                LocalMusic.applyChannelBalance();
-                YouTubeMusic.applyChannelBalance();
-            });
-            toggleRow(dspG, Icons.HEADPHONES, m.getString(R.string.bpa_crossfeed), BitPerfect.PREF_CROSSFEED, false, () -> NpuAudio.apply(m, true));
-            toggleRow(dspG, Icons.VOLUME, m.getString(R.string.bpa_mono), BitPerfect.PREF_MONO, false, () -> NpuAudio.apply(m, true));
-            int curBal = BitPerfect.balance(m);
-            View balRow = dspG.row(Icons.SLIDERS, Ui.ACCENT, m.getString(R.string.bpa_balance), formatBalance(m, curBal), false, null);
-            Widgets.GlassSlider balSl = new Widgets.GlassSlider(m, (curBal + 100) / 200f, 20);
-            balSl.change = v -> {
-                int b = Math.round(v * 200f) - 100;
-                if (Math.abs(b) < 6) b = 0;
-                MainActivity.prefs(m).edit().putInt(BitPerfect.PREF_BALANCE, b).apply();
-                Object tv = balRow.getTag();
-                if (tv instanceof TextView) ((TextView) tv).setText(formatBalance(m, b));
-                LocalMusic.applyChannelBalance();
-                YouTubeMusic.applyChannelBalance();
-            };
-            dspG.card.addView(balSl, Widgets.MW);
-            content.addView(dspG, Widgets.MW);
-
-            // 5) Live Frequency Response Curve + Instant A/B Bypass Comparison
-            NpuAudio.CurveView curveView = new NpuAudio.CurveView(m);
-            Widgets.Group cg = new Widgets.Group(m, m.getString(R.string.bpa_curve));
-            cg.card.addView(curveView, Widgets.MW);
-            if (supported && active) {
-                TextView abBtn = Ui.text(m, m.getString(R.string.bpa_ab_hold), 13.5f, Ui.semibold, Ui.ACCENT);
-                abBtn.setClickable(true);
-                abBtn.setGravity(android.view.Gravity.CENTER);
-                abBtn.setPadding(Ui.dp(14), Ui.dp(12), Ui.dp(14), Ui.dp(12));
-                abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
-                LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                abLp.setMargins(Ui.dp(14), Ui.dp(4), Ui.dp(14), Ui.dp(14));
-                abBtn.setOnTouchListener((v, ev) -> {
-                    int act = ev.getActionMasked();
-                    if (act == android.view.MotionEvent.ACTION_DOWN) {
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
-                        NpuAudio.setBypassHold(m, true);
-                        abBtn.setText(R.string.bpa_ab_bypassing);
-                        abBtn.setBackground(Ui.round(Ui.alpha(0xFFFF9F0A, 0.28f), 14));
-                        abBtn.setTextColor(0xFFFF9F0A);
-                        stTv.setText(NpuAudio.status(m));
-                        curveView.invalidate();
-                        return true;
-                    } else if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(false);
-                        NpuAudio.setBypassHold(m, false);
-                        abBtn.setText(R.string.bpa_ab_hold);
-                        abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
-                        abBtn.setTextColor(Ui.ACCENT);
-                        stTv.setText(NpuAudio.status(m));
-                        curveView.invalidate();
-                        return true;
-                    }
-                    return true;
-                });
-                cg.card.addView(abBtn, abLp);
-            }
-            content.addView(cg, Widgets.MW);
-
-            // 6) Compact NPU Profile & Harmonic Exciter Selectors
-            Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.bpa_profile));
-            pg.card.addView(pillSelectorRow(m, NpuAudio.PROFILES, NpuAudio.PROFILE_NAMES, NpuAudio.profile(m), supported, val -> {
-                for (int i = 0; i < NpuAudio.PROFILES.length; i++) {
-                    if (NpuAudio.PROFILES[i].equals(val)) {
-                        NpuAudio.setProfile(m, i);
-                        if (!NpuAudio.enabled(m)) NpuAudio.setEnabled(m, true);
-                        rebuild();
-                        return;
-                    }
-                }
-            }), Widgets.MW);
-            pg.card.addView(pillSectionLabel(m, m.getString(R.string.bpa_harmonics)), Widgets.MW);
-            pg.card.addView(pillSelectorRow(m, NpuAudio.HARMONICS, NpuAudio.HARMONIC_NAMES, NpuAudio.harmonics(m), supported && active, val -> {
-                NpuAudio.setHarmonics(m, val);
-                rebuild();
-            }), Widgets.MW);
-            content.addView(pg, Widgets.MW);
-
-            // 7) 6-Band Detailed NPU Tuning Sliders + Limiter + Per-Device Memory
-            Widgets.Group tg = new Widgets.Group(m, m.getString(R.string.bpa_tuning));
-            addTuningSlider(tg, m, R.string.bpa_strength, NpuAudio.PREF_STRENGTH, NpuAudio.strength(m), supported && active, curveView);
-            addTuningSlider(tg, m, R.string.bpa_air, NpuAudio.PREF_AIR, NpuAudio.air(m), supported && active, curveView);
-            addTuningSlider(tg, m, R.string.bpa_dyn, NpuAudio.PREF_DYN, NpuAudio.dyn(m), supported && active, curveView);
-            addTuningSlider(tg, m, R.string.bpa_vocal, NpuAudio.PREF_VOCAL, NpuAudio.vocal(m), supported && active, curveView);
-            addTuningSlider(tg, m, R.string.bpa_bass, NpuAudio.PREF_BASS, NpuAudio.bass(m), supported && active, curveView);
-            addTuningSlider(tg, m, R.string.bpa_space, NpuAudio.PREF_SPACE, NpuAudio.space(m), supported && active, curveView);
-            if (supported) {
-                toggleRow(tg, Icons.WAVE, m.getString(R.string.bpa_limiter), NpuAudio.PREF_LIMITER, true, () -> NpuAudio.apply(m, true));
-                toggleRow(tg, Icons.DEVICE, m.getString(R.string.bpa_per_device), NpuAudio.PREF_PER_DEVICE, true, null);
-            }
-            content.addView(tg, Widgets.MW);
+            // 3) Grouped sub-pages below NPU 음질 향상 for crisp readability & scannability
+            Widgets.Group subG = new Widgets.Group(m, m.getString(R.string.bpa_categories));
+            String dacSub = BitPerfect.enabled(m) ? m.getString(R.string.eq_state_on) : m.getString(R.string.eq_state_off);
+            subG.row(Icons.DAC, Ui.ACCENT, m.getString(R.string.bpa_dac_section), dacSub, true, v -> m.push(new BitPerfectDacPage(m)));
+            String dspSub = formatDspSummary(m);
+            subG.row(Icons.SLIDERS, Ui.ACCENT, m.getString(R.string.bpa_dsp_section), dspSub, true, v -> m.push(new BitPerfectDspPage(m)));
+            String tuneSub = supported ? (active ? (NpuAudio.strength(m) + "%") : m.getString(R.string.eq_state_off)) : m.getString(R.string.bpa_sub_unsupported);
+            subG.row(Icons.WAVE, Ui.ACCENT, m.getString(R.string.bpa_tuning_page), tuneSub, true, v -> m.push(new BitPerfectTuningPage(m)));
+            content.addView(subG, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.npu_note)));
         }
 
-        private static String formatBalance(Context c, int b) {
+        private static String formatDspSummary(Context c) {
+            int activeCount = 0;
+            if (BitPerfect.replayGain(c)) activeCount++;
+            if (BitPerfect.crossfeed(c)) activeCount++;
+            if (BitPerfect.mono(c)) activeCount++;
+            if (BitPerfect.balance(c) != 0) activeCount++;
+            if (!"off".equals(BitPerfect.dither(c))) activeCount++;
+            return activeCount == 0 ? c.getString(R.string.glass_default) : c.getString(R.string.bpa_active_count, activeCount);
+        }
+
+        static String formatBalance(Context c, int b) {
             if (b == 0) return c.getString(R.string.bpa_balance_center);
             return b < 0 ? ("L " + (-b) + "%") : ("R " + b + "%");
         }
@@ -793,13 +680,13 @@ final class Settings {
             return v;
         }
 
-        private static View pillSectionLabel(Context c, String label) {
+        static View pillSectionLabel(Context c, String label) {
             TextView tv = Ui.text(c, label, 12.5f, Ui.semibold, Ui.text2());
             tv.setPadding(Ui.dp(16), Ui.dp(12), Ui.dp(16), Ui.dp(4));
             return tv;
         }
 
-        private static View pillSelectorRow(Context c, String[] values, int[] labelRes, String current, boolean enabled, java.util.function.Consumer<String> onPick) {
+        static View pillSelectorRow(Context c, String[] values, int[] labelRes, String current, boolean enabled, java.util.function.Consumer<String> onPick) {
             android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(c);
             hs.setHorizontalScrollBarEnabled(false);
             LinearLayout row = new LinearLayout(c);
@@ -826,7 +713,7 @@ final class Settings {
             return hs;
         }
 
-        private View sampleRateRow(MainActivity m) {
+        static View sampleRateRow(MainActivity m, Runnable onChange) {
             android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(m);
             hs.setHorizontalScrollBarEnabled(false);
             LinearLayout row = new LinearLayout(m);
@@ -845,7 +732,7 @@ final class Settings {
                 pill.setOnClickListener(v -> {
                     MainActivity.prefs(m).edit().putInt(BitPerfect.PREF_SAMPLE_RATE, rate).apply();
                     LocalMusic.reopen();
-                    rebuild();
+                    if (onChange != null) onChange.run();
                 });
                 Ui.press(pill, 0.94f);
                 row.addView(pill, plp);
@@ -854,7 +741,7 @@ final class Settings {
             return hs;
         }
 
-        private void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive, NpuAudio.CurveView curve) {
+        static void addTuningSlider(Widgets.Group g, MainActivity m, int titleRes, String key, int curPct, boolean interactive, NpuAudio.CurveView curve) {
             View row = g.row(0, 0, m.getString(titleRes), curPct + "%", false, null);
             Widgets.GlassSlider sl = new Widgets.GlassSlider(m, curPct / 100f, 20);
             if (!interactive) {
@@ -871,6 +758,164 @@ final class Settings {
                 };
             }
             g.card.addView(sl, Widgets.MW);
+        }
+    }
+
+    // ---- Sub-page 1: USB DAC & Hardware Output ----
+    static final class BitPerfectDacPage extends Sub {
+        BitPerfectDacPage(MainActivity m) { super(m, R.string.bpa_dac_section); }
+
+        @Override void build() {
+            MainActivity m = main;
+            Widgets.Group dacG = new Widgets.Group(m, m.getString(R.string.bpa_dac_section));
+            dacG.row(Icons.DAC, Ui.ACCENT, m.getString(R.string.bpa_dac_specs), BitPerfect.dacProfileSummary(m), false, null);
+            toggleRow(dacG, Icons.DEVICE, m.getString(R.string.bp_title), BitPerfect.PREF, false, () -> {
+                if (!BitPerfect.enabled(m)) BitPerfect.clear(m);
+                LocalMusic.reopen();
+                Spotify.MAIN.postDelayed(() -> { if (isAttachedToWindow()) rebuild(); }, 400);
+            });
+            content.addView(dacG, Widgets.MW);
+
+            Widgets.Group cfgG = new Widgets.Group(m, m.getString(R.string.bpa_output_mode));
+            cfgG.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_output_mode)), Widgets.MW);
+            cfgG.card.addView(BitPerfectAssistPage.pillSelectorRow(m, BitPerfect.OUTPUT_MODES, BitPerfect.OUTPUT_MODE_LABELS, BitPerfect.outputMode(m), true, val -> {
+                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_OUTPUT_MODE, val).apply();
+                LocalMusic.reopen();
+                rebuild();
+            }), Widgets.MW);
+            cfgG.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_sample_rate)), Widgets.MW);
+            cfgG.card.addView(BitPerfectAssistPage.sampleRateRow(m, this::rebuild), Widgets.MW);
+            cfgG.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_buffer)), Widgets.MW);
+            String[] bufKeys = {"20", "45", "90"};
+            cfgG.card.addView(BitPerfectAssistPage.pillSelectorRow(m, bufKeys, BitPerfect.BUFFER_LABELS, String.valueOf(BitPerfect.bufferMs(m)), true, val -> {
+                MainActivity.prefs(m).edit().putInt(BitPerfect.PREF_BUFFER_MS, Integer.parseInt(val)).apply();
+                rebuild();
+            }), Widgets.MW);
+            content.addView(cfgG, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.bp_note)));
+        }
+    }
+
+    // ---- Sub-page 2: Sound Fine-Tuning (DSP & Filters) ----
+    static final class BitPerfectDspPage extends Sub {
+        BitPerfectDspPage(MainActivity m) { super(m, R.string.bpa_dsp_section); }
+
+        @Override void build() {
+            MainActivity m = main;
+            Widgets.Group filtG = new Widgets.Group(m, m.getString(R.string.bpa_filter));
+            filtG.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_dither)), Widgets.MW);
+            filtG.card.addView(BitPerfectAssistPage.pillSelectorRow(m, BitPerfect.DITHERS, BitPerfect.DITHER_LABELS, BitPerfect.dither(m), true, val -> {
+                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_DITHER, val).apply();
+                NpuAudio.apply(m, true);
+                rebuild();
+            }), Widgets.MW);
+            filtG.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_filter)), Widgets.MW);
+            filtG.card.addView(BitPerfectAssistPage.pillSelectorRow(m, BitPerfect.FILTERS, BitPerfect.FILTER_LABELS, BitPerfect.filter(m), true, val -> {
+                MainActivity.prefs(m).edit().putString(BitPerfect.PREF_FILTER, val).apply();
+                NpuAudio.apply(m, true);
+                rebuild();
+            }), Widgets.MW);
+            content.addView(filtG, Widgets.MW);
+
+            Widgets.Group dspG = new Widgets.Group(m, m.getString(R.string.bpa_dsp_section));
+            toggleRow(dspG, Icons.WAVE, m.getString(R.string.bpa_replaygain), BitPerfect.PREF_REPLAYGAIN, false, () -> {
+                LocalMusic.applyChannelBalance();
+                YouTubeMusic.applyChannelBalance();
+            });
+            toggleRow(dspG, Icons.HEADPHONES, m.getString(R.string.bpa_crossfeed), BitPerfect.PREF_CROSSFEED, false, () -> NpuAudio.apply(m, true));
+            toggleRow(dspG, Icons.VOLUME, m.getString(R.string.bpa_mono), BitPerfect.PREF_MONO, false, () -> NpuAudio.apply(m, true));
+            int curBal = BitPerfect.balance(m);
+            View balRow = dspG.row(Icons.SLIDERS, Ui.ACCENT, m.getString(R.string.bpa_balance), BitPerfectAssistPage.formatBalance(m, curBal), false, null);
+            Widgets.GlassSlider balSl = new Widgets.GlassSlider(m, (curBal + 100) / 200f, 20);
+            balSl.change = v -> {
+                int b = Math.round(v * 200f) - 100;
+                if (Math.abs(b) < 6) b = 0;
+                MainActivity.prefs(m).edit().putInt(BitPerfect.PREF_BALANCE, b).apply();
+                Object tv = balRow.getTag();
+                if (tv instanceof TextView) ((TextView) tv).setText(BitPerfectAssistPage.formatBalance(m, b));
+                LocalMusic.applyChannelBalance();
+                YouTubeMusic.applyChannelBalance();
+            };
+            dspG.card.addView(balSl, Widgets.MW);
+            content.addView(dspG, Widgets.MW);
+        }
+    }
+
+    // ---- Sub-page 3: NPU Profile, Curve, A/B Compare & 6-Band Tuning ----
+    static final class BitPerfectTuningPage extends Sub {
+        BitPerfectTuningPage(MainActivity m) { super(m, R.string.bpa_tuning_page); }
+
+        @Override void build() {
+            MainActivity m = main;
+            boolean supported = NpuAudio.isSupported();
+            boolean active = NpuAudio.enabled(m);
+
+            NpuAudio.CurveView curveView = new NpuAudio.CurveView(m);
+            Widgets.Group cg = new Widgets.Group(m, m.getString(R.string.bpa_curve));
+            cg.card.addView(curveView, Widgets.MW);
+            if (supported && active) {
+                TextView abBtn = Ui.text(m, m.getString(R.string.bpa_ab_hold), 13.5f, Ui.semibold, Ui.ACCENT);
+                abBtn.setClickable(true);
+                abBtn.setGravity(android.view.Gravity.CENTER);
+                abBtn.setPadding(Ui.dp(14), Ui.dp(12), Ui.dp(14), Ui.dp(12));
+                abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
+                LinearLayout.LayoutParams abLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                abLp.setMargins(Ui.dp(14), Ui.dp(4), Ui.dp(14), Ui.dp(14));
+                abBtn.setOnTouchListener((v, ev) -> {
+                    int act = ev.getActionMasked();
+                    if (act == android.view.MotionEvent.ACTION_DOWN) {
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                        NpuAudio.setBypassHold(m, true);
+                        abBtn.setText(R.string.bpa_ab_bypassing);
+                        abBtn.setBackground(Ui.round(Ui.alpha(0xFFFF9F0A, 0.28f), 14));
+                        abBtn.setTextColor(0xFFFF9F0A);
+                        curveView.invalidate();
+                        return true;
+                    } else if (act == android.view.MotionEvent.ACTION_UP || act == android.view.MotionEvent.ACTION_CANCEL) {
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(false);
+                        NpuAudio.setBypassHold(m, false);
+                        abBtn.setText(R.string.bpa_ab_hold);
+                        abBtn.setBackground(Ui.round(Ui.alpha(Ui.ACCENT, 0.14f), 14));
+                        abBtn.setTextColor(Ui.ACCENT);
+                        curveView.invalidate();
+                        return true;
+                    }
+                    return true;
+                });
+                cg.card.addView(abBtn, abLp);
+            }
+            content.addView(cg, Widgets.MW);
+
+            Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.bpa_profile));
+            pg.card.addView(BitPerfectAssistPage.pillSelectorRow(m, NpuAudio.PROFILES, NpuAudio.PROFILE_NAMES, NpuAudio.profile(m), supported, val -> {
+                for (int i = 0; i < NpuAudio.PROFILES.length; i++) {
+                    if (NpuAudio.PROFILES[i].equals(val)) {
+                        NpuAudio.setProfile(m, i);
+                        if (!NpuAudio.enabled(m)) NpuAudio.setEnabled(m, true);
+                        rebuild();
+                        return;
+                    }
+                }
+            }), Widgets.MW);
+            pg.card.addView(BitPerfectAssistPage.pillSectionLabel(m, m.getString(R.string.bpa_harmonics)), Widgets.MW);
+            pg.card.addView(BitPerfectAssistPage.pillSelectorRow(m, NpuAudio.HARMONICS, NpuAudio.HARMONIC_NAMES, NpuAudio.harmonics(m), supported && active, val -> {
+                NpuAudio.setHarmonics(m, val);
+                rebuild();
+            }), Widgets.MW);
+            content.addView(pg, Widgets.MW);
+
+            Widgets.Group tg = new Widgets.Group(m, m.getString(R.string.bpa_tuning));
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_strength, NpuAudio.PREF_STRENGTH, NpuAudio.strength(m), supported && active, curveView);
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_air, NpuAudio.PREF_AIR, NpuAudio.air(m), supported && active, curveView);
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_dyn, NpuAudio.PREF_DYN, NpuAudio.dyn(m), supported && active, curveView);
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_vocal, NpuAudio.PREF_VOCAL, NpuAudio.vocal(m), supported && active, curveView);
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_bass, NpuAudio.PREF_BASS, NpuAudio.bass(m), supported && active, curveView);
+            BitPerfectAssistPage.addTuningSlider(tg, m, R.string.bpa_space, NpuAudio.PREF_SPACE, NpuAudio.space(m), supported && active, curveView);
+            if (supported) {
+                toggleRow(tg, Icons.WAVE, m.getString(R.string.bpa_limiter), NpuAudio.PREF_LIMITER, true, () -> NpuAudio.apply(m, true));
+                toggleRow(tg, Icons.DEVICE, m.getString(R.string.bpa_per_device), NpuAudio.PREF_PER_DEVICE, true, null);
+            }
+            content.addView(tg, Widgets.MW);
         }
 
         @Override protected void onDetachedFromWindow() {

@@ -435,4 +435,8 @@
     <string name="ytm_ad_skip_time">広告をスキップ · %1$s</string>
     <string name="ytm_adblock">YouTube Music 広告ブロック</string>
     <string name="ytm_adblock_note">YouTube Music 再生時の広告ネットワーク通信をブロックし、広告が表示された場合はミュート・自動スキップを試みます。</string>
+    <string name="aod_auto_screen_off">画面オフ時に独自AODを自動起動</string>
+    <string name="bpa_categories">詳細設定</string>
+    <string name="bpa_tuning_page">NPU プロファイルと詳細チューニング</string>
+    <string name="bpa_active_count">%1$d件有効</string>
 </resources>

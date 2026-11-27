@@ -1205,22 +1205,35 @@ final class YouTubeMusic {
             + "window.__prismSwitchUntil=0;"
             + "window.__prismVol=100;"
             + "window.__prismPan=0;"
+            + "window.__prismLastVol=-1;"
+            + "window.__prismLastPan=-99;"
+            + "window.__prismQualGen=-1;"
             + "window.__prismAdBlock=true;"
             + "window.__prismWasAd=false;"
+            + "(function(){try{"
+            + "  if(!document.getElementById('prism-lite-css')){"
+            + "    var st=document.createElement('style');st.id='prism-lite-css';"
+            + "    st.textContent='ytm-comment-section-renderer,ytm-item-section-renderer[section-identifier=\"related-items\"],#related,#comments{display:none!important;}';"
+            + "    (document.head||document.documentElement).appendChild(st);"
+            + "  }"
+            + "}catch(e){}})();"
             + "function suppressMS(){"
-            + "  try{if(navigator.mediaSession){"
+            + "  try{if(navigator.mediaSession&&"
+            + "    (navigator.mediaSession.metadata!==null||navigator.mediaSession.playbackState!=='none')){"
             + "    navigator.mediaSession.metadata=null;"
             + "    navigator.mediaSession.playbackState='none';"
             + "  }}catch(e){}"
             + "}"
             + "function getP(){return document.getElementById('movie_player');}"
             + "function getV(){return document.querySelector('video.html5-main-video')||document.querySelector('video');}"
-            + "function applyPan(){"
+            + "function applyPan(force){"
             + "  try{"
+            + "    var vol=window.__prismVol,pan=window.__prismPan||0;"
+            + "    if(!force&&vol===window.__prismLastVol&&Math.abs(pan-window.__prismLastPan)<0.005)return;"
+            + "    window.__prismLastVol=vol;window.__prismLastPan=pan;"
             + "    var p=getP(),v=getV();"
-            + "    if(p&&p.setVolume)p.setVolume(window.__prismVol);"
-            + "    if(v)v.volume=Math.max(0,Math.min(1,window.__prismVol/100));"
-            + "    var pan=window.__prismPan||0;"
+            + "    if(p&&p.setVolume)p.setVolume(vol);"
+            + "    if(v)v.volume=Math.max(0,Math.min(1,vol/100));"
             + "    if(window.__prismPanner){window.__prismPanner.pan.value=pan;return;}"
             + "    if(Math.abs(pan)>0.02&&v&&v.currentSrc&&v.currentSrc.indexOf('blob:')===0&&!v.__prismPanWired){"
             + "      var AC=window.AudioContext||window.webkitAudioContext;"
@@ -1230,7 +1243,18 @@ final class YouTubeMusic {
             + "    }"
             + "  }catch(e){}"
             + "}"
-            + "window.__prismSetBalance=function(volPct,pan){window.__prismVol=volPct;window.__prismPan=pan;applyPan();};"
+            + "function preferHighAudio(p){"
+            + "  try{"
+            + "    if(!p||window.__prismQualGen===window.__prismGen)return;"
+            + "    var q=p.getPlaybackQuality?p.getPlaybackQuality():'';"
+            + "    if(q==='tiny'||q==='small'||q==='medium'){"
+            + "      window.__prismQualGen=window.__prismGen;"
+            + "      if(p.setPlaybackQualityRange)p.setPlaybackQualityRange('large','hd720');"
+            + "      else if(p.setPlaybackQuality)p.setPlaybackQuality('hd720');"
+            + "    }else if(q){window.__prismQualGen=window.__prismGen;}"
+            + "  }catch(e){}"
+            + "}"
+            + "window.__prismSetBalance=function(volPct,pan){window.__prismVol=volPct;window.__prismPan=pan;applyPan(true);};"
             + "window.__prismSetAdBlock=function(on){window.__prismAdBlock=!!on;};"
             + "window.__prismSkipAd=function(){"
             + "  try{"
@@ -1335,17 +1359,18 @@ final class YouTubeMusic {
             + "      window.__prismNudgeLeft--;"
             + "    }else if(!ad&&v&&!v.paused&&vCt>0.15){"
             + "      window.__prismNudgeLeft=0;"
-            + "      try{if(p&&p.setPlaybackQuality)p.setPlaybackQuality('small');}catch(e){}"
+            + "      preferHighAudio(p);"
             + "    }"
             + "  }"
             + "  if(!ad&&target&&curVid===target){"
             + "    if((v&&!v.paused&&vCt>0.05)||pState===1||pCt>0.2){"
+            + "      var firstStart=!window.__prismSawTarget;"
             + "      window.__prismSawTarget=true;"
+            + "      if(firstStart){preferHighAudio(p);applyPan(true);}"
             + "      if(window.__prismPendingSeek>1){"
             + "        var sk=window.__prismPendingSeek;window.__prismPendingSeek=0;"
             + "        try{if(p&&p.seekTo)p.seekTo(sk,true);else if(v)v.currentTime=sk;}catch(e){}"
             + "      }"
-            + "      applyPan();"
             + "    }"
             + "  }"
             + "  if(!ad&&window.__prismSawTarget&&curVid&&target&&curVid!==target&&Date.now()>(window.__prismSwitchUntil||0)){"
@@ -1359,7 +1384,7 @@ final class YouTubeMusic {
             + "  }"
             + "  try{PrismYtm.onState(window.__prismGen,playing,Math.round(ct*1000),Math.round(dur*1000),ad,adRem,canSkip);}catch(e){}"
             + "}"
-            + "setInterval(tick,350);"
+            + "setInterval(tick,500);"
             + "tick();"
             + "})();";
 
@@ -1380,7 +1405,7 @@ final class YouTubeMusic {
         if (web == null || a == null || root == null) return;
         if (webCtx != null) webCtx.setBaseContext(a);
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
-        root.addView(web, 0, new FrameLayout.LayoutParams(Ui.dp(320), Ui.dp(180)));
+        root.addView(web, 0, new FrameLayout.LayoutParams(Ui.dp(2), Ui.dp(2)));
     }
 
     /** Detaches from a dying Activity without stopping playback (Recents swipe / fold / rotation). */
@@ -1467,12 +1492,16 @@ final class YouTubeMusic {
             }
         });
         web.addJavascriptInterface(new WebBridge(), "PrismYtm");
-        web.setAlpha(0f);
-        web.setTranslationX(-Ui.dp(4000));
+        try {
+            web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        } catch (Throwable ignored) {}
+        // Keep inside viewport at 2dp x 2dp behind the opaque backdrop so Chromium never throttles MSE audio timers
+        web.setAlpha(0.01f);
+        web.setTranslationX(0f);
         web.setClickable(false);
         web.setFocusable(false);
         if (root != null) {
-            root.addView(web, 0, new FrameLayout.LayoutParams(Ui.dp(320), Ui.dp(180)));
+            root.addView(web, 0, new FrameLayout.LayoutParams(Ui.dp(2), Ui.dp(2)));
         }
     }
 

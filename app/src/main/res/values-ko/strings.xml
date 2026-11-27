@@ -435,4 +435,8 @@
     <string name="ytm_ad_skip_time">광고 건너뛰기 · %1$s</string>
     <string name="ytm_adblock">YouTube Music 광고 차단</string>
     <string name="ytm_adblock_note">YouTube Music 재생 시 광고 네트워크 요청을 차단하고, 광고가 표시되면 음소거 및 자동 건너뛰기를 시도해요.</string>
+    <string name="aod_auto_screen_off">화면 끌 때 자체 AOD 자동 실행</string>
+    <string name="bpa_categories">세부 설정</string>
+    <string name="bpa_tuning_page">NPU 보정 프로파일 및 상세 튜닝</string>
+    <string name="bpa_active_count">%1$d개 활성</string>
 </resources>

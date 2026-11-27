@@ -435,4 +435,8 @@
     <string name="ytm_ad_skip_time">Skip ad · %1$s</string>
     <string name="ytm_adblock">YouTube Music ad blocker</string>
     <string name="ytm_adblock_note">Blocks ad-network requests during YouTube Music playback and automatically mutes or skips ads when possible.</string>
+    <string name="aod_auto_screen_off">Auto-launch Prism AOD on screen off</string>
+    <string name="bpa_categories">Advanced settings</string>
+    <string name="bpa_tuning_page">NPU profiles &amp; detailed tuning</string>
+    <string name="bpa_active_count">%1$d active</string>
 </resources>
