@@ -573,12 +573,12 @@ final class LocalMusic {
          * cannot hijack background media / hardware volume controls.
          */
         static void claimControl(Context c) {
-            if (c == null || Player.track == null || !(isLocal(Player.track) || inApp())) return;
+            if (c == null || Player.track == null || !(isLocal(Player.track) || YouTubeMusic.isYtm(Player.track) || inApp())) return;
             update(c);
             Spotify.MAIN.postDelayed(() -> {
                 PlaybackService s = running;
                 if (s == null || session == null || Player.track == null) return;
-                if (!(isLocal(Player.track) || inApp())) return;
+                if (!(isLocal(Player.track) || YouTubeMusic.isYtm(Player.track) || inApp())) return;
                 try {
                     session.setPlaybackToLocal(new AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -656,7 +656,7 @@ final class LocalMusic {
             if (t == null) return;
             Bitmap art = Img.cached(t.art);
             if (art == null && t.art != null) Img.load(t.art, b -> { if (b != null && Player.track == t) post(); });
-            holdWake(Player.playing && inApp());
+            holdWake(Player.playing && (inApp() || YouTubeMusic.isYtm(Player.track)));
             // keep local STREAM_MUSIC volume routing active when backgrounded during in-app Spotify playback
             session.setPlaybackToLocal(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -735,7 +735,9 @@ final class LocalMusic {
         /** Stops the player sources too, so no control is left pointing at a dead player. */
         static void shutDown() {
             try { if (isLocal(Player.track)) { stopForOther(); Player.playing = false; } } catch (Exception ignored) {}
+            try { if (YouTubeMusic.isYtm(Player.track)) { YouTubeMusic.stopForOther(); Player.playing = false; } } catch (Exception ignored) {}
             if (SpotifyWeb.web != null && !uiOpen()) SpotifyWeb.stop();
+            if (YouTubeMusic.web != null && !uiOpen()) YouTubeMusic.stopWeb();
             stopNow();
         }
 

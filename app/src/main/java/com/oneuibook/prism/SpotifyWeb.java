@@ -251,7 +251,7 @@ final class SpotifyWeb {
         deviceId = null;
         activated = false;
         // no player left: a notification still saying "playing" would be a lie
-        if (!LocalMusic.isLocal(Player.track)) {
+        if (!LocalMusic.isLocal(Player.track) && !YouTubeMusic.isYtm(Player.track)) {
             Player.playing = false;
             LocalMusic.PlaybackService.stopNow();
         }
@@ -405,7 +405,7 @@ final class SpotifyWeb {
                     // the new song is running (a different track, or the same one restarted): bring the level back
                     if (fadeInPending && !o.optBoolean("paused") && (newSong || o.optLong("position") < 2000))
                         Spotify.MAIN.postDelayed(SpotifyWeb::fadeIn, 40);
-                    if (Player.local() || !ready()) return;
+                    if (Player.local() || Player.ytm() || !ready()) return;
                     if (Player.deviceId == null || deviceId.equals(Player.deviceId)) {
                         Player.deviceId = deviceId;
                         Player.hasDevice = true;

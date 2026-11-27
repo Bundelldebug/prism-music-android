@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.23";
+    static final String VERSION = "9.5.24";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -166,6 +166,8 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         // on-device library is read once in the background even while Spotify is the source, so switching is instant
         if (!LocalMusic.loaded && LocalMusic.hasPermission(this)) LocalMusic.load(this, () -> { if (isLocalSource()) reloadAll(); });
         root.postDelayed(this::startSpotifyPlayer, 220);
+        // If YouTube Music WebView is already playing across rotation / fold re-creation, re-attach it cleanly
+        YouTubeMusic.attachWeb(this, root);
         // keep the media session / foreground service in step with every playback change
         LocalMusic.app = getApplicationContext();
         YouTubeMusic.app = getApplicationContext();
@@ -670,11 +672,13 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
         if (isFinishing() && !Player.playing) NpuAudio.release();
         // closing the app (Recents swipe / back) while Spotify plays in-app: the player keeps running in this process
         // under the media service, like any music app. Paused, or a re-creation: just let go of this window.
-        if (isFinishing() && !(Player.playing && LocalMusic.PlaybackService.inApp())) {
+        if (isFinishing() && !(Player.playing && (LocalMusic.PlaybackService.inApp() || Player.ytm()))) {
             SpotifyWeb.stop();
+            YouTubeMusic.stopWeb();
             if (!Player.playing) LocalMusic.PlaybackService.stopNow();
         } else {
             SpotifyWeb.detach(this);
+            YouTubeMusic.detachWeb(this);
         }
         super.onDestroy();
     }

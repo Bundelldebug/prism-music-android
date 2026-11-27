@@ -1439,6 +1439,73 @@ public class PrismUiTest {
         LocalMusic.songs.clear();
     }
 
+    @Test public void ytmWebPlayerEngine() {
+        android.content.Context app = RuntimeEnvironment.getApplication();
+        YouTubeMusic.app = app;
+        YouTubeMusic.testFixtures = k -> java.util.Collections.emptyList();
+        try {
+            Player.Track t1 = YouTubeMusic.buildItem("kJQP7kiw5Fk", "Despacito", "Luis Fonsi", "", "", 282000L).track;
+            Player.Track t2 = YouTubeMusic.buildItem("7wtfhZwyrcc", "Believer", "Imagine Dragons", "", "", 204000L).track;
+            java.util.List<Player.Track> list = java.util.Arrays.asList(t1, t2);
+
+            Player.repeat = "off";
+            Player.shuffle = false;
+            YouTubeMusic.play(list, 0, "YouTube Music");
+            int gen1 = YouTubeMusic.playGen;
+            assertEquals("ytm:kJQP7kiw5Fk", Player.track.id);
+            assertTrue("playing immediately after play()", Player.playing);
+
+            // Ad state must NOT overwrite duration or pause track
+            YouTubeMusic.handleWebState(gen1, true, 5000L, 15000L, true);
+            assertEquals(282000L, Player.track.duration);
+
+            // Real playback past 1-minute mark (75s and 180s) updates progress & stays playing
+            YouTubeMusic.handleWebState(gen1, true, 75000L, 281565L, false);
+            assertTrue("still playing past 1 minute (75s)", Player.playing);
+            assertEquals(75000L, Player.progress);
+            assertEquals(281565L, Player.track.duration);
+
+            YouTubeMusic.handleWebState(gen1, true, 180000L, 281565L, false);
+            assertTrue("still playing at 3 minutes (180s)", Player.playing);
+            assertEquals(180000L, Player.progress);
+
+            // Stale generation callbacks are ignored
+            YouTubeMusic.handleWebState(gen1 - 1, false, 0L, 1000L, false);
+            assertTrue("stale gen ignored", Player.playing);
+            YouTubeMusic.handleWebEnded(gen1 - 1);
+            assertEquals("stale ended ignored", "ytm:kJQP7kiw5Fk", Player.track.id);
+
+            // Track end advances cleanly to next track in Prism queue
+            YouTubeMusic.handleWebEnded(gen1);
+            assertEquals("advanced to track 2", "ytm:7wtfhZwyrcc", Player.track.id);
+            assertEquals(1, YouTubeMusic.currentIndex());
+            assertTrue(YouTubeMusic.playGen > gen1);
+
+            // Duplicate onEnded for same gen is ignored
+            int gen2 = YouTubeMusic.playGen;
+            YouTubeMusic.handleWebEnded(gen1);
+            assertEquals("duplicate ended ignored", gen2, YouTubeMusic.playGen);
+
+            // Toggle pause/resume and seek work cleanly
+            YouTubeMusic.toggle();
+            assertEquals(false, Player.playing);
+            YouTubeMusic.toggle();
+            assertTrue(Player.playing);
+            YouTubeMusic.seek(95000L);
+            assertEquals(95000L, Player.progress);
+
+            // Sanitize videoId strips any JS-unsafe characters
+            assertEquals("kJQP7kiw5Fk", YouTubeMusic.sanitizeVideoId("kJQP7kiw5Fk'\"();"));
+
+            // Stop when switching to another source
+            YouTubeMusic.stopForOther();
+            assertTrue(YouTubeMusic.playGen > gen2);
+        } finally {
+            YouTubeMusic.testFixtures = null;
+            YouTubeMusic.stopWeb();
+        }
+    }
+
     private static Bitmap captureScaled(MainActivity act, float scale) {
         View root = act.getWindow().getDecorView();
         int w = Math.max(1, Math.round(root.getWidth() * scale));
