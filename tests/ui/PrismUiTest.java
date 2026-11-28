@@ -1699,6 +1699,189 @@ public class PrismUiTest {
         assertTrue(!Updater.isTrustedReleaseUrl("https://evil.example.com/PrismMusic_Android.apk"));
     }
 
+    @Test public void prism9530FeaturesAndRegressions() throws Exception {
+        android.app.Application app = RuntimeEnvironment.getApplication();
+
+        // 1) Namuwiki TOP priority lyrics resolution
+        java.util.List<String[]> namuPairs = java.util.Arrays.asList(
+                new String[]{"Mayoi no naka de", "방황 속에서 (나무위키)"},
+                new String[]{"Sakebi tsuzukeru", "계속 외치고 있어 (나무위키)"},
+                new String[]{"Hikari wo sagashite", "빛을 찾아서 (나무위키)"}
+        );
+        Lyrics.NamuMatch nm = new Lyrics.NamuMatch(namuPairs, null);
+        // Case A: synced provider already has an inferior translation -> Namuwiki MUST overwrite and lead source!
+        Lyrics.Result syncedOther = Lyrics.parse("[00:05.00]Mayoi no naka de\n[00:10.00]Sakebi tsuzukeru\n[00:15.00]Hikari wo sagashite", "");
+        syncedOther.source = "NetEase";
+        syncedOther.lines.get(0).trans = "기존 번역";
+        Lyrics.Result merged = Lyrics.resolveWithNamuPriority(nm, syncedOther, true);
+        assertTrue("merged keeps synced timestamps", merged.synced);
+        assertEquals("Namuwiki · NetEase", merged.source);
+        assertEquals("방황 속에서 (나무위키)", merged.lines.get(0).trans);
+        assertEquals("계속 외치고 있어 (나무위키)", merged.lines.get(1).trans);
+        // Case B: mismatched / wrong song from other provider -> Namuwiki lyrics returned directly!
+        Lyrics.Result wrongSong = Lyrics.parse("[00:05.00]Completely different song\n[00:10.00]Unrelated line two\n[00:15.00]Unrelated line three", "");
+        wrongSong.source = "LRCLIB";
+        Lyrics.Result direct = Lyrics.resolveWithNamuPriority(nm, wrongSong, true);
+        assertEquals("Namuwiki", direct.source);
+        assertEquals("Mayoi no naka de", direct.lines.get(0).text);
+        assertEquals("방황 속에서 (나무위키)", direct.lines.get(0).trans);
+
+        // 2) YouTube Music shelf-aware search algorithm (Top Result + Songs vs Videos + Podcast exclusion)
+        org.json.JSONObject ytmSearchJson = new org.json.JSONObject("{"
+                + "\"contents\":{\"tabbedSearchResultsRenderer\":{\"tabs\":[{\"tabRenderer\":{\"content\":{\"sectionListRenderer\":{\"contents\":["
+                + "  {\"musicCardShelfRenderer\":{"
+                + "    \"title\":{\"runs\":[{\"text\":\"IVE\"}]},"
+                + "    \"subtitle\":{\"runs\":[{\"text\":\"아티스트\"}]},"
+                + "    \"onTap\":{\"browseEndpoint\":{\"browseId\":\"UCIVEARTIST01\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ARTIST\"}}}}"
+                + "  }},"
+                + "  {\"musicShelfRenderer\":{"
+                + "    \"title\":{\"runs\":[{\"text\":\"노래\"}]},"
+                + "    \"contents\":[{\"musicResponsiveListItemRenderer\":{"
+                + "      \"playlistItemData\":{\"videoId\":\"Y8JFxS1HlDo\"},"
+                + "      \"flexColumns\":["
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"LOVE DIVE\"}]}}},"
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"IVE • 2:57\"}]}}}"
+                + "      ]"
+                + "    }}]"
+                + "  }},"
+                + "  {\"musicShelfRenderer\":{"
+                + "    \"title\":{\"runs\":[{\"text\":\"동영상\"}]},"
+                + "    \"contents\":[{\"musicResponsiveListItemRenderer\":{"
+                + "      \"playlistItemData\":{\"videoId\":\"MVVID123456\"},"
+                + "      \"flexColumns\":["
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"LOVE DIVE MV\"}]}}},"
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"starshipTV • 2:59\"}]}}}"
+                + "      ]"
+                + "    }}]"
+                + "  }},"
+                + "  {\"musicShelfRenderer\":{"
+                + "    \"title\":{\"runs\":[{\"text\":\"에피소드\"}]},"
+                + "    \"contents\":[{\"musicResponsiveListItemRenderer\":{"
+                + "      \"playlistItemData\":{\"videoId\":\"POD12345678\"},"
+                + "      \"flexColumns\":["
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"Podcast Ep 1\"}]}}}"
+                + "      ]"
+                + "    }}]"
+                + "  }},"
+                + "  {\"musicShelfRenderer\":{"
+                + "    \"title\":{\"runs\":[{\"text\":\"앨범\"}]},"
+                + "    \"contents\":[{\"musicResponsiveListItemRenderer\":{"
+                + "      \"navigationEndpoint\":{\"browseEndpoint\":{\"browseId\":\"MPREb_IVE01\",\"browseEndpointContextSupportedConfigs\":{\"browseEndpointContextMusicConfig\":{\"pageType\":\"MUSIC_PAGE_TYPE_ALBUM\"}}}},"
+                + "      \"flexColumns\":["
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"I've IVE\"}]}}},"
+                + "        {\"musicResponsiveListItemFlexColumnRenderer\":{\"text\":{\"runs\":[{\"text\":\"앨범 • IVE\"}]}}}"
+                + "      ]"
+                + "    }}]"
+                + "  }}"
+                + "]}}}}]}}}"
+        );
+        YouTubeMusic.SearchBundle sb = new YouTubeMusic.SearchBundle();
+        YouTubeMusic.parseSearchResponse(ytmSearchJson, sb, false);
+        assertNotNull("Top Result parsed", sb.topResult);
+        assertEquals("IVE", sb.topResult.title);
+        assertEquals("ytm_artist", sb.topResult.type);
+        assertEquals("1 official song", 1, sb.tracks.size());
+        assertEquals("LOVE DIVE", sb.tracks.get(0).title);
+        assertEquals("1 music video separated from songs", 1, sb.videos.size());
+        assertEquals("LOVE DIVE MV", sb.videos.get(0).title);
+        assertEquals("1 album", 1, sb.albums.size());
+        assertEquals("I've IVE", sb.albums.get(0).title);
+
+        // 3) YtmVpn split-tunnel allowlist, proxy parser, and Korea IP geo-restriction classifier
+        assertTrue(YtmVpn.shouldTunnelHost("music.youtube.com"));
+        assertTrue(YtmVpn.shouldTunnelHost("m.youtube.com"));
+        assertTrue(YtmVpn.shouldTunnelHost("rr2---sn-abc.googlevideo.com"));
+        assertTrue(!YtmVpn.shouldTunnelHost("api.spotify.com"));
+        assertTrue(!YtmVpn.shouldTunnelHost("sdk.scdn.co"));
+        assertTrue(!YtmVpn.shouldTunnelHost("accounts.google.com"));
+        assertTrue(YtmVpn.isKoreaIpBlockedMessage("YouTube Music Premium 회원만 이용할 수 있습니다"));
+        assertTrue(YtmVpn.isKoreaIpBlockedMessage("This video is not available in your country"));
+        assertTrue(!YtmVpn.isKoreaIpBlockedMessage("Network timeout"));
+        YtmVpn.RelayNode p1 = YtmVpn.parseProxySpec("socks5://user:pw@203.0.113.5:1080", "US");
+        assertNotNull(p1);
+        assertEquals(java.net.Proxy.Type.SOCKS, p1.type);
+        assertEquals("203.0.113.5", p1.host);
+        assertEquals(1080, p1.port);
+        assertEquals("user", p1.user);
+        YtmVpn.RelayNode p2 = YtmVpn.parseProxySpec("198.51.100.7:8080", "JP");
+        assertNotNull(p2);
+        assertEquals(java.net.Proxy.Type.HTTP, p2.type);
+
+        // 4) Long title & artist in Lyrics panel MUST NOT overlap the Like (star) button!
+        MainActivity.prefs(app).edit().putString("player_style", "prism").putString("source", "spotify").commit();
+        Ui.gStyle = false;
+        ActivityController<MainActivity> c = launch("ko-w393dp-h852dp-xxhdpi");
+        MainActivity a = c.get();
+        Player.Track longTr = new Player.Track();
+        longTr.id = "long_9530";
+        longTr.uri = "spotify:track:long_9530";
+        longTr.name = "Supernova Love (Extended Orchestral Club Symphony Remix Version 2026)";
+        longTr.artist = "IVE (아이브), David Guetta & The Prism Philharmonic Orchestra";
+        longTr.album = "Supernova Love";
+        longTr.duration = 210_000L;
+        Player.track = longTr;
+        Player.playing = true;
+        Player.progress = 32_000L;
+        Player.stamp = android.os.SystemClock.elapsedRealtime();
+        Player.notifyAll0();
+        for (Runnable r : new java.util.ArrayList<>(Player.trackListeners)) r.run();
+        a.np.open();
+        idle(900);
+        Method setPanelM = NowPlaying.class.getDeclaredMethod("setPanel", int.class);
+        setPanelM.setAccessible(true);
+        setPanelM.invoke(a.np, 1);
+        idle(900);
+        java.lang.reflect.Field titleF = NowPlaying.class.getDeclaredField("title");
+        java.lang.reflect.Field artistF = NowPlaying.class.getDeclaredField("artist");
+        java.lang.reflect.Field starF = NowPlaying.class.getDeclaredField("star");
+        titleF.setAccessible(true); artistF.setAccessible(true); starF.setAccessible(true);
+        View titleV = (View) titleF.get(a.np);
+        View artistV = (View) artistF.get(a.np);
+        View starV = (View) starF.get(a.np);
+        float titleRight = titleV.getLeft() + titleV.getTranslationX() + titleV.getWidth() * titleV.getScaleX();
+        float artistRight = artistV.getLeft() + artistV.getTranslationX() + artistV.getWidth() * artistV.getScaleX();
+        assertTrue("title visual right (" + titleRight + ") must stay clear of star left (" + starV.getLeft() + ")",
+                titleRight <= starV.getLeft() - Ui.dpf(6));
+        assertTrue("artist visual right (" + artistRight + ") must stay clear of star left (" + starV.getLeft() + ")",
+                artistRight <= starV.getLeft() - Ui.dpf(6));
+        shot(a, "99a_lyrics_long_title_no_overlap");
+        a.np.close();
+        idle(700);
+
+        // 5) Home top-right source picker monochrome icon switches dynamically (Spotify / YTM / Prism Local)
+        java.lang.reflect.Field hdrIconsF = Header.class.getDeclaredField("icons");
+        hdrIconsF.setAccessible(true);
+        a.setSource("spotify"); idle(500);
+        assertEquals(Icons.SPOTIFY, a.sourceIcon());
+        assertEquals(Icons.SPOTIFY, ((int[]) hdrIconsF.get(a.header))[0]);
+        shot(a, "99d_header_spotify");
+
+        a.setSource("ytm"); idle(500);
+        assertEquals(Icons.YTM, a.sourceIcon());
+        assertEquals(Icons.YTM, ((int[]) hdrIconsF.get(a.header))[0]);
+        shot(a, "99e_header_ytm");
+
+        a.setSource("local"); idle(500);
+        assertEquals(Icons.PRISM, a.sourceIcon());
+        assertEquals(Icons.PRISM, ((int[]) hdrIconsF.get(a.header))[0]);
+        shot(a, "99f_header_prism_local");
+
+        // 6) YTM VPN settings & Korea IP restriction notice UI screenshots
+        YtmVpn.testRegionOverride = new YtmVpn.RegionInfo("KR", "211.45.12.8", false, false, android.os.SystemClock.elapsedRealtime());
+        YouTubeMusic.testFixtures = k -> java.util.Collections.emptyList();
+        try {
+            a.setSource("ytm"); idle(600);
+            shot(a, "99c_ytm_kr_notice");
+            a.onTab(3, false); idle(400);
+            a.push(new Settings.YouTubeMusicAccountPage(a)); idle(600);
+            shot(a, "99b_ytm_vpn_settings");
+        } finally {
+            YtmVpn.testRegionOverride = null;
+            YouTubeMusic.testFixtures = null;
+            a.setSource("spotify");
+        }
+    }
+
     private static Bitmap captureScaled(MainActivity act, float scale) {
         View root = act.getWindow().getDecorView();
         int w = Math.max(1, Math.round(root.getWidth() * scale));

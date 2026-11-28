@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.oneuibook.prism"
-    android:versionCode="252"
-    android:versionName="9.5.29">
+    android:versionCode="253"
+    android:versionName="9.5.30">
 
     <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="35" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -19,6 +20,10 @@
 
     <queries>
         <package android:name="com.spotify.music" />
+        <package android:name="com.nordvpn.android" />
+        <package android:name="ch.protonvpn.android" />
+        <package android:name="net.mullvad.mullvadvpn" />
+        <package android:name="com.wireguard.android" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

@@ -122,14 +122,21 @@ final class YouTubeMusic {
     }
 
     static final class SearchBundle {
+        Widgets.Item topResult;
         final List<Widgets.Item> tracks = new ArrayList<>();
+        final List<Widgets.Item> videos = new ArrayList<>();
         final List<Widgets.Item> artists = new ArrayList<>();
         final List<Widgets.Item> albums = new ArrayList<>();
         final List<Widgets.Item> playlists = new ArrayList<>();
+        boolean geoBlocked;
+        String geoReason = "";
         boolean isEmpty() {
-            return tracks.isEmpty() && artists.isEmpty() && albums.isEmpty() && playlists.isEmpty();
+            return topResult == null && tracks.isEmpty() && videos.isEmpty()
+                    && artists.isEmpty() && albums.isEmpty() && playlists.isEmpty();
         }
     }
+
+    static volatile String lastHomeGeoReason = "";
 
     static boolean isYtm(Player.Track t) {
         return t != null && t.uri != null && t.uri.startsWith("ytm:");
@@ -293,7 +300,7 @@ final class YouTubeMusic {
     // ---------------------------------------------------------------- InnerTube requests
     private static JSONObject webRemixContext() throws Exception {
         String hl = Locale.getDefault().getLanguage();
-        String gl = Locale.getDefault().getCountry();
+        String gl = YtmVpn.effectiveGl(app);
         if (hl == null || hl.isEmpty()) hl = "ko";
         if (gl == null || gl.isEmpty()) gl = "KR";
         return new JSONObject()
@@ -305,7 +312,7 @@ final class YouTubeMusic {
     }
 
     private static JSONObject postJson(String url, JSONObject body, String userAgent, boolean sendAuth) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection c = YtmVpn.openConnection(url);
         c.setInstanceFollowRedirects(false);
         c.setRequestMethod("POST");
         c.setConnectTimeout(7000);
@@ -348,12 +355,15 @@ final class YouTubeMusic {
         }
         IO.execute(() -> {
             Map<String, List<Widgets.Item>> sections = new LinkedHashMap<>();
+            lastHomeGeoReason = "";
             try {
                 JSONObject req = new JSONObject()
                         .put("context", webRemixContext())
                         .put("browseId", "FEmusic_home");
                 JSONObject res = postJson(API_BASE + "browse?prettyPrint=false", req, null, true);
                 if (res != null) {
+                    String geo = YtmVpn.extractGeoBlockReason(res);
+                    if (!geo.isEmpty()) lastHomeGeoReason = geo;
                     extractShelves(res, sections);
                     // Follow up to 2 Home continuation tokens so YTM Home is rich like Spotify Home
                     String cont = findContinuationToken(res);
@@ -611,42 +621,188 @@ final class YouTubeMusic {
         });
     }
 
-    /** Full YouTube Music search separated into songs, artists, albums, and playlists. */
+    /** YouTube Music official InnerTube search filter for Songs (ATV audio tracks). */
+    private static final String SEARCH_PARAMS_SONGS = "EgWKAQIIAWoMEAMQBBAJEAoQBRAV";
+
+    /**
+     * Full YouTube Music search with proper YTM ranking:
+     * 1) Runs unfiltered search (capturing Top Result musicCardShelfRenderer + Songs / Videos / Artists / Albums / Playlists shelves)
+     * 2) Runs dedicated Songs-filtered search in parallel so official songs populate first instead of random YouTube videos
+     * 3) Separates Music Videos from official Songs and excludes podcasts/episodes/profiles.
+     */
     static void searchAll(String query, Consumer<SearchBundle> cb) {
         if (query == null || query.trim().isEmpty()) {
             Spotify.MAIN.post(() -> cb.accept(new SearchBundle()));
             return;
         }
+        final String cleanQ = query.trim();
         if (testFixtures != null) {
             SearchBundle b = new SearchBundle();
-            List<Widgets.Item> list = testFixtures.apply("search:" + query.trim());
+            List<Widgets.Item> list = testFixtures.apply("search:" + cleanQ);
             if (list != null) {
-                for (Widgets.Item it : list) classifyIntoBundle(it, b);
+                for (Widgets.Item it : list) classifyIntoBundle(it, b, false);
             }
             Spotify.MAIN.post(() -> cb.accept(b));
             return;
         }
         IO.execute(() -> {
             SearchBundle b = new SearchBundle();
-            try {
-                JSONObject req = new JSONObject()
-                        .put("context", webRemixContext())
-                        .put("query", query.trim());
-                JSONObject res = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
-                if (res != null) {
-                    List<Widgets.Item> all = new ArrayList<>();
-                    extractAnyItemsRecursive(res, all, 45);
-                    for (Widgets.Item it : all) classifyIntoBundle(it, b);
-                }
-            } catch (Exception ignored) {}
+            boolean useAuth = signedIn(app);
+            java.util.concurrent.Future<JSONObject> fAll = IO.submit(() -> {
+                try {
+                    JSONObject req = new JSONObject().put("context", webRemixContext()).put("query", cleanQ);
+                    JSONObject r = postJson(API_BASE + "search?prettyPrint=false", req, null, useAuth);
+                    if (r == null && useAuth) r = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
+                    return r;
+                } catch (Exception e) { return null; }
+            });
+            java.util.concurrent.Future<JSONObject> fSongs = IO.submit(() -> {
+                try {
+                    JSONObject req = new JSONObject()
+                            .put("context", webRemixContext())
+                            .put("query", cleanQ)
+                            .put("params", SEARCH_PARAMS_SONGS);
+                    JSONObject r = postJson(API_BASE + "search?prettyPrint=false", req, null, useAuth);
+                    if (r == null && useAuth) r = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
+                    return r;
+                } catch (Exception e) { return null; }
+            });
+            JSONObject allRes = null, songsRes = null;
+            try { allRes = fAll.get(12, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+            try { songsRes = fSongs.get(12, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception ignored) {}
+
+            if (allRes != null) {
+                String geo = YtmVpn.extractGeoBlockReason(allRes);
+                if (!geo.isEmpty()) { b.geoBlocked = true; b.geoReason = geo; }
+                parseSearchResponse(allRes, b, false);
+            }
+            if (songsRes != null) {
+                parseSearchResponse(songsRes, b, true);
+            }
+            // If songs are still empty but videos were found, promote videos into tracks so playback is never dead
+            if (b.tracks.isEmpty() && !b.videos.isEmpty()) {
+                b.tracks.addAll(b.videos);
+                b.videos.clear();
+            }
+            if (b.isEmpty() && !b.geoBlocked && YtmVpn.isKoreaIpRestriction(app, "")) {
+                b.geoBlocked = true;
+            }
             Spotify.MAIN.post(() -> cb.accept(b));
         });
     }
 
-    private static void classifyIntoBundle(Widgets.Item it, SearchBundle b) {
+    /** Shelf-aware YouTube Music search parser (handles Top Result card + Songs / Videos / Artists / Albums / Playlists). */
+    static void parseSearchResponse(JSONObject res, SearchBundle b, boolean songsOnly) {
+        if (res == null || b == null) return;
+        if (!songsOnly) {
+            // 1) Parse Top Result card (musicCardShelfRenderer) — previously dropped completely!
+            List<JSONObject> cards = new ArrayList<>();
+            collectByKey(res, "musicCardShelfRenderer", cards);
+            for (JSONObject card : cards) {
+                Widgets.Item top = parseTopResultCard(card);
+                if (top != null && b.topResult == null) {
+                    b.topResult = top;
+                    classifyIntoBundle(top, b, false);
+                }
+                // Top result often embeds 2-3 official top songs inside card.contents
+                JSONArray sub = card.optJSONArray("contents");
+                if (sub != null) {
+                    List<Widgets.Item> subItems = new ArrayList<>();
+                    extractAnyItemsRecursive(sub, subItems, 6);
+                    for (Widgets.Item si : subItems) classifyIntoBundle(si, b, false);
+                }
+            }
+        }
+
+        // 2) Walk each musicShelfRenderer using its actual section title so Songs & Videos never mix!
+        List<JSONObject> shelves = new ArrayList<>();
+        collectByKey(res, "musicShelfRenderer", shelves);
+        if (!shelves.isEmpty()) {
+            for (JSONObject shelf : shelves) {
+                String stitle = extractText(shelf.optJSONObject("title")).toLowerCase(Locale.ROOT);
+                if (!songsOnly && isNonMusicShelf(stitle)) continue;
+                boolean isVideoShelf = !songsOnly && isVideoShelfTitle(stitle);
+                boolean isSongShelf = songsOnly || isSongShelfTitle(stitle);
+                List<Widgets.Item> shelfItems = new ArrayList<>();
+                extractAnyItemsRecursive(shelf.optJSONArray("contents"), shelfItems, songsOnly ? 18 : 15);
+                for (Widgets.Item it : shelfItems) {
+                    if (songsOnly) {
+                        if (it.track != null && b.tracks.size() < 20) classifyIntoBundle(it, b, false);
+                    } else if (isVideoShelf) {
+                        classifyIntoBundle(it, b, true);
+                    } else if (isSongShelf) {
+                        classifyIntoBundle(it, b, false);
+                    } else {
+                        classifyIntoBundle(it, b, false);
+                    }
+                }
+            }
+            return;
+        }
+        // Fallback if InnerTube omitted musicShelfRenderer wrappers
+        List<Widgets.Item> flat = new ArrayList<>();
+        extractAnyItemsRecursive(res, flat, songsOnly ? 18 : 35);
+        for (Widgets.Item it : flat) {
+            if (!songsOnly || it.track != null) classifyIntoBundle(it, b, false);
+        }
+    }
+
+    private static boolean isSongShelfTitle(String low) {
+        return low.equals("노래") || low.equals("곡") || low.equals("songs") || low.equals("tracks")
+                || low.contains("인기 곡") || low.contains("top songs");
+    }
+
+    private static boolean isVideoShelfTitle(String low) {
+        return low.equals("동영상") || low.equals("뮤직비디오") || low.equals("videos") || low.contains("video");
+    }
+
+    private static boolean isNonMusicShelf(String low) {
+        return low.contains("에피소드") || low.contains("팟캐스트") || low.contains("프로필")
+                || low.contains("episodes") || low.contains("podcasts") || low.contains("profiles");
+    }
+
+    /** Parses YouTube Music's #1 "Top Result" card (musicCardShelfRenderer). */
+    static Widgets.Item parseTopResultCard(JSONObject card) {
+        if (card == null) return null;
+        String title = extractText(card.optJSONObject("title"));
+        String sub = extractText(card.optJSONObject("subtitle"));
+        if (title.isEmpty()) return null;
+        String thumb = extractBestThumb(card, "");
+        JSONObject onTap = card.optJSONObject("onTap");
+        if (onTap == null) onTap = firstRunNavEndpoint(card.optJSONObject("title"));
+        if (onTap != null) {
+            JSONObject be = onTap.optJSONObject("browseEndpoint");
+            if (be != null) {
+                String bid = be.optString("browseId", "");
+                String pt = pageTypeOf(be);
+                if (!bid.isEmpty() && !bid.startsWith("FE") && !isPodcastOrEpisodePageType(pt, bid)) {
+                    return buildBrowseItem(bid, pt, title, sub, thumb);
+                }
+            }
+            JSONObject we = onTap.optJSONObject("watchEndpoint");
+            if (we != null) {
+                String vid = we.optString("videoId", "");
+                if (!vid.isEmpty()) {
+                    Widgets.Item it = buildItem(vid, title, cleanSubtitleArtist(sub), "", thumb, parseDurationFromText(sub));
+                    enrichTrackLinks(card.optJSONObject("subtitle"), it.track);
+                    enrichTrackLinks(card.optJSONObject("menu"), it.track);
+                    return it;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void classifyIntoBundle(Widgets.Item it, SearchBundle b, boolean asVideo) {
         if (it == null) return;
         if (it.track != null || "ytm_track".equals(it.type)) {
-            if (!containsId(b.tracks, it.id)) b.tracks.add(it);
+            if (asVideo) {
+                if (!containsId(b.tracks, it.id) && !containsId(b.videos, it.id)) b.videos.add(it);
+            } else {
+                if (!containsId(b.tracks, it.id)) b.tracks.add(it);
+                // Remove duplicate from videos if official song version was added
+                b.videos.removeIf(v -> it.id != null && it.id.equals(v.id));
+            }
         } else if ("ytm_artist".equals(it.type)) {
             if (!containsId(b.artists, it.id)) b.artists.add(it);
         } else if ("ytm_album".equals(it.type)) {
@@ -681,7 +837,7 @@ final class YouTubeMusic {
                 JSONObject req = new JSONObject()
                         .put("context", webRemixContext())
                         .put("query", clean)
-                        .put("params", "EgWKAQIgAWoKEAMQBBAJEAoQBQ%3D%3D");
+                        .put("params", "EgWKAQIgAWoKEAMQBBAJEAoQBQ==");
                 JSONObject res = postJson(API_BASE + "search?prettyPrint=false", req, null, false);
                 if (res == null) {
                     JSONObject req2 = new JSONObject().put("context", webRemixContext()).put("query", clean);
@@ -915,37 +1071,63 @@ final class YouTubeMusic {
         }
     }
 
-    /** Real-time autocomplete suggestions via YouTube/Google Suggest API (no login needed). */
+    /** Real-time autocomplete suggestions via YouTube Music native InnerTube API (with Google Suggest fallback). */
     static void fetchSuggestions(String query, Consumer<List<String>> cb) {
         if (query == null || query.trim().isEmpty()) {
             Spotify.MAIN.post(() -> cb.accept(Collections.emptyList()));
             return;
         }
+        final String q = query.trim();
         IO.execute(() -> {
             List<String> out = new ArrayList<>();
+            // 1) Native YouTube Music search suggestions (music-specific, excludes generic YouTube vlogs/shorts)
             try {
-                String hl = Locale.getDefault().getLanguage();
-                String url = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl="
-                        + Spotify.enc(hl.isEmpty() ? "ko" : hl) + "&q=" + Spotify.enc(query.trim());
-                HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
-                h.setConnectTimeout(3500);
-                h.setReadTimeout(4500);
+                JSONObject req = new JSONObject()
+                        .put("context", webRemixContext())
+                        .put("input", q);
+                JSONObject res = postJson(API_BASE + "music/get_search_suggestions?prettyPrint=false", req, null, signedIn(app));
+                if (res != null) {
+                    List<JSONObject> srs = new ArrayList<>();
+                    collectByKey(res, "searchSuggestionRenderer", srs);
+                    collectByKey(res, "historySuggestionRenderer", srs);
+                    for (JSONObject sr : srs) {
+                        String text = extractText(sr.optJSONObject("suggestion"));
+                        if (text.isEmpty()) {
+                            JSONObject nav = sr.optJSONObject("navigationEndpoint");
+                            JSONObject se = nav == null ? null : nav.optJSONObject("searchEndpoint");
+                            if (se != null) text = se.optString("query", "").trim();
+                        }
+                        if (!text.isEmpty() && !out.contains(text)) out.add(text);
+                        if (out.size() >= 8) break;
+                    }
+                }
+            } catch (Exception ignored) {}
+            // 2) Fallback: Google/YouTube Suggest API if native YTM returned empty
+            if (out.isEmpty()) {
                 try {
-                    if (h.getResponseCode() == 200) {
-                        String body = Spotify.read(h.getInputStream());
-                        JSONArray root = new JSONArray(body);
-                        if (root.length() >= 2) {
-                            JSONArray arr = root.optJSONArray(1);
-                            if (arr != null) {
-                                for (int i = 0; i < Math.min(8, arr.length()); i++) {
-                                    String s = arr.optString(i, "").trim();
-                                    if (!s.isEmpty() && !out.contains(s)) out.add(s);
+                    String hl = Locale.getDefault().getLanguage();
+                    String url = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl="
+                            + Spotify.enc(hl.isEmpty() ? "ko" : hl) + "&q=" + Spotify.enc(q);
+                    HttpURLConnection h = YtmVpn.openConnection(url);
+                    h.setConnectTimeout(3500);
+                    h.setReadTimeout(4500);
+                    try {
+                        if (h.getResponseCode() == 200) {
+                            String body = Spotify.read(h.getInputStream());
+                            JSONArray root = new JSONArray(body);
+                            if (root.length() >= 2) {
+                                JSONArray arr = root.optJSONArray(1);
+                                if (arr != null) {
+                                    for (int i = 0; i < Math.min(8, arr.length()); i++) {
+                                        String s = arr.optString(i, "").trim();
+                                        if (!s.isEmpty() && !out.contains(s)) out.add(s);
+                                    }
                                 }
                             }
                         }
-                    }
-                } finally { h.disconnect(); }
-            } catch (Exception ignored) {}
+                    } finally { h.disconnect(); }
+                } catch (Exception ignored) {}
+            }
             Spotify.MAIN.post(() -> cb.accept(out));
         });
     }
@@ -1036,12 +1218,13 @@ final class YouTubeMusic {
         return "ytm_playlist";
     }
 
-    private static boolean isPlayableTrackPageType(String pageType, String browseId) {
+    private static boolean isPodcastOrEpisodePageType(String pageType, String browseId) {
         if ("MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE".equals(pageType)
-                || "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE".equals(pageType)) {
+                || "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE".equals(pageType)
+                || "MUSIC_PAGE_TYPE_USER_CHANNEL".equals(pageType) && browseId != null && browseId.startsWith("MPSP")) {
             return true;
         }
-        return browseId != null && browseId.startsWith("MPED");
+        return browseId != null && (browseId.startsWith("MPED") || browseId.startsWith("MPSP"));
     }
 
     /**
@@ -1060,7 +1243,8 @@ final class YouTubeMusic {
         if (be != null) {
             String bid = be.optString("browseId", "");
             String pt = pageTypeOf(be);
-            if (!bid.isEmpty() && !bid.startsWith("FE") && !isPlayableTrackPageType(pt, bid)) {
+            if (isPodcastOrEpisodePageType(pt, bid)) return null;
+            if (!bid.isEmpty() && !bid.startsWith("FE")) {
                 String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
                 String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
                 if (!title.isEmpty()) {
@@ -1071,7 +1255,7 @@ final class YouTubeMusic {
         Widgets.Item tr = parseListItem(rli);
         if (tr != null) return tr;
         String bid = findBrowseId(rli);
-        if (bid.isEmpty()) return null;
+        if (bid.isEmpty() || isPodcastOrEpisodePageType("", bid)) return null;
         String title = cols != null && cols.length() > 0 ? extractText(cols.optJSONObject(0)) : "";
         String sub = cols != null && cols.length() > 1 ? extractText(cols.optJSONObject(1)) : "";
         if (title.isEmpty()) return null;
@@ -1093,7 +1277,8 @@ final class YouTubeMusic {
         if (be != null) {
             String bid = be.optString("browseId", "");
             String pt = pageTypeOf(be);
-            if (!bid.isEmpty() && !bid.startsWith("FE") && !isPlayableTrackPageType(pt, bid)) {
+            if (isPodcastOrEpisodePageType(pt, bid)) return null;
+            if (!bid.isEmpty() && !bid.startsWith("FE")) {
                 String title = extractText(two.optJSONObject("title"));
                 String sub = extractText(two.optJSONObject("subtitle"));
                 if (!title.isEmpty()) {
@@ -1104,7 +1289,7 @@ final class YouTubeMusic {
         Widgets.Item tr = parseTwoRowItem(two);
         if (tr != null) return tr;
         String bid = findBrowseId(two);
-        if (bid.isEmpty()) return null;
+        if (bid.isEmpty() || isPodcastOrEpisodePageType("", bid)) return null;
         String title = extractText(two.optJSONObject("title"));
         String sub = extractText(two.optJSONObject("subtitle"));
         if (title.isEmpty()) return null;
@@ -1500,6 +1685,7 @@ final class YouTubeMusic {
             + "window.__prismPendingSeek=0;"
             + "window.__prismSawTarget=false;"
             + "window.__prismEndedGen=-1;"
+            + "window.__prismErrGen=-1;"
             + "window.__prismNudgeLeft=0;"
             + "window.__prismSwitchUntil=0;"
             + "window.__prismVol=100;"
@@ -1678,6 +1864,19 @@ final class YouTubeMusic {
             + "  var dur=pDur>0?pDur:vDur;"
             + "  var ct=(!ad&&pCt>0)?pCt:vCt;"
             + "  var playing=!!(v&&!v.paused&&!v.ended)||pState===1;"
+            + "  if(!playing&&window.__prismWantPlay&&window.__prismErrGen!==window.__prismGen){"
+            + "    var errMsg='';"
+            + "    try{"
+            + "      if(location.pathname.indexOf('music_premium')>=0||location.pathname.indexOf('/premium')===0){errMsg='YouTube Music Premium required in this region';}"
+            + "      var er=document.querySelector('.ytp-error-content-wrap-reason,.ytp-error-content-wrap-subreason,.ytm-playability-error-supported-renderers');"
+            + "      if(!errMsg&&er&&er.textContent&&er.textContent.trim().length>3){errMsg=er.textContent.trim();}"
+            + "      if(!errMsg&&window.ytInitialPlayerResponse&&window.ytInitialPlayerResponse.playabilityStatus){"
+            + "        var ps=window.ytInitialPlayerResponse.playabilityStatus;"
+            + "        if(ps.status&&ps.status!=='OK'){errMsg=(ps.reason||ps.status||'');}"
+            + "      }"
+            + "    }catch(e){}"
+            + "    if(errMsg){window.__prismErrGen=window.__prismGen;try{PrismYtm.onPlayError(window.__prismGen,errMsg);}catch(e){}}"
+            + "  }"
             + "  if(!ad&&window.__prismSawTarget&&(pState===0||(v&&v.ended&&dur>5)||(dur>10&&ct>=dur-0.35&&playing))){"
             + "    fireEnded();return;"
             + "  }"
@@ -1871,6 +2070,29 @@ final class YouTubeMusic {
         @JavascriptInterface public void onEnded(int gen) {
             Spotify.MAIN.post(() -> handleWebEnded(gen));
         }
+
+        @JavascriptInterface public void onPlayError(int gen, String reason) {
+            Spotify.MAIN.post(() -> handleWebError(gen, reason));
+        }
+    }
+
+    /** Handles YouTube player error / geo-block reported from YtmWebView, diagnosing KR IP accurately. */
+    static void handleWebError(int gen, String reason) {
+        if (gen != playGen || !isYtm(Player.track)) return;
+        final String msg = reason == null ? "" : reason.trim();
+        YtmVpn.diagnosePlaybackFailure(app, msg, krBlocked -> {
+            if (gen != playGen) return;
+            if (krBlocked) {
+                wantPlaying = false;
+                Player.playing = false;
+                Player.notifyAll0();
+                if (Player.activity != null) {
+                    YtmVpn.showKoreaIpDialog(Player.activity, msg, () -> start(0));
+                } else {
+                    Player.toast(R.string.ytm_kr_block_title);
+                }
+            }
+        });
     }
 
     /** Convenience overload for tests and callers without ad countdown metadata. */

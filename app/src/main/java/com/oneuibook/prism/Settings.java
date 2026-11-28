@@ -162,9 +162,22 @@ final class Settings {
         }
     }
 
-    // ------------------------------------------------------------------ YouTube Music Account
+    // ------------------------------------------------------------------ YouTube Music Account & Built-in VPN
     static final class YouTubeMusicAccountPage extends Sub {
+        private final Runnable vpnListener = () -> { if (isAttachedToWindow()) rebuild(); };
+
         YouTubeMusicAccountPage(MainActivity m) { super(m, R.string.ytm_account); }
+
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            YtmVpn.listeners.add(vpnListener);
+            YtmVpn.checkEgressRegion(main, false, null);
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            YtmVpn.listeners.remove(vpnListener);
+            super.onDetachedFromWindow();
+        }
 
         @Override void build() {
             MainActivity m = main;
@@ -181,11 +194,79 @@ final class Settings {
                         YouTubeMusic.showSignInDialog(m, () -> { m.reloadAll(); rebuild(); }));
             }
             content.addView(st, Widgets.MW);
+
+            // Built-in YouTube Music Regional VPN (US / Japan) + Accurate IP Check
+            Widgets.Group vpn = new Widgets.Group(m, m.getString(R.string.ytm_vpn_group));
+            String curReg = YtmVpn.region(m);
+            vpn.row(Icons.GLOBE, Ui.ACCENT, m.getString(R.string.ytm_vpn_status), YtmVpn.summaryText(m), false, null);
+            String[][] regOpts = {
+                    {YtmVpn.REGION_OFF, m.getString(R.string.ytm_vpn_off)},
+                    {YtmVpn.REGION_US, m.getString(R.string.ytm_vpn_us)},
+                    {YtmVpn.REGION_JP, m.getString(R.string.ytm_vpn_jp)}
+            };
+            for (String[] o : regOpts) {
+                final String target = o[0];
+                vpn.option(o[1], target.equals(curReg), v -> {
+                    if (target.equals(YtmVpn.region(m)) && (YtmVpn.REGION_OFF.equals(target) || YtmVpn.isBuiltInConnected())) return;
+                    YtmVpn.setRegion(m, target, ok -> {
+                        if (isAttachedToWindow()) rebuild();
+                        if (!YtmVpn.REGION_OFF.equals(target)) {
+                            Toast.makeText(m, ok
+                                    ? m.getString(R.string.ytm_vpn_connected, YtmVpn.regionLabel(m, target))
+                                    : m.getString(R.string.ytm_vpn_connect_failed, YtmVpn.regionLabel(m, target)), Toast.LENGTH_LONG).show();
+                            if (ok) m.reloadContent();
+                        } else {
+                            m.reloadContent();
+                        }
+                    });
+                    rebuild();
+                });
+            }
+            vpn.row(Icons.REPEAT, Ui.ACCENT, m.getString(R.string.ytm_vpn_check_ip), null, false, v -> {
+                Toast.makeText(m, R.string.loading, Toast.LENGTH_SHORT).show();
+                YtmVpn.checkEgressRegion(m, true, ri -> {
+                    if (isAttachedToWindow()) rebuild();
+                    if (ri != null && !ri.country.isEmpty()) {
+                        Toast.makeText(m, m.getString(R.string.ytm_kr_block_loc, ri.country, ri.ip.isEmpty() ? "-" : ri.ip), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            });
+            String customReg = YtmVpn.REGION_JP.equals(curReg) ? YtmVpn.REGION_JP : YtmVpn.REGION_US;
+            String curCustom = YtmVpn.customProxy(m, customReg);
+            vpn.row(Icons.KEY, Ui.ACCENT, m.getString(R.string.ytm_vpn_custom_proxy) + " (" + customReg.toUpperCase(java.util.Locale.US) + ")",
+                    curCustom.isEmpty() ? m.getString(R.string.not_set) : curCustom, true, v -> editCustomProxy(customReg));
+            vpn.row(Icons.LINK, Ui.ACCENT, m.getString(R.string.ytm_vpn_open_external), null, true, v ->
+                    YtmVpn.openExternalVpn(m, () -> { if (isAttachedToWindow()) rebuild(); m.reloadContent(); }));
+            content.addView(vpn, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.ytm_vpn_note)));
+
             Widgets.Group pb = new Widgets.Group(m, m.getString(R.string.set_playback));
             toggleRow(pb, Icons.YTM, m.getString(R.string.ytm_adblock), YouTubeMusic.PREF_ADBLOCK, true, YouTubeMusic::syncAdBlock);
             content.addView(pb, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.ytm_adblock_note)));
             content.addView(Widgets.caption(m, m.getString(R.string.ytm_guest_note)));
+        }
+
+        private void editCustomProxy(String reg) {
+            MainActivity m = main;
+            EditText e = new EditText(m);
+            e.setSingleLine(true);
+            e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            e.setText(YtmVpn.customProxy(m, reg));
+            e.setHint(R.string.ytm_vpn_custom_hint);
+            FrameLayout f = new FrameLayout(m);
+            f.setPadding(Ui.dp(22), Ui.dp(8), Ui.dp(22), 0);
+            f.addView(e);
+            new AlertDialog.Builder(m)
+                    .setTitle(m.getString(R.string.ytm_vpn_custom_proxy) + " (" + reg.toUpperCase(java.util.Locale.US) + ")")
+                    .setView(f)
+                    .setPositiveButton(R.string.save, (d, w) -> {
+                        YtmVpn.setCustomProxy(m, reg, e.getText().toString().trim());
+                        if (reg.equals(YtmVpn.region(m))) YtmVpn.setRegion(m, reg, ok -> { if (isAttachedToWindow()) rebuild(); });
+                        rebuild();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
         }
     }
 

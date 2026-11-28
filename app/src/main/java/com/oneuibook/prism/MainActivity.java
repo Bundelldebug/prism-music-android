@@ -29,7 +29,7 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class MainActivity extends Activity implements Dock.Listener, Header.Listener {
-    static final String VERSION = "9.5.29";
+    static final String VERSION = "9.5.30";
 
     FrameLayout root;
     Glass.Backdrop backdrop;
@@ -146,6 +146,7 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
         LocalMusic.app = getApplicationContext();
         YouTubeMusic.app = getApplicationContext();
+        YtmVpn.init(this);
         tabs[0] = new NavStack(new Pages.HomePage(this));
         tabs[1] = new NavStack(new Pages.ExplorePage(this));
         tabs[2] = new NavStack(new Pages.LibraryPage(this));
@@ -456,9 +457,30 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     int bottomPadding() { return dock == null ? Ui.dp(200) : dock.chromeHeight() + Ui.dp(12); }
 
+    /** Monochrome header source icon matching the currently active music source (Local=Prism, Spotify, YouTube Music). */
+    int sourceIcon() {
+        if (isLocalSource()) return Icons.PRISM;
+        if (isYtmSource()) return Icons.YTM;
+        return Icons.SPOTIFY;
+    }
+
     void syncHeader() {
         Page p = currentPage();
-        header.configure(p.title, p.headerIcons, p.back);
+        int[] src = p.headerIcons;
+        int[] resolved = src;
+        if (src != null && src.length > 0) {
+            for (int ic : src) {
+                if (ic == Icons.QUEUE) {
+                    resolved = src.clone();
+                    int si = sourceIcon();
+                    for (int i = 0; i < resolved.length; i++) {
+                        if (resolved[i] == Icons.QUEUE) resolved[i] = si;
+                    }
+                    break;
+                }
+            }
+        }
+        header.configure(p.title, resolved, p.back);
         updateScrollChrome(p);
     }
 
@@ -662,11 +684,11 @@ public final class MainActivity extends Activity implements Dock.Listener, Heade
 
     // ------------------------------------------------------------------ Header.Listener
     @Override public void onHeaderButton(int icon, RectF anchor) {
-        if (icon == Icons.QUEUE) {
+        if (icon == Icons.QUEUE || icon == Icons.SPOTIFY || icon == Icons.YTM || icon == Icons.PRISM) {
             // music source picker: Local / Spotify / YouTube Music
             List<GlassMenu.Entry> e = new ArrayList<>();
-            e.add(new GlassMenu.Entry(getString(R.string.source_local), Icons.NOTE, isLocalSource(), () -> setSource("local")));
-            e.add(new GlassMenu.Entry("Spotify", Icons.WAVE, isSpotifySource(), () -> setSource("spotify")));
+            e.add(new GlassMenu.Entry(getString(R.string.source_local), Icons.PRISM, isLocalSource(), () -> setSource("local")));
+            e.add(new GlassMenu.Entry("Spotify", Icons.SPOTIFY, isSpotifySource(), () -> setSource("spotify")));
             e.add(new GlassMenu.Entry(getString(R.string.source_ytm), Icons.YTM, isYtmSource(), () -> setSource("ytm")));
             if (isSpotifySource() && Spotify.loggedIn())
                 e.add(new GlassMenu.Entry(getString(R.string.choose_device), Icons.DEVICE, false, () -> np.deviceMenuAt(anchor)));

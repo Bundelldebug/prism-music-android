@@ -19,7 +19,7 @@ final class Icons {
             DOWNLOAD = 31, STORAGE = 32, INFO = 33, LOGOUT = 34, ALBUM = 35, ARTIST = 36, CLOSE = 37,
             REPEAT_ONE = 38, PLAY_SMALL = 39, HEADPHONES = 40, KEY = 41, LINK = 42, CHEVRON_UP = 43, INFINITY = 44, DRAG = 45, SIDEBAR = 46, VOLUME = 47, VOLUME_LOW = 48, OUTPUT = 49, AOD = 50,
             BUDS = 51, EARBUDS = 52, DAC = 53, BUDS4 = 54, BUDS_ON = 55, BUDS2 = 56, BUDS_LIVE = 57,
-            VIDEO = 58, RECAP = 59, YTM = 60, SLIDERS = 61, PLAYLIST_GO = 62, SPOTIFY = 63;
+            VIDEO = 58, RECAP = 59, YTM = 60, SLIDERS = 61, PLAYLIST_GO = 62, SPOTIFY = 63, PRISM = 64;
 
     private static final Paint P = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final CornerPathEffect ROUND2 = new CornerPathEffect(2.2f);
@@ -724,6 +724,32 @@ final class Icons {
                 p.reset();
                 stroke(1.5f);
                 p.moveTo(8.7f, 15.5f); p.quadTo(12f, 14.4f, 15.3f, 16.0f); c.drawPath(p, P);
+                break;
+            }
+            case PRISM: {
+                // Monochrome Prism logo (exact silhouette from ic_launcher_fg: rounded prism + inner facet + 3 light rays)
+                int baseAlpha = P.getAlpha();
+                stroke(1.75f);
+                P.setAlpha(Math.round(baseAlpha * 0.95f));
+                c.drawLine(14.0f, 10.2f, 21.0f, 7.8f, P);
+                P.setAlpha(Math.round(baseAlpha * 0.68f));
+                c.drawLine(14.5f, 12.1f, 21.6f, 11.8f, P);
+                P.setAlpha(Math.round(baseAlpha * 0.44f));
+                c.drawLine(14.6f, 14.1f, 21.1f, 16.2f, P);
+                P.setAlpha(baseAlpha);
+                fill();
+                P.setPathEffect(ROUND2);
+                p.setFillType(Path.FillType.EVEN_ODD);
+                p.moveTo(9.0f, 4.6f);
+                p.lineTo(15.6f, 17.4f);
+                p.lineTo(2.4f, 17.4f);
+                p.close();
+                p.moveTo(9.0f, 8.8f);
+                p.lineTo(12.5f, 15.5f);
+                p.lineTo(8.9f, 15.5f);
+                p.close();
+                c.drawPath(p, P);
+                p.setFillType(Path.FillType.WINDING);
                 break;
             }
             default:

@@ -367,6 +367,7 @@ final class NowPlaying extends FrameLayout {
     /** Unfolded foldable / tablet: artwork + controls on the left, lyrics or queue always on the right. */
     boolean wide;
     private float colX, colW;
+    private int baseTitleW;
 
     private void computeSlots(int W, int H) {
         float top = Ui.statusInset;
@@ -449,7 +450,8 @@ final class NowPlaying extends FrameLayout {
             int side = Ui.dp(28);
             int colWi = wide ? (int) colW : W - side * 2;
             exact(handle, Ui.dp(36), Ui.dp(5));
-            int titleW = oneui ? colWi : Math.max(Ui.dp(80), colWi - Ui.dp(84));
+            int titleW = oneui ? colWi : Math.max(Ui.dp(80), colWi - Ui.dp(88));
+            baseTitleW = titleW;
             exact(title, titleW, Ui.dp(30));
             exact(artist, titleW, Ui.dp(24));
             for (View v : new View[]{star, more, aodBtn}) exact(v, Ui.dp(38), Ui.dp(38));
@@ -664,10 +666,28 @@ final class NowPlaying extends FrameLayout {
         }
     }
 
+    /** Dynamically adjusts title/artist measured bounds so marquee text never overlaps the Like / More buttons. */
+    private void applyTitleBoundsWidth(int targetW) {
+        if (targetW <= 0) return;
+        if (title.getWidth() != targetW) {
+            int l = title.getLeft(), t = title.getTop(), h = Math.max(Ui.dp(30), title.getHeight());
+            title.measure(MeasureSpec.makeMeasureSpec(targetW, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
+            title.layout(l, t, l + targetW, t + h);
+            title.setSelected(true);
+        }
+        if (artist.getWidth() != targetW) {
+            int l = artist.getLeft(), t = artist.getTop(), h = Math.max(Ui.dp(24), artist.getHeight());
+            artist.measure(MeasureSpec.makeMeasureSpec(targetW, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
+            artist.layout(l, t, l + targetW, t + h);
+            artist.setSelected(true);
+        }
+    }
+
     /** Positions that interpolate between the artwork layout and the panel layout. */
     private void applyMode() {
         int wantGrav = oneui ? Gravity.CENTER : (Gravity.START | Gravity.CENTER_VERTICAL);
         if (wide) {
+            applyTitleBoundsWidth(baseTitleW);
             title.setGravity(wantGrav);
             artist.setGravity(wantGrav);
             for (View v : new View[]{title, artist, star, more, aodBtn}) {
@@ -702,14 +722,28 @@ final class NowPlaying extends FrameLayout {
         }
         float tx = Ui.lerp(0, artSmall.right + Ui.dpf(14) - Ui.dpf(28), k);
         float ty = Ui.lerp(0, titleSmallY - titleBigY, k);
+        float s = Ui.lerp(1f, oneui ? 0.84f : 0.82f, k);
+        int W = getWidth();
+        if (baseTitleW > 0 && W > 0) {
+            int targetW = baseTitleW;
+            if (!oneui) {
+                float rightBtnLeft = (!Player.local() && star.getLeft() > 0)
+                        ? star.getLeft()
+                        : (more.getLeft() > 0 ? more.getLeft() : (W - Ui.dpf(64)));
+                float rightLimit = rightBtnLeft - Ui.dpf(10);
+                float visLeft = title.getLeft() + tx;
+                float availVisW = Math.max(Ui.dpf(60), rightLimit - visLeft);
+                targetW = Math.min(baseTitleW, Math.max(Ui.dp(60), (int) Math.floor(availVisW / Math.max(0.5f, s))));
+            } else if (k >= 0.35f) {
+                float rightLimit = W - Ui.dpf(20);
+                float visLeft = title.getLeft() + tx;
+                float availVisW = Math.max(Ui.dpf(80), rightLimit - visLeft);
+                targetW = Math.min(baseTitleW, Math.max(Ui.dp(80), (int) Math.floor(availVisW / Math.max(0.5f, s))));
+            }
+            applyTitleBoundsWidth(targetW);
+        }
         title.setPivotX(oneui && k < 0.35f ? title.getWidth() / 2f : 0); title.setPivotY(0);
         artist.setPivotX(oneui && k < 0.35f ? artist.getWidth() / 2f : 0); artist.setPivotY(0);
-        float maxPanelScale = 0.82f;
-        if (oneui && title.getWidth() > 0 && getWidth() > 0) {
-            float availPanelW = Math.max(Ui.dpf(100), getWidth() - (artSmall.right + Ui.dpf(14)) - Ui.dpf(20));
-            maxPanelScale = Math.min(0.84f, availPanelW / (float) title.getWidth());
-        }
-        float s = Ui.lerp(1f, maxPanelScale, k);
         title.setScaleX(s); title.setScaleY(s);
         artist.setScaleX(s); artist.setScaleY(s);
         title.setTranslationX(tx); title.setTranslationY(ty);
@@ -1291,6 +1325,7 @@ final class NowPlaying extends FrameLayout {
         star.set(Player.liked ? Icons.HEART_FILL : Icons.HEART, getVisibility() == VISIBLE);
         repeatBtn.set("track".equals(Player.repeat) ? Icons.REPEAT_ONE : Icons.REPEAT, getVisibility() == VISIBLE);
         star.setVisibility(Player.local() ? INVISIBLE : VISIBLE);
+        if (!wide && mode > 0.01f) applyMode();
         if (Player.track != null) {
             String adLbl = Player.adStatusText(getContext());
             artist.setText(!adLbl.isEmpty() ? adLbl : Player.track.artist);

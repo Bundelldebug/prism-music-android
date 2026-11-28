@@ -73,9 +73,11 @@ final class Lyrics {
         synchronized (MISSING) { MISSING.clear(); }
         Context ctx = c != null ? c : Img.appContext;
         if (ctx != null) {
-            File d = new File(ctx.getCacheDir(), "lyrics_v4");
-            File[] fs = d.listFiles();
-            if (fs != null) for (File f : fs) f.delete();
+            for (String dirName : new String[]{"lyrics_v4", "lyrics_v5"}) {
+                File d = new File(ctx.getCacheDir(), dirName);
+                File[] fs = d.listFiles();
+                if (fs != null) for (File f : fs) f.delete();
+            }
         }
     }
 
@@ -164,21 +166,25 @@ final class Lyrics {
             boolean wantKoSub = showKoreanSubtitles(ctx);
             boolean useNamu = namuwikiEnabled(ctx);
             boolean dirty = false;
-            if (r == null) {
-                r = lookup(ctx, t, wantKoSub);
-                dirty = r != null;
-            }
             String namuArtist = primaryArtist(t.artist);
             String namuTitle = t.name == null ? "" : t.name.trim();
             String namuClean = cleanTitle(namuTitle);
-            if (useNamu) {
-                if (r == null) {
-                    r = lookupNamuwikiPlain(namuArtist, namuTitle, namuClean, wantKoSub);
-                    if (r != null) dirty = true;
-                } else if (needsKoreanTranslation(r) && !hasTranslations(r)) {
-                    if (enrichFromNamuwiki(r, namuArtist, namuTitle, namuClean)) {
-                        dirty = true;
-                    }
+            if (r == null) {
+                if (useNamu) {
+                    // Namuwiki has TOP priority when enabled: query Namuwiki FIRST before all other providers.
+                    NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
+                    Result other = lookup(ctx, t, wantKoSub);
+                    r = resolveWithNamuPriority(nm, other, wantKoSub);
+                } else {
+                    r = lookup(ctx, t, wantKoSub);
+                }
+                dirty = r != null;
+            } else if (useNamu && (r.source == null || !r.source.contains("Namuwiki"))) {
+                // Upgrade any non-Namuwiki cached lyrics if user later enabled Namuwiki priority.
+                NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
+                if (nm != null) {
+                    r = resolveWithNamuPriority(nm, r, wantKoSub);
+                    dirty = true;
                 }
             }
             if (dirty && r != null) writeDisk(t.id, r);
@@ -642,20 +648,48 @@ final class Lyrics {
     private static final Pattern HTML_SCRIPT_STYLE = Pattern.compile("(?is)<(?:script|style|noscript)\\b[^>]*>.*?</(?:script|style|noscript)>");
     private static final Pattern HTML_ENTITY_NUM = Pattern.compile("&#(x?[0-9a-fA-F]+);");
 
+    static final class NamuMatch {
+        final List<String[]> pairs;
+        final List<String> plain;
+        NamuMatch(List<String[]> pairs, List<String> plain) {
+            this.pairs = pairs == null ? new ArrayList<>() : pairs;
+            this.plain = plain == null ? new ArrayList<>() : plain;
+        }
+        boolean hasLyrics() {
+            return pairs.size() >= 3 || plain.size() >= 4;
+        }
+    }
+
     private static List<String> namuCandidates(String artist, String origTitle, String clean) {
         String base = !clean.isEmpty() ? clean : origTitle;
-        List<String> out = new ArrayList<>(5);
+        List<String> out = new ArrayList<>(6);
         if (base == null || base.isEmpty()) return out;
-        if (artist != null && !artist.isEmpty()) out.add(base + "(" + artist + ")");
-        out.add(base);
-        out.add(base + "(노래)");
-        out.add(base + "(곡)");
-        if (origTitle != null && !origTitle.isEmpty() && !origTitle.equals(base)) out.add(origTitle);
+        if (artist != null && !artist.isEmpty()) {
+            // Handle "IVE (아이브)" -> try full artist name and primary/alias tokens
+            String a = artist.trim();
+            addUnique(out, base + "(" + a + ")");
+            int par = a.indexOf('(');
+            int parEnd = a.indexOf(')');
+            if (par > 0 && parEnd > par) {
+                String before = a.substring(0, par).trim();
+                String inside = a.substring(par + 1, parEnd).trim();
+                if (!before.isEmpty()) addUnique(out, base + "(" + before + ")");
+                if (!inside.isEmpty()) addUnique(out, base + "(" + inside + ")");
+            }
+        }
+        addUnique(out, base);
+        addUnique(out, base + "(노래)");
+        addUnique(out, base + "(곡)");
+        if (origTitle != null && !origTitle.isEmpty() && !origTitle.equals(base)) addUnique(out, origTitle);
         return out;
     }
 
-    private static boolean enrichFromNamuwiki(Result r, String artist, String origTitle, String clean) {
-        if (r == null || r.lines.isEmpty()) return false;
+    private static void addUnique(List<String> list, String v) {
+        if (v != null && !v.isEmpty() && !list.contains(v)) list.add(v);
+    }
+
+    /** Queries Namuwiki public song articles (honest app UA, stops immediately on Cloudflare/challenge pages). */
+    private static NamuMatch fetchNamuwiki(String artist, String origTitle, String clean) {
         List<String> candidates = namuCandidates(artist, origTitle, clean);
         int tried = 0;
         for (String doc : candidates) {
@@ -666,50 +700,79 @@ final class Lyrics {
                 String html = getText(url, 5500);
                 if (html == null || html.isEmpty()) continue;
                 // Respect anti-bot / Cloudflare challenge responses: stop immediately without bypassing.
-                if (isNamuChallengePage(html)) return false;
-                List<String[]> pairs = parseNamuwikiHtml(html);
-                if (!pairs.isEmpty() && applyNamuwikiPairs(r, pairs) >= 2) {
-                    r.source = (r.source == null || r.source.isEmpty()) ? "Namuwiki" : (r.source + " + Namuwiki");
-                    return true;
-                }
-            } catch (Exception ignored) {}
-        }
-        return false;
-    }
-
-    /** Fallback when no synced lyrics provider returned anything: reads the song article's lyrics directly from Namuwiki. */
-    private static Result lookupNamuwikiPlain(String artist, String origTitle, String clean, boolean wantKoSub) {
-        List<String> candidates = namuCandidates(artist, origTitle, clean);
-        int tried = 0;
-        for (String doc : candidates) {
-            if (tried >= 4) break;
-            tried++;
-            try {
-                String url = "https://namu.wiki/w/" + Spotify.enc(doc).replace("+", "%20");
-                String html = getText(url, 5500);
-                if (html == null || html.isEmpty()) continue;
                 if (isNamuChallengePage(html)) return null;
                 List<String[]> pairs = parseNamuwikiHtml(html);
-                if (pairs.size() >= 4) {
-                    Result res = new Result();
-                    res.synced = false;
-                    res.source = "Namuwiki";
-                    for (String[] pair : pairs) {
-                        res.lines.add(new Line(-1, 0, pair[0], wantKoSub ? pair[1] : null, null));
-                    }
-                    return res;
-                }
                 List<String> plain = parseNamuwikiPlainLines(html);
-                if (plain.size() >= 4) {
-                    Result res = new Result();
-                    res.synced = false;
-                    res.source = "Namuwiki";
-                    for (String ln : plain) res.lines.add(new Line(-1, ln));
-                    return res;
-                }
+                NamuMatch m = new NamuMatch(pairs, plain);
+                if (m.hasLyrics()) return m;
             } catch (Exception ignored) {}
         }
         return null;
+    }
+
+    /**
+     * Resolves final lyrics with Namuwiki as TOP priority:
+     * - If Namuwiki has (original, Korean) pairs:
+     *   - When a synced source matches the same song, merges Namuwiki's Korean translations (overwriting other
+     *     providers' translations so Namuwiki always wins) while preserving synced timestamps.
+     *   - When no synced source matches (or only plain/wrong-song lyrics exist), returns Namuwiki's lyrics directly.
+     * - If Namuwiki has plain lyrics (e.g. Korean songs):
+     *   - Keeps synced timestamps only when the synced text matches Namuwiki; otherwise returns Namuwiki directly.
+     */
+    static Result resolveWithNamuPriority(NamuMatch nm, Result other, boolean wantKoSub) {
+        if (nm == null || !nm.hasLyrics()) return other;
+        if (nm.pairs.size() >= 3) {
+            if (other != null && other.synced && !other.lines.isEmpty()) {
+                int minNeed = Math.max(2, Math.min(other.lines.size(), nm.pairs.size()) / 4);
+                int matched = applyNamuwikiPairs(other, nm.pairs);
+                if (matched >= minNeed) {
+                    other.source = (other.source == null || other.source.isEmpty())
+                            ? "Namuwiki" : ("Namuwiki · " + other.source);
+                    return other;
+                }
+            }
+            Result res = new Result();
+            res.synced = false;
+            res.source = "Namuwiki";
+            for (String[] pair : nm.pairs) {
+                res.lines.add(new Line(-1, 0, pair[0], wantKoSub ? pair[1] : null, null));
+            }
+            return res;
+        }
+        if (nm.plain.size() >= 4) {
+            if (other != null && other.synced && !other.lines.isEmpty()) {
+                int minNeed = Math.max(2, Math.min(other.lines.size(), nm.plain.size()) / 4);
+                if (countPlainOverlap(other, nm.plain) >= minNeed) {
+                    other.source = (other.source == null || other.source.isEmpty())
+                            ? "Namuwiki" : ("Namuwiki · " + other.source);
+                    return other;
+                }
+            }
+            Result res = new Result();
+            res.synced = false;
+            res.source = "Namuwiki";
+            for (String ln : nm.plain) res.lines.add(new Line(-1, ln));
+            return res;
+        }
+        return other;
+    }
+
+    private static int countPlainOverlap(Result r, List<String> plain) {
+        if (r == null || plain == null || plain.isEmpty()) return 0;
+        String[] normPlain = new String[plain.size()];
+        for (int i = 0; i < plain.size(); i++) normPlain[i] = norm(plain.get(i));
+        int matched = 0;
+        for (Line l : r.lines) {
+            String nl = norm(l.text);
+            if (nl.length() < 2) continue;
+            for (String np : normPlain) {
+                if (np.length() >= 2 && lineSimilarity(nl, np) >= 0.65f) {
+                    matched++;
+                    break;
+                }
+            }
+        }
+        return matched;
     }
 
     static boolean isNamuChallengePage(String html) {
@@ -981,10 +1044,10 @@ final class Lyrics {
         return s == null ? null : new JSONObject(s);
     }
 
-    // ---- disk cache (v4: native translation tracks only, drops old v3 machine-translated cache) ----
+    // ---- disk cache (v5: Namuwiki top-priority lyrics + native translation tracks) ----
     private static File file(String id) {
         if (Img.appContext == null) return null;
-        File d = new File(Img.appContext.getCacheDir(), "lyrics_v4");
+        File d = new File(Img.appContext.getCacheDir(), "lyrics_v5");
         d.mkdirs();
         return new File(d, Integer.toHexString(id.hashCode()) + "_" + id.length() + ".json");
     }

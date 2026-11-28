@@ -411,10 +411,29 @@ final class Pages {
         }
         View sp = Widgets.spinner(m, 160);
         c.addView(sp);
+        LinearLayout ipBannerSlot = new LinearLayout(m);
+        ipBannerSlot.setOrientation(LinearLayout.VERTICAL);
+        c.addView(ipBannerSlot, Widgets.MW);
+        // Proactively check whether the user is on a Korean IP without Premium/VPN so we can guide them accurately
+        if (!YouTubeMusic.signedIn(m) && !YtmVpn.isBuiltInConnected() && !YtmVpn.isExternalVpnActive(m)) {
+            YtmVpn.checkEgressRegion(m, false, ri -> {
+                if (!p.isAttachedToWindow()) return;
+                if (ri != null && ri.isKorea() && !ri.builtInVpn && !ri.externalVpn) {
+                    ipBannerSlot.removeAllViews();
+                    ipBannerSlot.addView(koreaIpNoticeCard(m, ri.country, ri.ip, p::rebuild), Widgets.MW);
+                }
+            });
+        }
         YouTubeMusic.fetchHome(sections -> {
             c.removeView(sp);
             if (sections == null || sections.isEmpty()) {
-                c.addView(Widgets.caption(m, m.getString(R.string.load_failed)));
+                if (YtmVpn.isKoreaIpRestriction(m, YouTubeMusic.lastHomeGeoReason)) {
+                    YtmVpn.RegionInfo ri = YtmVpn.cachedRegionInfo();
+                    ipBannerSlot.removeAllViews();
+                    ipBannerSlot.addView(koreaIpNoticeCard(m, ri != null ? ri.country : "KR", ri != null ? ri.ip : "", p::rebuild), Widgets.MW);
+                } else {
+                    c.addView(Widgets.caption(m, m.getString(R.string.load_failed)));
+                }
                 return;
             }
             int idx = 0;
@@ -471,6 +490,83 @@ final class Pages {
             Widgets.addToRail(tiles, Widgets.gradientTile(m, m.getString(R.string.lib_recent), null, 0xFF0FB59D, 0xFF198754, tsz,
                     v -> m.push(new YtmListPage(m, m.getString(R.string.lib_recent), "FEmusic_history"))), Ui.dp(tsz));
         });
+    }
+
+    /** Actionable One UI card shown when South Korea IP restriction blocks free YouTube Music access. */
+    static View koreaIpNoticeCard(MainActivity m, String country, String ip, Runnable onReload) {
+        LinearLayout wrap = new LinearLayout(m);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(Ui.dp(16), Ui.dp(6), Ui.dp(16), Ui.dp(14));
+
+        LinearLayout card = new LinearLayout(m);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(Ui.dp(16), Ui.dp(15), Ui.dp(16), Ui.dp(15));
+        android.graphics.drawable.GradientDrawable bg = Ui.round(Ui.card(), Ui.cardRadius());
+        bg.setStroke(Math.max(1, Ui.dp(1f)), Ui.alpha(0xFFFF2D55, Ui.dark ? 0.45f : 0.30f));
+        card.setBackground(bg);
+
+        LinearLayout hdr = new LinearLayout(m);
+        hdr.setOrientation(LinearLayout.HORIZONTAL);
+        hdr.setGravity(Gravity.CENTER_VERTICAL);
+        hdr.addView(new Icons.IconView(m, Icons.GLOBE, 19, 0xFFFF2D55), new LinearLayout.LayoutParams(Ui.dp(22), Ui.dp(22)));
+        TextView title = Ui.text(m, m.getString(R.string.ytm_kr_block_title), 14.5f, Ui.bold, Ui.text());
+        title.setSingleLine(false);
+        title.setPadding(Ui.dp(8), 0, 0, 0);
+        hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(hdr, Widgets.MW);
+
+        String loc = (country != null && !country.isEmpty())
+                ? m.getString(R.string.ytm_kr_block_loc, country, (ip == null || ip.isEmpty()) ? "-" : ip)
+                : m.getString(R.string.ytm_kr_block_loc_unknown);
+        TextView body = Ui.text(m, m.getString(R.string.ytm_kr_block_body) + "\n" + loc, 12.5f, Ui.regular, Ui.text2());
+        body.setSingleLine(false);
+        body.setLineSpacing(Ui.dpf(2), 1f);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = Ui.dp(8);
+        card.addView(body, blp);
+
+        LinearLayout btnRow = new LinearLayout(m);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        brLp.topMargin = Ui.dp(12);
+
+        TextView usBtn = Ui.text(m, m.getString(R.string.ytm_vpn_connect_us), 13f, Ui.semibold, 0xFFFFFFFF);
+        usBtn.setGravity(Gravity.CENTER);
+        usBtn.setPadding(Ui.dp(12), Ui.dp(10), Ui.dp(12), Ui.dp(10));
+        usBtn.setBackground(Ui.round(Ui.ACCENT, 100));
+        usBtn.setOnClickListener(v -> {
+            android.widget.Toast.makeText(m, m.getString(R.string.ytm_vpn_connecting, m.getString(R.string.ytm_vpn_us)), android.widget.Toast.LENGTH_SHORT).show();
+            YtmVpn.setRegion(m, YtmVpn.REGION_US, ok -> {
+                android.widget.Toast.makeText(m, ok
+                        ? m.getString(R.string.ytm_vpn_connected, m.getString(R.string.ytm_vpn_us))
+                        : m.getString(R.string.ytm_vpn_connect_failed, m.getString(R.string.ytm_vpn_us)), android.widget.Toast.LENGTH_LONG).show();
+                if (ok && onReload != null) onReload.run();
+            });
+        });
+        Ui.press(usBtn, 0.95f);
+        LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        uLp.rightMargin = Ui.dp(8);
+        btnRow.addView(usBtn, uLp);
+
+        TextView jpBtn = Ui.text(m, m.getString(R.string.ytm_vpn_connect_jp), 13f, Ui.semibold, Ui.text());
+        jpBtn.setGravity(Gravity.CENTER);
+        jpBtn.setPadding(Ui.dp(12), Ui.dp(10), Ui.dp(12), Ui.dp(10));
+        jpBtn.setBackground(Ui.round(Ui.chip(), 100));
+        jpBtn.setOnClickListener(v -> {
+            android.widget.Toast.makeText(m, m.getString(R.string.ytm_vpn_connecting, m.getString(R.string.ytm_vpn_jp)), android.widget.Toast.LENGTH_SHORT).show();
+            YtmVpn.setRegion(m, YtmVpn.REGION_JP, ok -> {
+                android.widget.Toast.makeText(m, ok
+                        ? m.getString(R.string.ytm_vpn_connected, m.getString(R.string.ytm_vpn_jp))
+                        : m.getString(R.string.ytm_vpn_connect_failed, m.getString(R.string.ytm_vpn_jp)), android.widget.Toast.LENGTH_LONG).show();
+                if (ok && onReload != null) onReload.run();
+            });
+        });
+        Ui.press(jpBtn, 0.95f);
+        btnRow.addView(jpBtn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(btnRow, brLp);
+
+        wrap.addView(card, Widgets.MW);
+        return wrap;
     }
 
     static final class HomePage extends Page {
@@ -3516,10 +3612,29 @@ final class Pages {
                 YouTubeMusic.searchAll(q, bundle -> {
                     if (my != req) return;
                     results.removeAllViews();
-                    if (bundle == null || bundle.isEmpty()) { results.addView(Widgets.caption(m, m.getString(R.string.no_results))); return; }
+                    if (bundle != null && bundle.geoBlocked) {
+                        YtmVpn.RegionInfo ri = YtmVpn.cachedRegionInfo();
+                        results.addView(koreaIpNoticeCard(m, ri != null ? ri.country : "KR", ri != null ? ri.ip : "", this::doSearch), Widgets.MW);
+                    }
+                    if (bundle == null || bundle.isEmpty()) {
+                        if (bundle == null || !bundle.geoBlocked) results.addView(Widgets.caption(m, m.getString(R.string.no_results)));
+                        return;
+                    }
+                    if (bundle.topResult != null) {
+                        results.addView(Widgets.section(m, m.getString(R.string.ytm_top_result)));
+                        final Widgets.Item top = bundle.topResult;
+                        if (top.track != null) {
+                            List<Widgets.Item> single = new ArrayList<>();
+                            single.add(top);
+                            results.addView(Widgets.trackRow(m, top, 0, v -> m.playList(single, 0, q), v -> m.trackMenu(top, v)), Widgets.MW);
+                        } else {
+                            results.addView(entityRow(m, top), Widgets.MW);
+                        }
+                    }
                     if (!bundle.tracks.isEmpty()) {
                         results.addView(Widgets.section(m, m.getString(R.string.songs)));
-                        for (int i = 0; i < bundle.tracks.size(); i++) {
+                        int showN = Math.min(15, bundle.tracks.size());
+                        for (int i = 0; i < showN; i++) {
                             final int idx = i;
                             Widgets.Item it = bundle.tracks.get(i);
                             results.addView(Widgets.trackRow(m, it, 0, v -> m.playList(bundle.tracks, idx, q), v -> m.trackMenu(it, v)), Widgets.MW);
@@ -3527,6 +3642,15 @@ final class Pages {
                     }
                     rail(R.string.artists, bundle.artists);
                     rail(R.string.albums, bundle.albums);
+                    if (!bundle.videos.isEmpty()) {
+                        results.addView(Widgets.section(m, m.getString(R.string.ytm_videos)));
+                        int showV = Math.min(8, bundle.videos.size());
+                        for (int i = 0; i < showV; i++) {
+                            final int idx = i;
+                            Widgets.Item it = bundle.videos.get(i);
+                            results.addView(Widgets.trackRow(m, it, 0, v -> m.playList(bundle.videos, idx, q), v -> m.trackMenu(it, v)), Widgets.MW);
+                        }
+                    }
                     rail(R.string.playlists, bundle.playlists);
                 });
                 return;
