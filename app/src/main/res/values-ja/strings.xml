@@ -298,7 +298,9 @@
     <string name="bpa_enable">ビットパーフェクト アシストをオン</string>
     <string name="bpa_disable">ビットパーフェクト アシストをオフ</string>
     <string name="bpa_supported_socs">対応チップセット一覧</string>
-    <string name="bpa_supported_socs_sub">全25種対応</string>
+    <string name="bpa_supported_socs_sub">全%1$d種対応</string>
+    <string name="bpa_family">%1$s 系</string>
+    <string name="bpa_family_unknown">型番未公開</string>
     <string name="bpa_current_device">現在の端末</string>
     <string name="bpa_hires_glow">Hi-Res 3段階グローエフェクト</string>
     <string name="bpa_hires_glow_note">Hi-Res 再生時のジャケット周囲グロー（ゴールド・ブルー・レインボー）とマスター背景を表示します。</string>
@@ -344,7 +346,7 @@
     <string name="app_icon_note">既定のクラシックプリズムアイコンと、滑らかな虹色グラデーションアイコン（オブシディアンネオン・スペクトラムブルーム）を切り替えられます。</string>
     <string name="app_icon_changed">アプリアイコンを変更しました。ホーム画面の反映まで少し時間がかかる場合があります。</string>
     <string name="lyrics_namuwiki">ナムウィキ歌詞を最優先で使用</string>
-    <string name="lyrics_namuwiki_note">既定はオフです。オンにするとナムウィキに歌詞がある場合、他のソースより最優先で適用します（同期歌詞と一致する場合は訳を統合し、それ以外はナムウィキの歌詞を直接表示します）。</string>
+    <string name="lyrics_namuwiki_note">ナムウィキ：初期設定はオフです。オンにすると、その曲の記事（題名が曲名で、本文に歌手・作詞/作曲がある記事）だけを使います。他のソースに歌詞がないときに代わりに表示し、同じ曲の同期歌詞にはナムウィキの韓国語訳を付けます。最優先にするには上の「優先する歌詞ソース」で選んでください。</string>
     <string name="bp_ready_direct">%1$s · USB ダイレクト出力対応</string>
     <string name="bp_active_direct">USB ダイレクト · %1$s / %2$s</string>
     <string name="aod_auto_bright">AOD 自動明るさ調整</string>
@@ -465,4 +467,22 @@
     <string name="ytm_kr_block_loc_unknown">検出された地域: 韓国 (KR)</string>
     <string name="ytm_vpn_connect_us">アメリカ(US) VPN をオン</string>
     <string name="ytm_vpn_connect_jp">日本(JP) VPN をオン</string>
+    <string name="lyrics_priority">優先する歌詞ソース</string>
+    <string name="lyrics_priority_auto">自動（リストの順番）</string>
+    <string name="lyrics_priority_note">選んだソースを最初に検索します。同期歌詞があればそのまま使い、通常の歌詞だけの場合は他のソースの同じ歌詞の同期版からタイミングを取ります。下のリストでオンのソースだけ選べます。</string>
+    <string name="mxm_key">Musixmatch API キー</string>
+    <string name="mxm_key_help">developer.musixmatch.com で発行したご自身のキーを入力してください。この端末に暗号化して保存し、Musixmatch にだけ送信します。</string>
+    <string name="mxm_key_note">Musixmatch にはご自身の API キーが必要です。無料プランでは歌詞の一部だけが同期なしで返されます（「Musixmatch（一部）」と表示）。同期歌詞には字幕を含むプランが必要です。</string>
+    <string name="key_set">設定済み</string>
+    <string name="key_remove">削除</string>
+    <string name="mt_group">歌詞の翻訳</string>
+    <string name="mt_engine">翻訳エンジン</string>
+    <string name="mt_engine_off">オフ</string>
+    <string name="mt_engine_device">端末内翻訳</string>
+    <string name="mt_key">API キー</string>
+    <string name="mt_key_help_deepl">ご自身の DeepL API キーを入力してください（無料キーは「:fx」で終わります）。暗号化して保存し、DeepL にだけ送信します。</string>
+    <string name="mt_key_help_google">ご自身の Google Cloud Translation API キーを入力してください。暗号化して保存し、Google にだけ送信します。</string>
+    <string name="mt_key_help_papago">NAVER Cloud Platform（Papago Translation）で発行した値を入力してください。暗号化して保存し、NAVER Cloud にだけ送信します。</string>
+    <string name="mt_device_unavailable">この端末には端末内翻訳サービスがないため翻訳されません。別のエンジンを選んでください。</string>
+    <string name="mt_note">初期設定はオフです。オンにすると、ソースに独自の翻訳がない歌詞だけをアプリの言語に機械翻訳して各行の下に表示します。端末内翻訳は端末の外に送信しません。DeepL・Google・Papago はご自身のキーで歌詞の文をそのサービスに送信します。YouTube Music アプリの歌詞翻訳は公開 API がないため使えません。</string>
 </resources>

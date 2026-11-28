@@ -19,6 +19,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Settings screens (grouped inset lists). */
 final class Settings {
@@ -677,7 +679,7 @@ final class Settings {
                 r.setAlpha(0.55f);
             }
             toggleRow(mg, Icons.APPEARANCE, m.getString(R.string.bpa_hires_glow), NpuAudio.PREF_HIRES_GLOW, true, Player::notifyAll0);
-            mg.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.bpa_supported_socs), m.getString(R.string.bpa_supported_socs_sub), true, v -> m.push(new SupportedChipsetsPage(m)));
+            mg.row(Icons.INFO, Ui.ACCENT, m.getString(R.string.bpa_supported_socs), m.getString(R.string.bpa_supported_socs_sub, NpuAudio.SUPPORTED_CHIPS.length), true, v -> m.push(new SupportedChipsetsPage(m)));
             content.addView(mg, Widgets.MW);
 
             // 3) Grouped sub-pages below NPU 음질 향상 for crisp readability & scannability
@@ -1018,11 +1020,15 @@ final class Settings {
             addVendorGroup(m, "Google Tensor", NpuAudio.VENDOR_GOOGLE, current);
         }
 
+        /** 9.5.31: one row per silicon family (model number), e.g. "MT6991 계열 — 디멘시티 9400 / 9400+ / 9500s". */
         private void addVendorGroup(MainActivity m, String title, int vendor, NpuAudio.ChipSpec current) {
             Widgets.Group g = new Widgets.Group(m, title);
             boolean first = true;
-            for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
-                if (cs.vendor != vendor) continue;
+            for (java.util.List<NpuAudio.ChipSpec> fam : NpuAudio.chipFamilies(vendor)) {
+                NpuAudio.ChipSpec cs = fam.get(0);
+                boolean here = false;
+                for (NpuAudio.ChipSpec x : fam) if (current != null && current.id.equals(x.id)) { cs = x; here = true; }
+                if (!here) for (NpuAudio.ChipSpec x : fam) if (x.drawableRes != 0) { cs = x; break; }
                 if (!first) {
                     View div = new View(m);
                     div.setBackgroundColor(Ui.separator());
@@ -1042,8 +1048,23 @@ final class Settings {
                 LinearLayout col = new LinearLayout(m);
                 col.setOrientation(LinearLayout.VERTICAL);
                 col.setPadding(showArt ? Ui.dp(12) : Ui.dp(2), 0, Ui.dp(8), 0);
-                col.addView(Ui.text(m, cs.displayName(m), 15f, Ui.semibold, Ui.text()), Widgets.MW);
-                TextView sub = Ui.text(m, cs.id + " · " + cs.npu, 12f, Ui.regular, Ui.text2());
+                String famName = cs.family().isEmpty() ? m.getString(R.string.bpa_family_unknown) : m.getString(R.string.bpa_family, cs.family());
+                col.addView(Ui.text(m, famName, 15f, Ui.semibold, Ui.text()), Widgets.MW);
+                // "디멘시티 9400 / 9400+ / 9500s": the vendor name once, then the variants
+                StringBuilder names = new StringBuilder();
+                String firstName = fam.get(0).displayName(m);
+                int cut = firstName.lastIndexOf(' ');
+                String prefix = cut > 0 ? firstName.substring(0, cut + 1) : "";
+                for (NpuAudio.ChipSpec x : fam) {
+                    String n = x.displayName(m);
+                    if (names.length() > 0) { names.append(" / "); if (!prefix.isEmpty() && n.startsWith(prefix)) n = n.substring(prefix.length()); }
+                    names.append(n);
+                }
+                TextView variants = Ui.text(m, names.toString(), 13.5f, Ui.medium, Ui.text());
+                LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                vlp.topMargin = Ui.dp(1);
+                col.addView(variants, vlp);
+                TextView sub = Ui.text(m, cs.npu, 12f, Ui.regular, Ui.text2());
                 LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 slp.topMargin = Ui.dp(2);
                 col.addView(sub, slp);
@@ -1102,20 +1123,53 @@ final class Settings {
         @Override void build() {
             MainActivity m = main;
             Widgets.Group g = new Widgets.Group(m, null);
-            toggleRow(g, Icons.LYRICS, m.getString(R.string.lyrics_online), "lyrics", true, null);
+            toggleRow(g, Icons.LYRICS, m.getString(R.string.lyrics_online), "lyrics", true, Lyrics::settingsChanged);
             toggleRow(g, Icons.GLOBE, m.getString(R.string.lyrics_ko_trans), Lyrics.PREF_KO_TRANS, true, () -> Lyrics.clearCache(m));
-            toggleRow(g, Icons.LINK, m.getString(R.string.lyrics_namuwiki), Lyrics.PREF_NAMUWIKI, false, () -> Lyrics.clearCache(m));
             content.addView(g, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.lyrics_ko_trans_note)));
-            content.addView(Widgets.caption(m, m.getString(R.string.lyrics_namuwiki_note)));
+
+            // 9.5.31: "Namuwiki first" became a general "ask this provider first"
+            Widgets.Group prg = new Widgets.Group(m, m.getString(R.string.lyrics_priority));
+            String prio = Lyrics.priority(m);
+            prg.row(Icons.STAR, Ui.ACCENT, m.getString(R.string.lyrics_priority),
+                    Lyrics.PRIORITY_AUTO.equals(prio) ? m.getString(R.string.lyrics_priority_auto) : Lyrics.providerName(prio), true, v -> pickPriority());
+            content.addView(prg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.lyrics_priority_note)));
 
             Widgets.Group pg = new Widgets.Group(m, m.getString(R.string.lyrics_providers));
             for (int i = 0; i < Lyrics.PROVIDER_IDS.length; i++) {
                 String id = Lyrics.PROVIDER_IDS[i];
                 String label = Lyrics.PROVIDER_NAMES[i];
-                toggleRow(pg, Icons.NOTE, label, Lyrics.providerPrefKey(id), true, () -> Lyrics.clearCache(m));
+                boolean def = Lyrics.isProviderEnabled(m, id);   // Namuwiki: off unless it was on in 9.5.30
+                toggleRow(pg, Lyrics.SRC_NAMU.equals(id) ? Icons.LINK : Icons.NOTE, label, Lyrics.providerPrefKey(id), def, () -> { Lyrics.clearCache(m); rebuild(); });
             }
+            pg.row(Icons.LINK, Ui.ACCENT, m.getString(R.string.mxm_key),
+                    Lyrics.musixmatchKeySet(m) ? m.getString(R.string.key_set) : m.getString(R.string.not_set), true,
+                    v -> editSecret(m.getString(R.string.mxm_key), m.getString(R.string.mxm_key_help), Lyrics.PREF_MXM_KEY));
             content.addView(pg, Widgets.MW);
+            content.addView(Widgets.caption(m, m.getString(R.string.mxm_key_note)));
+            content.addView(Widgets.caption(m, m.getString(R.string.lyrics_namuwiki_note)));
+
+            // machine translation (off by default)
+            Widgets.Group mg = new Widgets.Group(m, m.getString(R.string.mt_group));
+            String eng = LyricsTranslate.engine(m);
+            mg.row(Icons.GLOBE, Ui.ACCENT, m.getString(R.string.mt_engine), LyricsTranslate.engineName(m, eng), true, v -> pickEngine());
+            if (LyricsTranslate.DEEPL.equals(eng))
+                mg.row(Icons.LINK, Ui.ACCENT, "DeepL " + m.getString(R.string.mt_key), keyState(LyricsTranslate.KEY_DEEPL), true,
+                        v -> editSecret("DeepL " + m.getString(R.string.mt_key), m.getString(R.string.mt_key_help_deepl), LyricsTranslate.KEY_DEEPL));
+            if (LyricsTranslate.GOOGLE.equals(eng))
+                mg.row(Icons.LINK, Ui.ACCENT, "Google " + m.getString(R.string.mt_key), keyState(LyricsTranslate.KEY_GOOGLE), true,
+                        v -> editSecret("Google " + m.getString(R.string.mt_key), m.getString(R.string.mt_key_help_google), LyricsTranslate.KEY_GOOGLE));
+            if (LyricsTranslate.PAPAGO.equals(eng)) {
+                mg.row(Icons.LINK, Ui.ACCENT, "Papago Client ID", keyState(LyricsTranslate.KEY_PAPAGO_ID), true,
+                        v -> editSecret("Papago Client ID", m.getString(R.string.mt_key_help_papago), LyricsTranslate.KEY_PAPAGO_ID));
+                mg.row(Icons.LINK, Ui.ACCENT, "Papago Client Secret", keyState(LyricsTranslate.KEY_PAPAGO_SECRET), true,
+                        v -> editSecret("Papago Client Secret", m.getString(R.string.mt_key_help_papago), LyricsTranslate.KEY_PAPAGO_SECRET));
+            }
+            content.addView(mg, Widgets.MW);
+            if (LyricsTranslate.DEVICE.equals(eng) && !LyricsTranslate.deviceAvailable(m))
+                content.addView(Widgets.caption(m, m.getString(R.string.mt_device_unavailable)));
+            content.addView(Widgets.caption(m, m.getString(R.string.mt_note)));
 
             Widgets.Group cg = new Widgets.Group(m, null);
             cg.row(Icons.CLOSE, Ui.ACCENT, m.getString(R.string.lyrics_clear_cache), null, false, v -> {
@@ -1124,6 +1178,78 @@ final class Settings {
             });
             content.addView(cg, Widgets.MW);
             content.addView(Widgets.caption(m, m.getString(R.string.lyrics_note)));
+        }
+
+        private String keyState(String key) {
+            return SecureVault.has(MainActivity.prefs(main), key) ? main.getString(R.string.key_set) : main.getString(R.string.not_set);
+        }
+
+        private void pickPriority() {
+            MainActivity m = main;
+            List<String> ids = new ArrayList<>(), names = new ArrayList<>();
+            ids.add(Lyrics.PRIORITY_AUTO); names.add(m.getString(R.string.lyrics_priority_auto));
+            for (int i = 0; i < Lyrics.PROVIDER_IDS.length; i++) {
+                if (!Lyrics.isProviderEnabled(m, Lyrics.PROVIDER_IDS[i])) continue;   // only providers that are switched on
+                ids.add(Lyrics.PROVIDER_IDS[i]); names.add(Lyrics.PROVIDER_NAMES[i]);
+            }
+            int cur = Math.max(0, ids.indexOf(Lyrics.priority(m)));
+            new AlertDialog.Builder(m)
+                    .setTitle(R.string.lyrics_priority)
+                    .setSingleChoiceItems(names.toArray(new String[0]), cur, (d, w) -> {
+                        MainActivity.prefs(m).edit().putString(Lyrics.PREF_PRIORITY, ids.get(w)).apply();
+                        d.dismiss();
+                        Lyrics.clearCache(m);
+                        rebuild();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        }
+
+        private void pickEngine() {
+            MainActivity m = main;
+            String[] names = new String[LyricsTranslate.ENGINES.length];
+            for (int i = 0; i < names.length; i++) names[i] = LyricsTranslate.engineName(m, LyricsTranslate.ENGINES[i]);
+            int cur = Math.max(0, java.util.Arrays.asList(LyricsTranslate.ENGINES).indexOf(LyricsTranslate.engine(m)));
+            new AlertDialog.Builder(m)
+                    .setTitle(R.string.mt_engine)
+                    .setSingleChoiceItems(names, cur, (d, w) -> {
+                        MainActivity.prefs(m).edit().putString(LyricsTranslate.PREF_ENGINE, LyricsTranslate.ENGINES[w]).apply();
+                        d.dismiss();
+                        Lyrics.clearCache(m);
+                        rebuild();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        }
+
+        /** API keys are stored encrypted (SecureVault) and never shown back in full. */
+        private void editSecret(String title, String help, String key) {
+            MainActivity m = main;
+            EditText e = new EditText(m);
+            e.setSingleLine(true);
+            e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            e.setHint(SecureVault.has(MainActivity.prefs(m), key) ? m.getString(R.string.key_set) : "");
+            FrameLayout f = new FrameLayout(m);
+            f.setPadding(Ui.dp(22), Ui.dp(8), Ui.dp(22), 0);
+            f.addView(e);
+            new AlertDialog.Builder(m)
+                    .setTitle(title)
+                    .setMessage(help)
+                    .setView(f)
+                    .setPositiveButton(R.string.save, (d, w) -> {
+                        String v = e.getText().toString().trim();
+                        if (v.isEmpty()) return;
+                        SecureVault.put(MainActivity.prefs(m), key, v);
+                        Lyrics.clearCache(m);
+                        rebuild();
+                    })
+                    .setNeutralButton(R.string.key_remove, (d, w) -> {
+                        SecureVault.remove(MainActivity.prefs(m), key);
+                        Lyrics.clearCache(m);
+                        rebuild();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
         }
     }
 

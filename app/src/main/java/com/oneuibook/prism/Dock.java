@@ -299,6 +299,16 @@ final class Dock extends FrameLayout {
 
     static boolean tabletFor(int wPx, int hPx) { return !railFor(wPx, hPx) && wPx / Ui.density >= 600 && hPx / Ui.density >= 480; }
 
+    /**
+     * 9.5.31: wide foldables unfolded (landscape 4:3 inner screen), laid out like Apple Music on a wide foldable:
+     * a vertical pill at the bottom right holding the four tabs AND search (icon + label), a wide floating music
+     * bar with the transport controls to its left, small page titles at the top.
+     */
+    static boolean wideRailFor(int wPx, int hPx) { return railFor(wPx, hPx); }   // every unfolded foldable (9.5.31)
+    boolean wideRail;
+    /** Wide music bar with shuffle / previous / play / next / repeat … more / lyrics / queue. */
+    private boolean wideBar() { return tablet || wideRail; }
+
     static boolean railFor(int wPx, int hPx) {
         float wd = wPx / Ui.density, hd = hPx / Ui.density;
         float aspect = Math.max(wd, hd) / Math.max(1f, Math.min(wd, hd));
@@ -363,6 +373,7 @@ final class Dock extends FrameLayout {
         if (W <= 0) return;
         rail = railFor((int) W, (int) H);
         tablet = tabletFor((int) W, (int) H);
+        wideRail = wideRailFor((int) W, (int) H);
         float gap = Ui.dpf(8);
         if (tablet) {
             // everything centres on the content area, which starts right of the sidebar while it is open
@@ -388,17 +399,23 @@ final class Dock extends FrameLayout {
         float bottom = bottomY();
         float mh = Ui.dpf(50);
         if (rail) {
-            // icon-only vertical tab pill, centred on the screen's height
+            // icon-only vertical tab pill, centred on the screen's height — on a wide foldable (Apple Music-like)
+            // it sits at the bottom right instead, right above the round search button
             float rw = Ui.dpf(60), len = Ui.dpf(SLOT_PAD * 2 + 4 * 54);
-            float right = W - Ui.dpf(20), top = (H - len) / 2f;
+            float cs = Ui.dpf(60);   // same 60dp column as the rail and the header pill
+            float right = W - Ui.dpf(20);
+            float top = wideRail ? Math.max(Ui.statusInset + Ui.dpf(90), bottom - cs - gap - len) : (H - len) / 2f;
             pill.set(right - rw, top, right, top + len);
             // search stays at the bottom right, beside the music bar; it widens into the field
-            float cs = Ui.dpf(60);   // same 60dp column as the rail and the header pill
             RectF railCircle = tmp;
             railCircle.set(W - m - cs, bottom - cs, W - m, bottom);
-            circle.set(Ui.lerp(railCircle.left, m, search), railCircle.top, railCircle.right, railCircle.bottom);
+            // with the keyboard up the field rises beside the tab pill: then it stops left of the pill's column
+            float beside = wideRail ? Ui.clamp((pill.bottom + gap - railCircle.top) / cs, 0f, 1f) : 0f;
+            float fieldR = Ui.lerp(railCircle.right, pill.left - gap, search * beside);
+            circle.set(Ui.lerp(railCircle.left, m, search), railCircle.top, fieldR, railCircle.bottom);
             // In search mode, lift the mini player pill smoothly above the full-width search bar
-            float miniR = Ui.lerp(W - m - cs - gap, W - m, search);
+            // wide foldable: the tab pill sits right above the search button, so the lifted bar stops left of it
+            float miniR = wideRail ? W - m - cs - gap : Ui.lerp(W - m - cs - gap, W - m, search);
             float liftY = (cs + gap) * search;
             mini.set(m, bottom - Ui.dpf(56) - liftY, miniR, bottom - Ui.dpf(2) - liftY);
             return;
@@ -503,7 +520,9 @@ final class Dock extends FrameLayout {
             int barW = Math.min(W - Ui.dp(32), Ui.dp(420));
             return Math.max(1, barW - Ui.dp(46 + 44));
         }
-        return Math.max(1, W - sideMargin(W, H) - fieldLeft(W, H) - Ui.dp(18));
+        int w = W - sideMargin(W, H) - fieldLeft(W, H) - Ui.dp(18);
+        if (wideRailFor(W, H)) w -= Ui.dp(60 + 8);   // room for the tab pill column at the right
+        return Math.max(1, w);
     }
 
     @Override protected void onMeasure(int ws, int hs) {
@@ -621,7 +640,8 @@ final class Dock extends FrameLayout {
             return;
         }
 
-        // search bubble glyph (A style / rail / tablet)
+        // search bubble glyph (A style / rail / tablet); the wide-foldable pill holds search itself, no bubble at rest
+        if (circle.isEmpty()) return;
         float sp = searchPress.value;
         float iconCx = Ui.lerp(circle.centerX(), circle.left + Ui.dpf(26), search);
         Icons.draw(c, Icons.SEARCH, iconCx, circle.centerY(), Ui.dpf(25) * (1f - 0.08f * sp) * Ui.lerp(1f, 0.82f, search),
@@ -667,10 +687,17 @@ final class Dock extends FrameLayout {
             }
             int iconId = i < 4 ? TAB_ICONS[i] : Icons.SEARCH;
             String text = i < 4 ? labels[i] : getContext().getString(R.string.search);
-            float iy = rail ? cy : cy - Ui.dpf(ug ? 7.5f : 7f) * (1f - k);
+            float lab = wideRail ? Ui.clamp(lift.value, 0f, 1f) : 0f;   // labels show while pressed / dragged
+            float iy = wideRail ? cy - Ui.dpf(7f) * lab : rail ? cy : cy - Ui.dpf(ug ? 7.5f : 7f) * (1f - k);
             int col = Ui.alpha(color, a);
-            Icons.draw(c, iconId, cx, iy, iconSize * Ui.lerp(1f, 0.92f, k), col);
-            if (labelA > 0.01f && !rail) {
+            Icons.draw(c, iconId, cx, iy, (wideRail ? Ui.lerp(iconSize, Ui.dpf(23), lab) : iconSize) * Ui.lerp(1f, 0.92f, k), col);
+            if (wideRail) {
+                if (lab > 0.01f) {
+                label.setColor(Ui.alpha(color, a * lab));
+                label.setTypeface(accentPass ? Ui.bold : Ui.medium);
+                c.drawText(text, cx, cy + Ui.dpf(16.5f), label);
+                }
+            } else if (labelA > 0.01f && !rail) {
                 label.setColor(Ui.alpha(color, a * labelA));
                 label.setTypeface(accentPass ? Ui.bold : Ui.medium);
                 c.drawText(text, cx, cy + Ui.dpf(ug ? 18.5f : 19.5f), label);
@@ -688,7 +715,7 @@ final class Dock extends FrameLayout {
     /** Right-hand buttons that fit: all three on a wide bar, only the queue when the bar is narrow (sidebar open on a small screen). */
     private int rCount() { return mini.width() >= Ui.dpf(600) ? 3 : 1; }
     /** Left edge of the cover in the music bar — the player opens out of / closes into exactly this square. */
-    private float miniArtX() { return tablet ? tabletBtn(4) + Ui.dpf(34) : mini.left + Ui.dpf(15); }
+    private float miniArtX() { return wideBar() ? tabletBtn(4) + Ui.dpf(34) : mini.left + Ui.dpf(15); }
 
     private void drawMini(Canvas c) {
         float show = miniShow;
@@ -706,7 +733,7 @@ final class Dock extends FrameLayout {
         float pad = Ui.dpf(13);
         float artS = mini.height() - Ui.dpf(20);
         float ax = mini.left + pad + Ui.dpf(2), ay = mini.centerY() - artS / 2f;
-        if (tablet) {
+        if (wideBar()) {
             int fg = Ui.alpha(Ui.text(), show), dim = Ui.alpha(Ui.text(), show * 0.55f);
             boolean pl = Player.playing;
             Icons.draw(c, Icons.SHUFFLE, tabletBtn(0), mini.centerY(), Ui.dpf(20), Player.shuffle ? Ui.alpha(Ui.ACCENT, show) : dim);
@@ -738,7 +765,7 @@ final class Dock extends FrameLayout {
         }
         float nextA = rail || tablet ? 1f : 1f - miniK();
         float btnW = Ui.dpf(40);
-        if (tablet) {
+        if (wideBar()) {
             // PC-like wide bottom bar: title + artist + compact elapsed/total time readout + hairline progress indicator
             float tx = ax + artS + Ui.dpf(10), rightLimit = tabletRBtn(rCount() - 1) - Ui.dpf(26);
             float avail = rightLimit - tx;
@@ -905,7 +932,7 @@ final class Dock extends FrameLayout {
     private int hit(float x, float y) {
         float slop = Ui.dpf(4);
         if (miniShow > 0.5f && !miniHidden && x >= mini.left - slop && x <= mini.right + slop && y >= mini.top - slop && y <= mini.bottom + slop) {
-            if (tablet) {
+            if (wideBar()) {
                 int[] kinds = {T_MINI_SHUF, T_MINI_PREV, T_MINI_PLAY, T_MINI_NEXT, T_MINI_REP};
                 for (int i = 0; i < 5; i++) if (Math.abs(x - tabletBtn(i)) < Ui.dpf(22)) return kinds[i];
                 int[] right = {T_MINI_QUEUE, T_MINI_LYR, T_MINI_MORE};

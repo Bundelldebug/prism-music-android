@@ -295,7 +295,12 @@ final class NowPlaying extends FrameLayout {
         Player.setFast(true);
         // tablet / unfolded: the right pane is part of the layout and opens on the queue
         View host = (View) getParent();   // this view is still GONE (0×0) on the first open
-        if (host != null && host.getWidth() / Ui.density >= 600 && host.getHeight() / Ui.density >= 480 && panel == 0) post(() -> setPanel(2));
+        // (a wide foldable unfolded keeps the right pane closed until lyrics / queue is asked for, as in Apple Music,
+        //  with the cover and controls centred until then)
+        if (sideAnim != null) sideAnim.cancel();
+        sideK = panel == 0 ? 0f : 1f;
+        if (host != null && host.getWidth() / Ui.density >= 600 && host.getHeight() / Ui.density >= 480 && panel == 0
+                && !Dock.wideRailFor(host.getWidth(), host.getHeight())) post(() -> setPanel(2));
         animateOpen(1f, 560, Ui.DECEL);
         tickerRunning = true;
         removeCallbacks(ticker);
@@ -367,18 +372,31 @@ final class NowPlaying extends FrameLayout {
     /** Unfolded foldable / tablet: artwork + controls on the left, lyrics or queue always on the right. */
     boolean wide;
     private float colX, colW;
+    /**
+     * Wide foldable unfolded (Apple Music-like): 0 = cover + controls centred (no lyrics / queue open),
+     * 1 = moved to the left with the lyrics / queue pane beside them. Animated when a pane opens or closes.
+     */
+    private float sideK = 1f;
+    private ValueAnimator sideAnim;
+    private boolean centreWhenClosed(int W, int H) { return Dock.wideRailFor(W, H); }
     private int baseTitleW;
 
     private void computeSlots(int W, int H) {
         float top = Ui.statusInset;
+        boolean wasWide = wide;
         wide = W / Ui.density >= 600 && H / Ui.density >= 480;
+        // shuffle / repeat leave the action pill in the two-pane layout: drop their pill highlights (else a stray ring stays)
+        if (wasWide != wide) post(() -> syncActionButtons(false));
         if (wide) {
             bottomY = H - Ui.navInset - Ui.dpf(34);
             colW = Math.min(W * 0.42f, H * (oneui ? 0.39f : 0.45f));
-            colX = Math.max(Ui.dpf(32), W * 0.045f);
             float extraH = Ui.dpf(oneui ? 302 : 280);
+            // leave room for the grabber above the cover
+            colW = Math.max(Ui.dpf(160), Math.min(colW, H - Ui.navInset - Ui.dpf(8) - (top + Ui.dpf(32)) - extraH));
+            colX = Math.max(Ui.dpf(32), W * 0.045f);
+            if (centreWhenClosed(W, H)) colX = Ui.lerp((W - colW) / 2f, colX, sideK);
             float block = colW + extraH;
-            float y0 = Math.max(top + Ui.dpf(12), (H - block) / 2f);
+            float y0 = Math.max(top + Ui.dpf(32), (H - block) / 2f);
             artBig.set(colX, y0, colX + colW, y0 + colW);
             artSmall.set(artBig);
             if (oneui) {
@@ -596,7 +614,8 @@ final class NowPlaying extends FrameLayout {
         /** Unfolded foldable / tablet two-pane layout: cover + controls on left, lyrics/queue on right. */
         private void layoutWide(int W) {
             int x = (int) colX, cw = (int) colW;
-            place(handle, (int) (panelRect.centerX() - handle.getMeasuredWidth() / 2f), Ui.statusInset + Ui.dp(14));
+            // the grabber always sits centred above the cover (it follows the cover as it slides)
+            place(handle, (int) (artBig.centerX() - handle.getMeasuredWidth() / 2f), Ui.statusInset + Ui.dp(14));
             if (oneui) {
                 int devY = (int) (artBig.bottom + Ui.dpf(22));
                 place(chip, x, devY - chip.getMeasuredHeight() / 2);
@@ -1493,6 +1512,27 @@ final class NowPlaying extends FrameLayout {
             // two-pane: the right pane just cross-fades between lyrics and the queue
             mode = 0f;
             updatePanelVisibility();
+            boolean slide = centreWhenClosed(getWidth(), getHeight()) && ((old == 0) != (p == 0));
+            if (slide) {
+                // wide foldable: the centred cover + controls glide to the left as the pane comes in (and back)
+                if (p == 0) panelHost.setVisibility(VISIBLE);   // keep it on screen while it slides away
+                float from = sideK, to = p == 0 ? 0f : 1f;
+                if (sideAnim != null) sideAnim.cancel();
+                sideAnim = Ui.animate(from, to, 520, Ui.EMPHASIZED, a -> {
+                    sideK = (float) a.getAnimatedValue();
+                    panelHost.setAlpha(Ui.clamp((sideK - 0.35f) / 0.65f, 0f, 1f));
+                    panelHost.setTranslationX(Ui.dpf(56) * (1f - sideK));
+                    content.requestLayout();
+                    invalidate();
+                });
+                sideAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+                    @Override public void onAnimationEnd(android.animation.Animator a) { if (panel == 0) updatePanelVisibility(); }
+                });
+                applyMode();
+                return;
+            }
+            sideK = 1f;
+            panelHost.setTranslationX(0f);
             panelHost.setAlpha(0f);
             panelHost.animate().alpha(p == 0 ? 0f : 1f).setDuration(260).start();
             applyMode();
@@ -1521,8 +1561,13 @@ final class NowPlaying extends FrameLayout {
         lyrics.set(null, getContext().getString(R.string.loading));   // cached lyrics replace this synchronously
         if (!Settings.pref(getContext(), "lyrics", true)) { lyrics.set(null, getContext().getString(R.string.lyrics_off)); return; }
         final Player.Track t = Player.track;
+        // settings changes clear the lyrics cache: reload this pane right away instead of keeping stale lines
+        Lyrics.onCleared = () -> { if (panel == 1 && isAttachedToWindow()) loadLyrics(); };
         Lyrics.fetch(t, r -> {
-            if (t != Player.track) return;
+            // compare by id: the player replaces the Track object for the same song (state pushes), which
+            // dropped the result and left the pane on "loading" for good
+            Player.Track now = Player.track;
+            if (now == null || t == null || !java.util.Objects.equals(t.id, now.id)) return;
             lyrics.set(r, getContext().getString(R.string.no_lyrics));
             tick();
         });
@@ -2295,6 +2340,7 @@ final class NowPlaying extends FrameLayout {
                     View b = btns[i];
                     if (b == null || b.getVisibility() != VISIBLE) continue;
                     float cx = (b.getLeft() + b.getRight()) * 0.5f - getLeft();
+                    if (cx < 0 || cx > w) continue;   // button lives outside the pill (two-pane layout)
                     float cy = h * 0.5f;
                     float cw = Math.max(capH * 0.92f, capBaseW * Ui.lerp(0.86f, 1.0f, k));
                     float ch = capH * Ui.lerp(0.88f, 1.0f, k);

@@ -298,7 +298,9 @@
     <string name="bpa_enable">Enable Bit-Perfect Assist</string>
     <string name="bpa_disable">Disable Bit-Perfect Assist</string>
     <string name="bpa_supported_socs">Supported chipsets</string>
-    <string name="bpa_supported_socs_sub">25 chipsets supported</string>
+    <string name="bpa_supported_socs_sub">%1$d chipsets supported</string>
+    <string name="bpa_family">%1$s family</string>
+    <string name="bpa_family_unknown">Model number not public</string>
     <string name="bpa_current_device">This device</string>
     <string name="bpa_hires_glow">Hi-Res 3-tier glow effects</string>
     <string name="bpa_hires_glow_note">Shows the cover glow aura (Gold / Blue / Rainbow) and luxury Master backdrop during Hi-Res playback.</string>
@@ -344,7 +346,7 @@
     <string name="app_icon_note">Switch between the default Classic Prism icon and smooth rainbow-gradient icons (Obsidian Neon Frame &amp; Omnidirectional Spectrum Bloom).</string>
     <string name="app_icon_changed">App icon updated. It may take a moment to refresh on your home screen.</string>
     <string name="lyrics_namuwiki">Prioritize Namuwiki lyrics first</string>
-    <string name="lyrics_namuwiki_note">Off by default. When enabled, Namuwiki song lyrics take top priority over other providers (merging Namuwiki translations onto synced timestamps when matching, or displaying Namuwiki lyrics directly).</string>
+    <string name="lyrics_namuwiki_note">Namuwiki: off by default. When on, it is used only for the song\'s own article (title = the song, artist and credits on the page); it fills in when no other provider has lyrics, and adds its Korean translation to synced lyrics of the same song. Choose it as the provider asked first to make it win.</string>
     <string name="bp_ready_direct">%1$s · USB Direct ready</string>
     <string name="bp_active_direct">USB Direct · %1$s / %2$s</string>
     <string name="aod_auto_bright">Auto brightness in AOD</string>
@@ -472,4 +474,22 @@
     <string name="ytm_kr_block_loc_unknown">Detected region: South Korea (KR)</string>
     <string name="ytm_vpn_connect_us">Enable US VPN</string>
     <string name="ytm_vpn_connect_jp">Enable Japan VPN</string>
+    <string name="lyrics_priority">Lyrics provider asked first</string>
+    <string name="lyrics_priority_auto">Automatic (list order)</string>
+    <string name="lyrics_priority_note">The chosen provider is asked first. Its synced lyrics are used as they are; if it only has plain lyrics, a synced version of the same text from another provider supplies the timing. Only providers switched on below can be chosen.</string>
+    <string name="mxm_key">Musixmatch API key</string>
+    <string name="mxm_key_help">Your own key from developer.musixmatch.com. It is stored encrypted on this phone and sent only to Musixmatch.</string>
+    <string name="mxm_key_note">Musixmatch needs your own API key. On the free plan Musixmatch returns only part of the lyrics without timing (shown as \"Musixmatch (part)\"); synced lyrics need a plan that includes subtitles.</string>
+    <string name="key_set">Set</string>
+    <string name="key_remove">Remove</string>
+    <string name="mt_group">Lyrics translation</string>
+    <string name="mt_engine">Translation engine</string>
+    <string name="mt_engine_off">Off</string>
+    <string name="mt_engine_device">On-device translation</string>
+    <string name="mt_key">API key</string>
+    <string name="mt_key_help_deepl">Your own DeepL API key (free keys end with \":fx\"). Stored encrypted and sent only to DeepL.</string>
+    <string name="mt_key_help_google">Your own Google Cloud Translation API key. Stored encrypted and sent only to Google.</string>
+    <string name="mt_key_help_papago">From NAVER Cloud Platform (Papago Translation). Stored encrypted and sent only to NAVER Cloud.</string>
+    <string name="mt_device_unavailable">This phone has no on-device translation service, so nothing will be translated. Choose another engine.</string>
+    <string name="mt_note">Off by default. When on, lyrics lines whose source has no translation of their own are machine-translated into the app\'s language and shown under each line. On-device translation keeps everything on the phone; DeepL, Google and Papago send the lyrics text to that service with your own key. YouTube Music\'s in-app lyrics translation has no public API, so it can\'t be used here.</string>
 </resources>

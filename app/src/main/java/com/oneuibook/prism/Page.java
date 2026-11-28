@@ -144,10 +144,14 @@ abstract class Page extends FrameLayout {
 
     boolean largeTop() { return true; }
 
+    /** Root pages on a wide foldable's unfolded screen: small title at the top instead of the large one. */
+    boolean compactRoot() { return !back && Dock.wideRailFor(Ui.screenW, Ui.screenH); }
+
     void addBigTitle() {
         // G style sub-pages (except long-title detail lists like LocalListPage) show their title cleanly in the top bar
         boolean gRoot = Ui.gStyle && !back;
-        boolean gSubClean = Ui.gStyle && back && !(this instanceof Pages.LocalListPage);
+        // wide foldable unfolded (Apple Music-like): root pages keep their title small at the top
+        boolean gSubClean = (Ui.gStyle && back && !(this instanceof Pages.LocalListPage)) || compactRoot();
         bigTitle = Ui.text(getContext(), title, gRoot ? 34 : 36, Ui.bold, Ui.text());
         bigTitle.setLetterSpacing(Ui.gStyle ? -0.02f : -0.01f);
         if (gSubClean) {
@@ -236,6 +240,7 @@ abstract class Page extends FrameLayout {
     float titleProgress() {
         int y = scroll.getScrollY();
         if (Ui.gStyle && back && !(this instanceof Pages.LocalListPage)) return 1f;
+        if (compactRoot()) return 1f;
         if (bigTitle == null) return Ui.clamp((y - Ui.dp(140)) / (float) Ui.dp(24), 0f, 1f);
         float start = bigTitle.getTop() - Ui.statusInset - Ui.dp(Ui.gStyle ? 24 : 40);
         return Ui.clamp((y - start) / (float) Ui.dp(22), 0f, 1f);

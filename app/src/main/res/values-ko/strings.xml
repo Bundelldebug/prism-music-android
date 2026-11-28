@@ -298,7 +298,9 @@
     <string name="bpa_enable">비트퍼펙트 어시스트 켜기</string>
     <string name="bpa_disable">비트퍼펙트 어시스트 끄기</string>
     <string name="bpa_supported_socs">지원 칩셋 종류</string>
-    <string name="bpa_supported_socs_sub">총 25종 지원</string>
+    <string name="bpa_supported_socs_sub">총 %1$d종 지원</string>
+    <string name="bpa_family">%1$s 계열</string>
+    <string name="bpa_family_unknown">모델명 미공개</string>
     <string name="bpa_current_device">현재 기기</string>
     <string name="bpa_hires_glow">Hi-Res 커버 글로우</string>
     <string name="bpa_hires_glow_note">Hi-Res 재생 시 커버 외곽 글로우와 마스터 배경 효과를 표시해요.</string>
@@ -344,7 +346,7 @@
     <string name="app_icon_note">기본 클래식 프리즘 아이콘과 부드러운 무지개 그라데이션 아이콘(옵시디언 네온 프레임·전방향 스펙트럼 블룸) 중 선택할 수 있어요.</string>
     <string name="app_icon_changed">앱 아이콘을 바꿨어요. 홈 화면에 반영되기까지 잠시 걸릴 수 있어요.</string>
     <string name="lyrics_namuwiki">나무위키 가사 최우선 사용</string>
-    <string name="lyrics_namuwiki_note">기본은 꺼짐입니다. 켜면 나무위키 문서에 가사가 있을 때 다른 소스보다 최우선으로 적용해요(싱크 가사와 일치하면 나무위키 번역을 입혀 싱크 재생하고, 없으면 나무위키 가사를 바로 표시해요).</string>
+    <string name="lyrics_namuwiki_note">나무위키: 기본은 꺼짐이에요. 켜면 그 곡의 문서(제목이 곡명이고 본문에 가수·작사/작곡이 있는 문서)만 써요. 다른 제공처에 가사가 없을 때 대신 보여주고, 같은 곡의 싱크 가사에는 나무위키의 한국어 번역을 입혀요. 나무위키를 가장 먼저 쓰려면 위의 \"가사 우선 제공처\"에서 고르세요.</string>
     <string name="bp_ready_direct">%1$s · USB 다이렉트 출력 가능</string>
     <string name="bp_active_direct">USB 다이렉트 · %1$s / %2$s</string>
     <string name="aod_auto_bright">AOD 자동 밝기 사용</string>
@@ -472,4 +474,22 @@
     <string name="ytm_kr_block_loc_unknown">감지된 접속 지역: 대한민국 (KR)</string>
     <string name="ytm_vpn_connect_us">미국(US) VPN 켜기</string>
     <string name="ytm_vpn_connect_jp">일본(JP) VPN 켜기</string>
+    <string name="lyrics_priority">가사 우선 제공처</string>
+    <string name="lyrics_priority_auto">자동 (목록 순서)</string>
+    <string name="lyrics_priority_note">선택한 제공처를 가장 먼저 조회해요. 그 제공처에 싱크 가사가 있으면 그대로 쓰고, 일반 가사만 있으면 다른 제공처에서 같은 가사의 싱크 버전을 찾아 타이밍만 가져와요. 아래 목록에서 켜진 제공처만 고를 수 있어요.</string>
+    <string name="mxm_key">Musixmatch API 키</string>
+    <string name="mxm_key_help">developer.musixmatch.com에서 발급받은 본인 키를 넣어 주세요. 이 휴대폰에 암호화해 저장하고 Musixmatch에만 보내요.</string>
+    <string name="mxm_key_note">Musixmatch는 본인 API 키가 있어야 써요. 무료 요금제에서는 Musixmatch가 가사 일부만, 싱크 없이 보내줘요(\"Musixmatch (일부)\"로 표시). 싱크 가사는 자막이 포함된 요금제가 필요해요.</string>
+    <string name="key_set">설정됨</string>
+    <string name="key_remove">삭제</string>
+    <string name="mt_group">가사 번역</string>
+    <string name="mt_engine">번역 엔진</string>
+    <string name="mt_engine_off">끄기</string>
+    <string name="mt_engine_device">기기 내 번역</string>
+    <string name="mt_key">API 키</string>
+    <string name="mt_key_help_deepl">본인 DeepL API 키를 넣어 주세요(무료 키는 \":fx\"로 끝나요). 암호화해 저장하고 DeepL에만 보내요.</string>
+    <string name="mt_key_help_google">본인 Google Cloud Translation API 키를 넣어 주세요. 암호화해 저장하고 Google에만 보내요.</string>
+    <string name="mt_key_help_papago">네이버 클라우드 플랫폼(Papago Translation)에서 발급받은 값을 넣어 주세요. 암호화해 저장하고 네이버 클라우드에만 보내요.</string>
+    <string name="mt_device_unavailable">이 휴대폰에는 기기 내 번역 서비스가 없어 번역되지 않아요. 다른 엔진을 골라 주세요.</string>
+    <string name="mt_note">기본은 꺼짐이에요. 켜면 가사 소스에 자체 번역이 없는 가사만 앱 언어로 기계 번역해 각 줄 아래에 보여줘요. 기기 내 번역은 휴대폰 밖으로 보내지 않고, DeepL·Google·파파고는 본인 키로 가사 문장을 그 서비스에 보내요. 유튜브 뮤직 앱의 가사 번역은 공개 API가 없어 여기서 쓸 수 없어요.</string>
 </resources>

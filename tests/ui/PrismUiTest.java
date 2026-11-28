@@ -762,8 +762,8 @@ public class PrismUiTest {
         assertEquals("Third-party earbuds icon", Icons.EARBUDS, AudioInfo.deviceIconForName("AirPods Pro", true, false, false));
         assertEquals("USB DAC icon", Icons.DAC, AudioInfo.deviceIconForName("FiiO KA13", false, true, false));
 
-        // Friendly SoC marketing names & exact 25 supported chipsets check (including MT6993M for Dimensity 9600M)
-        assertEquals("25 supported chipsets", 25, NpuAudio.SUPPORTED_CHIPS.length);
+        // Friendly SoC marketing names & exact 27 supported chipsets check (9.5.31: + Dimensity 8500 / 8600) (including MT6993M for Dimensity 9600M)
+        assertEquals("27 supported chipsets", 27, NpuAudio.SUPPORTED_CHIPS.length);
         for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
             assertTrue("chip supported: " + cs.id, NpuAudio.isSupportedSoc(cs.id));
         }
@@ -801,7 +801,7 @@ public class PrismUiTest {
 
         // [12] 9.5.8 hotfix regression checks:
         // (a) Dual-language LRC native Korean subtitle split (no machine translation) + 6 selectable lyric providers
-        assertEquals("6 lyric providers", 6, Lyrics.PROVIDER_IDS.length);
+        assertEquals("8 lyric providers (9.5.31: + Musixmatch, Namuwiki)", 8, Lyrics.PROVIDER_IDS.length);
         Lyrics.Result dual = Lyrics.parse("[00:10.00]Hello world\n[00:10.05]안녕 세상아", "");
         Lyrics.extractDualKoreanLines(dual);
         assertTrue("dual LRC merged", dual != null && dual.lines.size() == 1);
@@ -885,7 +885,7 @@ public class PrismUiTest {
         // (b5) 9.5.14 Namuwiki real-time translation lyrics (default OFF + HTML parser + matcher)
         assertTrue("Namuwiki translation defaults OFF", !Lyrics.namuwikiEnabled(app));
         assertTrue("Challenge page rejected", Lyrics.isNamuChallengePage("<html><title>Just a moment...</title></html>"));
-        String namuTableHtml = "<table><tr><td>Hello world<br>Shine so bright</td><td>안녕 세상아<br>눈부시게 빛나</td></tr></table>";
+        String namuTableHtml = "<h2>1. 개요</h2><table><tr><td>Top of page</td><td>문서 맨 위 표</td></tr></table><h2>2. 가사</h2><table><tr><td>Hello world<br>Shine so bright</td><td>안녕 세상아<br>눈부시게 빛나</td></tr></table><h2>3. 여담</h2>";
         java.util.List<String[]> namuPairs = Lyrics.parseNamuwikiHtml(namuTableHtml);
         assertEquals("Parsed 2 Namuwiki lyric pairs", 2, namuPairs.size());
         Lyrics.Result namuRes = Lyrics.parse("[00:05.00]Hello world\n[00:10.00]Shine so bright", "");
@@ -1231,7 +1231,7 @@ public class PrismUiTest {
         // (10) All 24 released chipsets (13 existing + 10 newly added; Exynos 2700 unreleased) have official front drawable resources
         int withArt = 0;
         for (NpuAudio.ChipSpec cs : NpuAudio.SUPPORTED_CHIPS) {
-            if ("S5E9975".equals(cs.id)) continue;
+            if ("S5E9975".equals(cs.id) || "MT6899Z".equals(cs.id) || "D8600".equals(cs.id)) continue;   // 9.5.31: no official art yet (generated badge)
             assertTrue("Official chip drawable present for " + cs.id, cs.drawableRes != 0);
             android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeResource(app.getResources(), cs.drawableRes);
             assertNotNull("Decoded bitmap for " + cs.id, bmp);
@@ -1880,6 +1880,215 @@ public class PrismUiTest {
             YouTubeMusic.testFixtures = null;
             a.setSource("spotify");
         }
+    }
+
+    @Test public void prism9531Fixes() throws Exception {
+        // 5) new version names after 9.5.31: "9.5 A1A1", counted from the right
+        assertEquals("9.5 A1A1", Updater.nextVersion("9.5.31"));
+        assertEquals("9.5 A1A2", Updater.nextVersion("9.5 A1A1"));
+        assertEquals("9.5 A1B1", Updater.nextVersion("9.5 A1A9"));
+        assertEquals("9.5 A2A1", Updater.nextVersion("9.5 A1Z9"));
+        assertEquals("9.5 B1A1", Updater.nextVersion("9.5 A9Z9"));
+        assertEquals(null, Updater.nextVersion("9.5 Z9Z9"));
+        assertTrue(Updater.newer("9.5.31", "9.5.30"));
+        assertTrue(Updater.newer("9.5 A1A1", "9.5.31"));
+        assertTrue(!Updater.newer("9.5.31", "9.5 A1A1"));
+        assertTrue(Updater.newer("v9.5-A1B1", "9.5 A1A9"));
+        assertTrue(Updater.newer("9.5_A2A1", "9.5 A1Z9"));
+        assertTrue(Updater.newer("9.5.B1A1", "9.5 A9Z9"));
+        assertTrue(!Updater.newer("9.5 A1A1", "9.5 A1A1"));
+        assertTrue(!Updater.newer("9.5.29", "9.5.31"));
+        assertEquals("9.5 A1A2", Updater.displayVersion("v9.5-a1a2"));
+        assertEquals("9.5.31", Updater.displayVersion("v9.5.31"));
+        // the whole sequence is strictly increasing
+        String v = "9.5.31";
+        for (int i = 0; i < 3000; i++) { String n = Updater.nextVersion(v); if (n == null) break; assertTrue(n + " > " + v, Updater.newer(n, v)); v = n; }
+
+        // 2) Namuwiki: only the song's own article; page chrome / recommendations are not lyrics
+        String good = "<html><head><title>Supernova(aespa) - 나무위키</title></head><body>aespa 작사 작곡 발매</body></html>";
+        assertTrue(Lyrics.isNamuSongArticle(good, "aespa", "Supernova", "Supernova"));
+        assertTrue(!Lyrics.isNamuSongArticle("<title>Supernova(천문학) - 나무위키</title> aespa 작사", "aespa", "Supernova", "Supernova"));
+        assertTrue(!Lyrics.isNamuSongArticle("<title>Supernova - 나무위키</title> 별의 폭발 발매", "aespa", "Supernova", "Supernova"));
+        assertTrue(!Lyrics.isNamuSongArticle("<title>Armageddon(aespa) - 나무위키</title> aespa 작사", "aespa", "Supernova", "Supernova"));
+        assertTrue(Lyrics.isNamuSongArticle("<title>해야(IVE) - 나무위키</title> 아이브 작사", "IVE (아이브)", "해야", "해야"));
+        assertTrue(Lyrics.isJunkLine("조회수 1.2만회 · 3일 전"));
+        assertTrue(Lyrics.isJunkLine("https://www.youtube.com/watch?v=abc"));
+        assertTrue(Lyrics.isJunkLine("추천 영상 보기"));
+        assertTrue(!Lyrics.isJunkLine("Look at me go, 재미 좀 볼"));
+        assertTrue(!Lyrics.isJunkLine("널 정말 좋아해요"));
+        // a mismatched Namuwiki page never replaces real synced lyrics, and leaves no stray translations behind
+        StringBuilder lrc = new StringBuilder();
+        String[] words = {"Under the neon sky we run", "Every heartbeat turns to gold", "Falling slowly through the rain", "Hold my hand until the dawn",
+                "Silver echoes in the night", "Waves are crashing on the shore", "Chasing shadows down the road", "Whisper softly what you know",
+                "Burning bright like distant stars", "Never letting go again"};
+        for (int i = 0; i < 10; i++) lrc.append("[00:").append(10 + i * 3).append(".00]").append(words[i]).append('\n');
+        Lyrics.Result real = Lyrics.parse(lrc.toString(), "");
+        real.source = "LRCLIB";
+        java.util.List<String[]> junkPairs = java.util.Arrays.asList(new String[]{"Every heartbeat turns to gold", "엉뚱한 번역"},
+                new String[]{"Recommended video", "추천"}, new String[]{"Another unrelated", "관련 없음"}, new String[]{"More unrelated", "관련 없음 2"});
+        Lyrics.Result kept = Lyrics.resolveWithNamuPriority(new Lyrics.NamuMatch(junkPairs, null), real, true);
+        assertEquals("LRCLIB", kept.source);
+        assertTrue(kept.synced);
+        for (Lyrics.Line l : kept.lines) assertEquals(null, l.trans);
+
+        // 1) settings changes invalidate running lookups and reload an open lyrics pane
+        java.lang.reflect.Field genF = Lyrics.class.getDeclaredField("generation");
+        genF.setAccessible(true);
+        int g0 = genF.getInt(null);
+        final int[] reloads = {0};
+        Lyrics.onCleared = () -> reloads[0]++;
+        Lyrics.clearCache(RuntimeEnvironment.getApplication());
+        idle(50);
+        assertEquals(g0 + 1, genF.getInt(null));
+        assertEquals(1, reloads[0]);
+        Lyrics.settingsChanged(); idle(50);
+        assertEquals(2, reloads[0]);
+        Lyrics.onCleared = null;
+
+        // 3) chipsets: Dimensity 8500 / 8600 added, grouped by model number
+        assertEquals("Dimensity 8500", NpuAudio.matchChipSpec("MT6899Z").nameEn);
+        assertEquals("Dimensity 8400", NpuAudio.matchChipSpec("MT6899").nameEn);
+        assertEquals("Dimensity 8600", NpuAudio.matchChipSpec("MediaTek Dimensity 8600").nameEn);
+        assertEquals("Dimensity 9400+", NpuAudio.matchChipSpec("MT6991Z").nameEn);
+        assertEquals("Snapdragon 8 Elite Gen 5 V", NpuAudio.matchChipSpec("SM8850-1").nameEn);
+        java.util.List<String> mt6991 = null;
+        for (java.util.List<NpuAudio.ChipSpec> fam : NpuAudio.chipFamilies(NpuAudio.VENDOR_MEDIATEK)) {
+            if ("MT6991".equals(fam.get(0).family())) { mt6991 = new java.util.ArrayList<>(); for (NpuAudio.ChipSpec cs : fam) mt6991.add(cs.nameEn); }
+            if ("MT6899".equals(fam.get(0).family())) assertEquals(2, fam.size());
+        }
+        assertEquals(java.util.Arrays.asList("Dimensity 9400", "Dimensity 9400+", "Dimensity 9500s"), mt6991);
+
+        MainActivity a = launch("w411dp-h891dp-xxhdpi").get();
+        NpuAudio.testSocOverride = "MT6991Z";
+        a.push(new Settings.SupportedChipsetsPage(a)); idle(600);
+        shot(a, "9531a_supported_chipsets");
+        android.widget.ScrollView sv = findScroll(a.getWindow().getDecorView());
+        if (sv != null) { sv.scrollTo(0, Ui.dp(700)); idle(200); shot(a, "9531b_supported_chipsets_mediatek"); }
+        a.pop(); idle(250);
+        NpuAudio.testSocOverride = null;
+
+        // lyrics settings: providers incl. Musixmatch / Namuwiki, the provider asked first, translation engine
+        MainActivity.prefs(a).edit().putBoolean(Lyrics.providerPrefKey(Lyrics.SRC_NAMU), true)
+                .putString(Lyrics.PREF_PRIORITY, Lyrics.SRC_NAMU).putString(LyricsTranslate.PREF_ENGINE, LyricsTranslate.DEEPL).commit();
+        assertEquals(Lyrics.SRC_NAMU, Lyrics.priority(a));
+        assertTrue(LyricsTranslate.enabled(a));
+        a.push(new Settings.LyricsPage(a)); idle(600);
+        shot(a, "9531d_lyrics_settings");
+        android.widget.ScrollView lsv = findScroll(a.getWindow().getDecorView());
+        if (lsv != null) { lsv.scrollTo(0, Ui.dp(900)); idle(200); shot(a, "9531e_lyrics_settings_translation"); }
+        a.pop(); idle(250);
+        // a provider switched off can't stay "first"
+        MainActivity.prefs(a).edit().putBoolean(Lyrics.providerPrefKey(Lyrics.SRC_NAMU), false).commit();
+        assertEquals(Lyrics.PRIORITY_AUTO, Lyrics.priority(a));
+        MainActivity.prefs(a).edit().remove(Lyrics.PREF_PRIORITY).remove(LyricsTranslate.PREF_ENGINE).remove(Lyrics.providerPrefKey(Lyrics.SRC_NAMU)).commit();
+        assertTrue(LyricsTranslate.alreadyIn("널 정말 좋아해", "ko"));
+        assertTrue(!LyricsTranslate.alreadyIn("Look at me go", "ko"));
+        assertEquals("ja", LyricsTranslate.guessLang(java.util.Arrays.asList("夜に駆ける", "沈むように溶けてゆくように")));
+
+        // 4) Enter closes the suggestions for good (late online suggestions / text echoes don't reopen them)
+        MainActivity.prefs(a).edit().putString("search_history_v1", "IVE\nIU").commit();
+        a.onSearch(); idle(400);
+        a.onQuery("I", false); idle(300);
+        java.lang.reflect.Field spF = MainActivity.class.getDeclaredField("searchPage");
+        spF.setAccessible(true);
+        Pages.SearchPage sp = (Pages.SearchPage) spF.get(a);
+        java.lang.reflect.Field slotF = Pages.SearchPage.class.getDeclaredField("suggestSlot");
+        slotF.setAccessible(true);
+        android.widget.LinearLayout slot = (android.widget.LinearLayout) slotF.get(sp);
+        assertTrue("suggestions show while typing", slot.getChildCount() > 0);
+        java.lang.reflect.Field sugF = Pages.SearchPage.class.getDeclaredField("sugReq");
+        sugF.setAccessible(true);
+        int before = sugF.getInt(sp);
+        a.onQuery("I", true); idle(50);
+        assertTrue("Enter invalidates the in-flight suggestion request", sugF.getInt(sp) > before);
+        assertEquals(0, slot.getChildCount());
+        a.onQuery("I", false); idle(800);   // IME commit echo of the same text
+        assertEquals(0, slot.getChildCount());
+        shot(a, "9531c_search_after_enter");
+        a.onQuery("IV", false); idle(400);   // typing again reopens them
+        assertTrue(slot.getChildCount() > 0);
+        a.onExitSearch(); idle(200);
+    }
+
+    /** 9.5.31: wide foldable unfolded (4:3 landscape) laid out like Apple Music on a wide foldable. */
+    @Test public void wideFoldableAppleMusicLayout() throws Exception {
+        ActivityController<MainActivity> c = launch("ko-w800dp-h600dp-xhdpi");
+        MainActivity a = c.get();
+        fakeTrack();
+        idle(800);
+        assertTrue("wide foldable rail", a.dock.wideRail);
+        shot(a, "9531f_wide_fold_home");
+        // pressing the tab pill shows the labels under the icons (hidden at rest)
+        java.lang.reflect.Field pillF = Dock.class.getDeclaredField("pill");
+        pillF.setAccessible(true);
+        android.graphics.RectF pr = (android.graphics.RectF) pillF.get(a.dock);
+        long t0 = android.os.SystemClock.uptimeMillis();
+        android.view.MotionEvent dn = android.view.MotionEvent.obtain(t0, t0, android.view.MotionEvent.ACTION_DOWN, pr.centerX(), pr.top + pr.height() * 0.3f, 0);
+        a.dock.dispatchTouchEvent(dn); idle(450);
+        shot(a, "9531j_wide_fold_pressed_labels");
+        android.view.MotionEvent cn = android.view.MotionEvent.obtain(t0, t0 + 500, android.view.MotionEvent.ACTION_CANCEL, pr.centerX(), pr.top + pr.height() * 0.3f, 0);
+        a.dock.dispatchTouchEvent(cn); idle(500);
+        a.onSearch(); idle(700);
+        shot(a, "9531g_wide_fold_search");
+        // keyboard up: the field rises beside the pill and must stop left of it
+        java.lang.reflect.Field imeF = Dock.class.getDeclaredField("imeOffset");
+        imeF.setAccessible(true);
+        imeF.set(a.dock, (int) (a.dock.getHeight() * 0.45f));
+        a.dock.requestLayout(); a.dock.invalidate(); idle(300);
+        shot(a, "9531o_wide_fold_search_ime");
+        java.lang.reflect.Field circF = Dock.class.getDeclaredField("circle");
+        circF.setAccessible(true);
+        android.graphics.RectF fr = (android.graphics.RectF) circF.get(a.dock);
+        assertTrue("search field stays left of the tab pill: " + fr + " pill " + pr, fr.right <= pr.left + 1);
+        imeF.set(a.dock, 0); a.dock.requestLayout(); idle(200);
+        a.onExitSearch(); idle(500);
+        Player.repeat = "track";
+        a.np.open(); idle(900);
+        java.lang.reflect.Field hf = NowPlaying.class.getDeclaredField("handle");
+        hf.setAccessible(true);
+        View hv = (View) hf.get(a.np);
+        java.lang.reflect.Field af = NowPlaying.class.getDeclaredField("artBig");
+        af.setAccessible(true);
+        android.graphics.RectF ab = (android.graphics.RectF) af.get(a.np);
+        assertEquals("grabber centred above the cover", ab.centerX(), (hv.getLeft() + hv.getRight()) / 2f, 2f);
+        assertTrue("grabber above the cover", hv.getBottom() <= ab.top);
+        java.lang.reflect.Field pf = NowPlaying.class.getDeclaredField("panel");
+        pf.setAccessible(true);
+        assertEquals("right pane starts closed", 0, pf.getInt(a.np));
+        shot(a, "9531h_wide_fold_player");
+        a.np.openPanel(2); idle(220);
+        shot(a, "9531k_wide_fold_player_sliding");
+        idle(600);
+        shot(a, "9531i_wide_fold_player_queue");
+        a.np.openPanel(0); idle(700);
+        assertEquals("closing the pane centres the player again", 0, pf.getInt(a.np));
+        a.np.close(); idle(400);
+        Player.repeat = "off";
+    }
+
+    /** 9.5.31: the same layout on every unfolded foldable (squarish portrait inner screen too). */
+    @Test public void portraitFoldableUsesSameLayout() throws Exception {
+        ActivityController<MainActivity> c = launch("ko-w700dp-h820dp-xhdpi");
+        MainActivity a = c.get();
+        fakeTrack();
+        idle(800);
+        assertTrue("portrait foldable uses the Apple Music-like rail", a.dock.wideRail);
+        shot(a, "9531l_fold_portrait_home");
+        a.onSearch(); idle(700);
+        shot(a, "9531m_fold_portrait_search");
+        a.onExitSearch(); idle(500);
+        a.np.open(); idle(900);
+        shot(a, "9531n_fold_portrait_player");
+        a.np.close(); idle(400);
+    }
+
+    private static android.widget.ScrollView findScroll(View v) {
+        if (v instanceof android.widget.ScrollView && v.isShown()) return (android.widget.ScrollView) v;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = g.getChildCount() - 1; i >= 0; i--) { android.widget.ScrollView s = findScroll(g.getChildAt(i)); if (s != null) return s; }
+        }
+        return null;
     }
 
     private static Bitmap captureScaled(MainActivity act, float scale) {

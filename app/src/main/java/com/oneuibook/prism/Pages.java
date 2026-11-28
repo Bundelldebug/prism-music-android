@@ -3513,16 +3513,27 @@ final class Pages {
             query(q, true);
         }
 
+        /** The text last submitted with Enter / a pick; suggestions stay closed until the text changes. */
+        private String committed = null;
+
         void query(String q, boolean now) {
-            pending = q == null ? "" : q.trim();
+            String next = q == null ? "" : q.trim();
+            // a text-change echo of what was just submitted (IME commit, setText) must not reopen suggestions
+            if (!now && committed != null && committed.equals(next)) return;
+            pending = next;
             removeCallbacks(run);
             removeCallbacks(runSug);
-            if (pending.isEmpty()) { req++; sugReq++; if (results != null) showBrowse(); return; }
+            if (pending.isEmpty()) { committed = null; req++; sugReq++; if (results != null) showBrowse(); return; }
             if (now) {
+                committed = pending;
                 pushHistory(pending);
+                // 9.5.31: also invalidate the online suggestion request still in flight — when it came back
+                // (same text) it redrew the suggestion box after Enter
+                sugReq++;
                 if (suggestSlot != null) suggestSlot.removeAllViews();
                 post(run);
             } else {
+                committed = null;
                 postDelayed(runSug, 120);
                 postDelayed(run, 420);
             }
@@ -3546,7 +3557,7 @@ final class Pages {
             }
             renderSuggestions(instant);
             YouTubeMusic.fetchSuggestions(q, remote -> {
-                if (my != sugReq || !q.equals(pending)) return;
+                if (my != sugReq || !q.equals(pending) || q.equals(committed)) return;
                 List<String> merged = new ArrayList<>(instant);
                 for (String r : remote) {
                     if (!merged.contains(r)) merged.add(r);

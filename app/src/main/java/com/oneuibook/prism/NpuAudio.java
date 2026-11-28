@@ -25,6 +25,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 /**
  * Bit-Perfect Assist — Flagship-SoC NPU-class audio enhancement (15 supported chipsets).
@@ -71,9 +72,33 @@ final class NpuAudio {
             boolean ko = c != null && Locale.KOREAN.getLanguage().equals(c.getResources().getConfiguration().getLocales().get(0).getLanguage());
             return ko ? nameKo : nameEn;
         }
+
+        /**
+         * Silicon family = model number without the variant suffix: SM8850-1 → SM8850, MT6991Z / MT6991W → MT6991,
+         * MT6899Z → MT6899. A chip whose model number isn't public yet has no family ("").
+         */
+        String family() {
+            Matcher fm = FAMILY.matcher(id);
+            return fm.find() ? fm.group(1) : "";
+        }
     }
 
-    /** 25 supported flagship / upper-flagship SoCs with NPU/DSP headroom (Dimensity 9600M uses MT6993 silicon family). */
+    private static final Pattern FAMILY = Pattern.compile("^((?:SM|MT|S5E|GS)\\d{3,4})");
+
+    /** Supported chips of one vendor grouped by silicon family, in list order. */
+    static java.util.List<java.util.List<ChipSpec>> chipFamilies(int vendor) {
+        java.util.LinkedHashMap<String, java.util.List<ChipSpec>> m = new java.util.LinkedHashMap<>();
+        for (ChipSpec cs : SUPPORTED_CHIPS) {
+            if (cs.vendor != vendor) continue;
+            String k = cs.family().isEmpty() ? cs.id : cs.family();
+            java.util.List<ChipSpec> l = m.get(k);
+            if (l == null) { l = new java.util.ArrayList<>(); m.put(k, l); }
+            l.add(cs);
+        }
+        return new java.util.ArrayList<>(m.values());
+    }
+
+    /** Supported flagship / upper-flagship SoCs with NPU/DSP headroom, listed by silicon family (model number). */
     static final ChipSpec[] SUPPORTED_CHIPS = {
             // Qualcomm Snapdragon (10)
             new ChipSpec("SM8550",  VENDOR_QUALCOMM, "스냅드래곤 8 2세대", "Snapdragon 8 Gen 2", "SNAPDRAGON", "8 Gen 2", "Hexagon NPU", false, R.drawable.chip_sm8550),
@@ -88,12 +113,16 @@ final class NpuAudio {
             new ChipSpec("SM8975",  VENDOR_QUALCOMM, "스냅드래곤 8 엘리트 익스트림 6세대", "Snapdragon 8 Elite Extreme Gen 6", "SNAPDRAGON", "8 Extreme", "Hexagon NPU", true, R.drawable.chip_sm8975),
             // MediaTek Dimensity (9) — verified model codes (9600M is MT6993 silicon family with NPU 990)
             new ChipSpec("MT6899",  VENDOR_MEDIATEK, "디멘시티 8400", "Dimensity 8400", "DIMENSITY", "8400", "MediaTek NPU 880", false, R.drawable.chip_mt6899),
+            // Dimensity 8500 = MT6899Z, the same MT6899 silicon as the 8400 (no official illustration: generated badge)
+            new ChipSpec("MT6899Z", VENDOR_MEDIATEK, "디멘시티 8500", "Dimensity 8500", "DIMENSITY", "8500", "MediaTek NPU 880", false, 0),
+            // Dimensity 8600: model number not public yet — detected by its marketing name
+            new ChipSpec("D8600",   VENDOR_MEDIATEK, "디멘시티 8600", "Dimensity 8600", "DIMENSITY", "8600", "MediaTek NPU", false, 0),
             new ChipSpec("MT6989",  VENDOR_MEDIATEK, "디멘시티 9300", "Dimensity 9300", "DIMENSITY", "9300", "MediaTek NPU 790", false, R.drawable.chip_mt6989),
             new ChipSpec("MT6989T", VENDOR_MEDIATEK, "디멘시티 9300+", "Dimensity 9300+", "DIMENSITY", "9300+", "MediaTek NPU 790+", true, R.drawable.chip_mt6989t),
             new ChipSpec("MT6991",  VENDOR_MEDIATEK, "디멘시티 9400", "Dimensity 9400", "DIMENSITY", "9400", "MediaTek NPU 890", false, R.drawable.chip_mt6991),
             new ChipSpec("MT6991Z", VENDOR_MEDIATEK, "디멘시티 9400+", "Dimensity 9400+", "DIMENSITY", "9400+", "MediaTek NPU 890+", true, R.drawable.chip_mt6991p),
-            new ChipSpec("MT6993",  VENDOR_MEDIATEK, "디멘시티 9500", "Dimensity 9500", "DIMENSITY", "9500", "MediaTek NPU 990", false, R.drawable.chip_mt6993),
             new ChipSpec("MT6991W", VENDOR_MEDIATEK, "디멘시티 9500s", "Dimensity 9500s", "DIMENSITY", "9500s", "MediaTek NPU 890+", false, R.drawable.chip_mt6991s),
+            new ChipSpec("MT6993",  VENDOR_MEDIATEK, "디멘시티 9500", "Dimensity 9500", "DIMENSITY", "9500", "MediaTek NPU 990", false, R.drawable.chip_mt6993),
             new ChipSpec("MT6993M", VENDOR_MEDIATEK, "디멘시티 9600M", "Dimensity 9600M", "DIMENSITY", "9600M", "MediaTek NPU 990", false, R.drawable.chip_mt6995m),
             new ChipSpec("MT6995",  VENDOR_MEDIATEK, "디멘시티 9600 프로", "Dimensity 9600 Pro", "DIMENSITY", "9600 Pro", "MediaTek NPU", true, R.drawable.chip_mt6995p),
             // Samsung Exynos (4) — Exynos 2700 is unreleased, intentionally no illustration (res = 0)
@@ -160,7 +189,8 @@ final class NpuAudio {
         if (MEDIATEK.matcher(u).find() || DIMENSITY_NAME.matcher(u).find()) return true;
         if (EXYNOS.matcher(u).find() || EXYNOS_NAME.matcher(u).find()) return true;
         if (TENSOR.matcher(u).find()) return true;
-        return false;
+        // listed chips without a public model number (Dimensity 8600) are recognised by name
+        return matchChipSpec(raw) != null;
     }
 
     private static ChipSpec findChip(String id) {
@@ -191,6 +221,8 @@ final class NpuAudio {
         if (u.contains("MT6991") || u.contains("9400")) return findChip("MT6991");
         if (u.contains("MT6989T") || u.contains("MT6989+") || u.contains("9300+")) return findChip("MT6989T");
         if (u.contains("MT6989") || u.contains("9300")) return findChip("MT6989");
+        if (u.contains("MT6899Z") || u.contains("DIMENSITY 8500")) return findChip("MT6899Z");
+        if (u.contains("DIMENSITY 8600") || u.equals("D8600")) return findChip("D8600");
         if (u.contains("MT6899") || u.contains("8400")) return findChip("MT6899");
         // Samsung Exynos
         if (u.contains("S5E9975") || u.contains("ERD9975") || u.contains("2700")) return findChip("S5E9975");

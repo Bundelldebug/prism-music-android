@@ -44,41 +44,93 @@ final class Lyrics {
     static final String SRC_KUGOU = "kugou";
     static final String SRC_SIMPMUSIC = "simpmusic";
     static final String SRC_LYRICSOVH = "lyricsovh";
+    static final String SRC_MUSIXMATCH = "musixmatch";
+    static final String SRC_NAMU = "namuwiki";
 
-    static final String[] PROVIDER_IDS = {SRC_LRCLIB, SRC_NETEASE, SRC_QQ, SRC_KUGOU, SRC_SIMPMUSIC, SRC_LYRICSOVH};
-    static final String[] PROVIDER_NAMES = {"LRCLIB", "NetEase Cloud Music", "QQ Music", "Kugou Lyrics", "SimpMusic Lyrics", "lyrics.ovh"};
+    // 9.5.31: Musixmatch added; Namuwiki is now one of the providers (a toggle in the list, off by default)
+    static final String[] PROVIDER_IDS = {SRC_LRCLIB, SRC_NETEASE, SRC_QQ, SRC_KUGOU, SRC_SIMPMUSIC, SRC_MUSIXMATCH, SRC_NAMU, SRC_LYRICSOVH};
+    static final String[] PROVIDER_NAMES = {"LRCLIB", "NetEase Cloud Music", "QQ Music", "Kugou Lyrics", "SimpMusic Lyrics", "Musixmatch", "나무위키", "lyrics.ovh"};
+
+    /** "auto" (the order above) or a provider id that is asked first. Replaces 9.5.30's "Namuwiki first" switch. */
+    static final String PREF_PRIORITY = "lyrics_priority";
+    static final String PRIORITY_AUTO = "auto";
+    /** Musixmatch developer API key (the user's own, stored encrypted). */
+    static final String PREF_MXM_KEY = "mxm_api_key";
 
     static String providerPrefKey(String id) { return "lyr_src_" + id; }
 
     static boolean isProviderEnabled(Context c, String id) {
         if (c == null) c = Img.appContext;
-        if (c == null) return true;
-        return MainActivity.prefs(c).getBoolean(providerPrefKey(id), true);
+        if (c == null) return !SRC_NAMU.equals(id);
+        android.content.SharedPreferences p = MainActivity.prefs(c);
+        // Namuwiki: off by default; a 9.5.30 user who had switched on "Namuwiki first" keeps it on
+        boolean def = !SRC_NAMU.equals(id) || p.getBoolean(PREF_NAMUWIKI, false);
+        return p.getBoolean(providerPrefKey(id), def);
     }
 
-    static boolean namuwikiEnabled(Context c) {
+    static boolean namuwikiEnabled(Context c) { return isProviderEnabled(c, SRC_NAMU); }
+
+    /** The provider asked first, or {@link #PRIORITY_AUTO}. Migrates 9.5.30's "Namuwiki first" switch. */
+    static String priority(Context c) {
         if (c == null) c = Img.appContext;
-        if (c == null) return false;
-        return MainActivity.prefs(c).getBoolean(PREF_NAMUWIKI, false);
+        if (c == null) return PRIORITY_AUTO;
+        android.content.SharedPreferences p = MainActivity.prefs(c);
+        String v = p.getString(PREF_PRIORITY, null);
+        if (v == null) v = p.getBoolean(PREF_NAMUWIKI, false) ? SRC_NAMU : PRIORITY_AUTO;
+        if (!PRIORITY_AUTO.equals(v) && !isProviderEnabled(c, v)) return PRIORITY_AUTO;   // turned off → back to the list order
+        return v;
     }
 
+    static String providerName(String id) {
+        for (int i = 0; i < PROVIDER_IDS.length; i++) if (PROVIDER_IDS[i].equals(id)) return PROVIDER_NAMES[i];
+        return id;
+    }
+
+    static boolean musixmatchKeySet(Context c) {
+        if (c == null) c = Img.appContext;
+        return c != null && SecureVault.has(MainActivity.prefs(c), PREF_MXM_KEY);
+    }
+
+    /** Translation lines under the lyrics: the source's own Korean translation, or machine translation when switched on. */
     static boolean showKoreanSubtitles(Context c) {
         if (c == null) c = Img.appContext;
         if (c == null) return false;
-        return namuwikiEnabled(c) || (isKoreanApp(c) && MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true));
+        return (namuwikiEnabled(c) && isKoreanApp(c)) || (isKoreanApp(c) && MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true))
+                || LyricsTranslate.enabled(c);
     }
 
+    /** Only the source's own Korean translations (never machine translation): kept for a Korean app. */
+    static boolean wantNativeKorean(Context c) {
+        if (c == null) c = Img.appContext;
+        return c != null && isKoreanApp(c) && (MainActivity.prefs(c).getBoolean(PREF_KO_TRANS, true) || namuwikiEnabled(c));
+    }
+
+    /**
+     * Bumped on every settings change / cache clear. A lookup that was already running under the old settings
+     * must not write its result into the cache (memory or disk) afterwards — 9.5.30 let such stale results land,
+     * so toggling lyrics settings back and forth could leave songs stuck on "no lyrics" or wrong lyrics.
+     */
+    private static volatile int generation;
+    /** Called on the main thread after a cache clear, so an open lyrics panel reloads with the new settings. */
+    static Runnable onCleared;
+
     static void clearCache(Context c) {
-        synchronized (CACHE) { CACHE.clear(); }
-        synchronized (MISSING) { MISSING.clear(); }
+        synchronized (CACHE) { CACHE.clear(); MISSING.clear(); generation++; }
         Context ctx = c != null ? c : Img.appContext;
         if (ctx != null) {
-            for (String dirName : new String[]{"lyrics_v4", "lyrics_v5"}) {
+            for (String dirName : new String[]{"lyrics_v4", "lyrics_v5", "lyrics_v6", "lyrics_v7"}) {
                 File d = new File(ctx.getCacheDir(), dirName);
                 File[] fs = d.listFiles();
                 if (fs != null) for (File f : fs) f.delete();
             }
         }
+        settingsChanged();
+    }
+
+    /** Tells an open lyrics pane to reload (lyrics on/off, providers, translation, Namuwiki). */
+    static void settingsChanged() {
+        Runnable r = onCleared;
+        if (r != null) Spotify.MAIN.post(r);
     }
 
     static final class Word {
@@ -107,10 +159,14 @@ final class Lyrics {
         final List<Line> lines = new ArrayList<>();
         boolean synced;
         String source = "";
+        /** Machine translation engine that filled {@code trans} (null: the source's own translations or none). */
+        String transEngine;
     }
 
     private static final Map<String, Result> CACHE = new HashMap<>();
-    private static final java.util.Set<String> MISSING = new java.util.HashSet<>();
+    /** track id → time it was found to have no lyrics; retried after {@link #MISSING_TTL_MS} (a network blip isn't forever) */
+    private static final Map<String, Long> MISSING = new HashMap<>();
+    private static final long MISSING_TTL_MS = 10 * 60_000L;
     private static final Map<String, List<Consumer<Result>>> PENDING = new HashMap<>();
     private static final java.util.concurrent.ExecutorService POOL = java.util.concurrent.Executors.newFixedThreadPool(3);
     private static final Pattern TAG = Pattern.compile("\\[(\\d+):(\\d+)(?:[.:](\\d+))?]");
@@ -140,19 +196,27 @@ final class Lyrics {
         MainActivity.prefs(c).edit().putLong("lyr_off_" + trackId, Math.max(-5000L, Math.min(5000L, ms))).apply();
     }
 
+    private static boolean missingNow(String id) {
+        Long at = MISSING.get(id);
+        if (at == null) return false;
+        if (System.currentTimeMillis() - at > MISSING_TTL_MS) { MISSING.remove(id); return false; }
+        return true;
+    }
+
     static void prefetch(Player.Track t) {
         if (t == null || t.id == null) return;
-        synchronized (CACHE) { if (CACHE.containsKey(t.id) || MISSING.contains(t.id)) return; }
+        synchronized (CACHE) { if (CACHE.containsKey(t.id) || missingNow(t.id)) return; }
         fetch(t, null);
     }
 
+    /** Main thread. Callbacks always run (on the main thread), even when a lookup throws. */
     static void fetch(Player.Track t, Consumer<Result> cb) {
         if (t == null || t.id == null) { if (cb != null) cb.accept(null); return; }
         Result cached;
         boolean miss;
         synchronized (CACHE) {
             cached = CACHE.get(t.id);
-            miss = MISSING.contains(t.id);
+            miss = cached == null && missingNow(t.id);
         }
         if (cached != null || miss) { if (cb != null) cb.accept(cached); return; }
         List<Consumer<Result>> waiting = PENDING.get(t.id);
@@ -161,48 +225,173 @@ final class Lyrics {
         if (cb != null) waiting.add(cb);
         PENDING.put(t.id, waiting);
         final Context ctx = Img.appContext;
+        final int gen = generation;
         POOL.execute(() -> {
-            Result r = readDisk(t.id);
-            boolean wantKoSub = showKoreanSubtitles(ctx);
-            boolean useNamu = namuwikiEnabled(ctx);
-            boolean dirty = false;
-            String namuArtist = primaryArtist(t.artist);
-            String namuTitle = t.name == null ? "" : t.name.trim();
-            String namuClean = cleanTitle(namuTitle);
-            if (r == null) {
-                if (useNamu) {
-                    // Namuwiki has TOP priority when enabled: query Namuwiki FIRST before all other providers.
-                    NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
-                    Result other = lookup(ctx, t, wantKoSub);
-                    r = resolveWithNamuPriority(nm, other, wantKoSub);
-                } else {
-                    r = lookup(ctx, t, wantKoSub);
-                }
-                dirty = r != null;
-            } else if (useNamu && (r.source == null || !r.source.contains("Namuwiki"))) {
-                // Upgrade any non-Namuwiki cached lyrics if user later enabled Namuwiki priority.
-                NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
-                if (nm != null) {
-                    r = resolveWithNamuPriority(nm, r, wantKoSub);
-                    dirty = true;
-                }
-            }
-            if (dirty && r != null) writeDisk(t.id, r);
-            if (r != null && !wantKoSub) {
-                for (Line l : r.lines) l.trans = null;
+            Result r = null;
+            boolean failed = false;
+            try {
+                r = resolve(ctx, t, gen);
+            } catch (Throwable e) {
+                failed = true;   // a broken provider response must not wedge this song's lyrics
             }
             final Result res = r;
+            final boolean err = failed;
             Spotify.MAIN.post(() -> {
-                synchronized (CACHE) {
-                    if (res != null) CACHE.put(t.id, res); else MISSING.add(t.id);
-                }
                 List<Consumer<Result>> cbs = PENDING.remove(t.id);
+                if (gen != generation) {
+                    // settings changed while this lookup ran: throw it away and look up again with the new settings
+                    if (cbs != null && !cbs.isEmpty()) {
+                        Consumer<Result> first = cbs.get(0);
+                        fetch(t, first);
+                        List<Consumer<Result>> again = PENDING.get(t.id);
+                        for (int i = 1; i < cbs.size(); i++) { if (again != null) again.add(cbs.get(i)); else cbs.get(i).accept(null); }
+                    }
+                    return;
+                }
+                synchronized (CACHE) {
+                    if (res != null) CACHE.put(t.id, res);
+                    else if (!err) MISSING.put(t.id, System.currentTimeMillis());
+                }
                 if (cbs != null) for (Consumer<Result> k : cbs) k.accept(res);
             });
         });
     }
 
-    private static Result lookup(Context c, Player.Track t, boolean wantKoSub) {
+    /** Worker thread: disk cache → providers (Namuwiki first when enabled), honouring the current settings. */
+    private static Result resolve(Context ctx, Player.Track t, int gen) {
+        Result r = readDisk(t.id);
+        boolean wantKoSub = wantNativeKorean(ctx);
+        boolean useNamu = namuwikiEnabled(ctx);
+        String prio = priority(ctx);
+        boolean dirty = false;
+        String namuArtist = primaryArtist(t.artist);
+        String namuTitle = t.name == null ? "" : t.name.trim();
+        String namuClean = cleanTitle(namuTitle);
+        if (r == null) {
+            if (SRC_NAMU.equals(prio)) {
+                // Namuwiki asked first: its lyrics / translations win when they belong to this song
+                NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
+                Result other = lookup(ctx, t, wantKoSub, SRC_NAMU);
+                r = resolveWithNamuPriority(nm, other, wantKoSub);
+            } else if (!PRIORITY_AUTO.equals(prio)) {
+                // another provider asked first: its synced lyrics win; its plain lyrics win unless a synced
+                // version of the same text exists elsewhere (then that one supplies the timing)
+                Result first = lookupOne(ctx, t, prio, wantKoSub);
+                if (first != null && first.synced) r = first;
+                else {
+                    Result other = lookup(ctx, t, wantKoSub, prio);
+                    r = preferPlain(first, other);
+                }
+            } else {
+                r = lookup(ctx, t, wantKoSub, null);
+            }
+            // Namuwiki in the list (not first): fills in when nothing else had lyrics, or adds its Korean
+            // translation to synced lyrics of the same song
+            if (useNamu && !SRC_NAMU.equals(prio) && (r == null || (wantKoSub && !hasTranslations(r) && needsKoreanTranslation(r)))) {
+                NamuMatch nm = fetchNamuwiki(namuArtist, namuTitle, namuClean);
+                if (nm != null && nm.hasLyrics()) r = r == null ? resolveWithNamuPriority(nm, null, wantKoSub) : resolveWithNamuPriority(nm, r, wantKoSub);
+            }
+            dirty = r != null;
+        }
+        if (r != null && !wantKoSub && r.transEngine == null) {
+            for (Line l : r.lines) l.trans = null;   // r is this lookup's own copy (fresh or read from disk)
+        }
+        // machine translation (off unless chosen in settings), only where the source has no translation of its own
+        if (r != null && r.transEngine == null && !hasTranslations(r) && LyricsTranslate.enabled(ctx)) {
+            if (LyricsTranslate.translate(ctx, r)) dirty = true;
+        }
+        // only results made under the current settings reach the disk cache
+        if (dirty && r != null && gen == generation) writeDisk(t.id, r);
+        return r;
+    }
+
+    /** Preferred provider gave plain lyrics: keep them, unless {@code other} is a synced version of the same text. */
+    private static Result preferPlain(Result first, Result other) {
+        if (first == null) return other;
+        if (other != null && other.synced && !other.lines.isEmpty()) {
+            List<String> plain = new ArrayList<>();
+            for (Line l : first.lines) plain.add(l.text);
+            int need = Math.max(2, Math.min(other.lines.size(), plain.size()) / 4);
+            if (countPlainOverlap(other, plain) >= need) { other.source = first.source + " · " + other.source; return other; }
+        }
+        return first;
+    }
+
+    /** One provider only (for "ask this one first"). */
+    private static Result lookupOne(Context c, Player.Track t, String id, boolean wantKoSub) {
+        String artist = primaryArtist(t.artist), name = t.name == null ? "" : t.name.trim(), clean = cleanTitle(name);
+        Result r = null;
+        try {
+            switch (id) {
+                case SRC_LRCLIB: r = lookupLrclib(artist, name, clean, t.album, t.duration / 1000L); break;
+                case SRC_NETEASE: r = lookupNetEase(artist, name, clean, t.duration, wantKoSub); break;
+                case SRC_QQ: r = lookupQqMusic(artist, name, clean, t.duration, wantKoSub); break;
+                case SRC_KUGOU: r = lookupKugou(artist, clean, t.duration); break;
+                case SRC_SIMPMUSIC: r = lookupSimpMusic(artist, name, clean, t.duration); break;
+                case SRC_MUSIXMATCH: r = lookupMusixmatch(c, artist, clean, t.duration); break;
+                case SRC_LYRICSOVH: r = lookupLyricsOvh(artist, clean); break;
+                default: return null;
+            }
+        } catch (Exception ignored) {}
+        if (r == null) return null;
+        if (wantKoSub) extractDualKoreanLines(r);
+        return finish(r, t.duration, wantKoSub);
+    }
+
+    // ---- Provider: Musixmatch (official developer API with the user's own key) ----
+    /**
+     * matcher.subtitle.get (synced; needs a Musixmatch plan that includes subtitles), then matcher.lyrics.get.
+     * The free plan returns only part of the lyrics plus a notice line — that notice is removed and the source is
+     * marked "Musixmatch (일부)".
+     */
+    private static Result lookupMusixmatch(Context c, String artist, String title, long durMs) {
+        if (c == null) c = Img.appContext;
+        if (c == null) return null;
+        String key = SecureVault.get(MainActivity.prefs(c), PREF_MXM_KEY);
+        if (key == null || key.trim().isEmpty() || artist.isEmpty() || title.isEmpty()) return null;
+        String base = "https://api.musixmatch.com/ws/1.1/";
+        String q = "q_track=" + Spotify.enc(title) + "&q_artist=" + Spotify.enc(artist) + "&apikey=" + Spotify.enc(key.trim());
+        try {
+            String sub = base + "matcher.subtitle.get?" + q + "&subtitle_format=lrc"
+                    + (durMs > 0 ? "&f_subtitle_length=" + (durMs / 1000L) + "&f_subtitle_length_max_deviation=4" : "");
+            JSONObject o = getObj(sub, 5500);
+            JSONObject body = mxmBody(o);
+            JSONObject st = body == null ? null : body.optJSONObject("subtitle");
+            if (st != null) {
+                Result r = parse(st.optString("subtitle_body", ""), "");
+                if (r != null && r.synced) { r.source = "Musixmatch"; return r; }
+            }
+        } catch (Exception ignored) {}
+        try {
+            JSONObject o = getObj(base + "matcher.lyrics.get?" + q, 5500);
+            JSONObject body = mxmBody(o);
+            JSONObject ly = body == null ? null : body.optJSONObject("lyrics");
+            if (ly == null) return null;
+            String text = ly.optString("lyrics_body", "");
+            boolean partial = text.contains("NOT for Commercial use") || text.contains("*******");
+            StringBuilder sb = new StringBuilder();
+            for (String line : text.split("\n")) {
+                String s = line.trim();
+                if (s.startsWith("*******") || s.matches("^\\(\\d+\\)$")) continue;
+                sb.append(line).append('\n');
+            }
+            Result r = parse("", sb.toString().trim());
+            if (r != null) r.source = partial ? "Musixmatch (일부)" : "Musixmatch";
+            return r;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static JSONObject mxmBody(JSONObject o) {
+        JSONObject msg = o == null ? null : o.optJSONObject("message");
+        if (msg == null) return null;
+        JSONObject h = msg.optJSONObject("header");
+        if (h == null || h.optInt("status_code") != 200) return null;
+        return msg.optJSONObject("body");
+    }
+
+    /** All enabled providers in list order; {@code skip} = a provider already asked (null for none). */
+    private static Result lookup(Context c, Player.Track t, boolean wantKoSub, String skip) {
         String artist = primaryArtist(t.artist);
         String name = t.name == null ? "" : t.name.trim();
         String clean = cleanTitle(name);
@@ -211,7 +400,7 @@ final class Lyrics {
         Result plainFallback = null;
 
         // 1) LRCLIB
-        if (isProviderEnabled(c, SRC_LRCLIB)) {
+        if (isProviderEnabled(c, SRC_LRCLIB) && !SRC_LRCLIB.equals(skip)) {
             Result r = lookupLrclib(artist, name, clean, t.album, durSec);
             if (r != null) {
                 if (wantKoSub) extractDualKoreanLines(r);
@@ -223,7 +412,7 @@ final class Lyrics {
         }
 
         // 2) NetEase Cloud Music (YRC word-sync + LRC + native Korean tlyric)
-        if (isProviderEnabled(c, SRC_NETEASE)) {
+        if (isProviderEnabled(c, SRC_NETEASE) && !SRC_NETEASE.equals(skip)) {
             Result r = lookupNetEase(artist, name, clean, t.duration, wantKoSub);
             if (r != null) {
                 if (wantKoSub) extractDualKoreanLines(r);
@@ -237,7 +426,7 @@ final class Lyrics {
         }
 
         // 3) QQ Music (LRC + native Korean trans track)
-        if (isProviderEnabled(c, SRC_QQ)) {
+        if (isProviderEnabled(c, SRC_QQ) && !SRC_QQ.equals(skip)) {
             Result r = lookupQqMusic(artist, name, clean, t.duration, wantKoSub);
             if (r != null) {
                 if (wantKoSub) extractDualKoreanLines(r);
@@ -251,7 +440,7 @@ final class Lyrics {
         if (bestSynced != null) return finish(bestSynced, t.duration, wantKoSub);
 
         // 4) Kugou Lyrics
-        if (isProviderEnabled(c, SRC_KUGOU)) {
+        if (isProviderEnabled(c, SRC_KUGOU) && !SRC_KUGOU.equals(skip)) {
             Result r = lookupKugou(artist, clean, t.duration);
             if (r != null) {
                 if (wantKoSub) extractDualKoreanLines(r);
@@ -261,8 +450,18 @@ final class Lyrics {
         }
 
         // 5) SimpMusic Lyrics
-        if (isProviderEnabled(c, SRC_SIMPMUSIC)) {
+        if (isProviderEnabled(c, SRC_SIMPMUSIC) && !SRC_SIMPMUSIC.equals(skip)) {
             Result r = lookupSimpMusic(artist, name, clean, t.duration);
+            if (r != null) {
+                if (wantKoSub) extractDualKoreanLines(r);
+                if (r.synced) return finish(r, t.duration, wantKoSub);
+                if (plainFallback == null) plainFallback = r;
+            }
+        }
+
+        // 6) Musixmatch (the user's own API key)
+        if (isProviderEnabled(c, SRC_MUSIXMATCH) && !SRC_MUSIXMATCH.equals(skip)) {
+            Result r = lookupMusixmatch(c, artist, clean, t.duration);
             if (r != null) {
                 if (wantKoSub) extractDualKoreanLines(r);
                 if (r.synced) return finish(r, t.duration, wantKoSub);
@@ -272,8 +471,8 @@ final class Lyrics {
 
         if (plainFallback != null) return finish(plainFallback, t.duration, wantKoSub);
 
-        // 6) lyrics.ovh (plain text fallback)
-        if (isProviderEnabled(c, SRC_LYRICSOVH)) {
+        // 7) lyrics.ovh (plain text fallback)
+        if (isProviderEnabled(c, SRC_LYRICSOVH) && !SRC_LYRICSOVH.equals(skip)) {
             Result r = lookupLyricsOvh(artist, clean);
             if (r != null) return finish(r, t.duration, wantKoSub);
         }
@@ -701,8 +900,12 @@ final class Lyrics {
                 if (html == null || html.isEmpty()) continue;
                 // Respect anti-bot / Cloudflare challenge responses: stop immediately without bypassing.
                 if (isNamuChallengePage(html)) return null;
-                List<String[]> pairs = parseNamuwikiHtml(html);
-                List<String> plain = parseNamuwikiPlainLines(html);
+                // 9.5.31: only the song's own article — a bare title often lands on an unrelated article
+                // (another song, a film, an astronomy page…) whose text was being shown as "lyrics"
+                if (!isNamuSongArticle(html, artist, origTitle, clean)) continue;
+                String songTitle = clean.isEmpty() ? origTitle : clean;
+                List<String[]> pairs = parseNamuwikiHtml(html, songTitle);
+                List<String> plain = parseNamuwikiPlainLines(html, songTitle);
                 NamuMatch m = new NamuMatch(pairs, plain);
                 if (m.hasLyrics()) return m;
             } catch (Exception ignored) {}
@@ -724,12 +927,17 @@ final class Lyrics {
         if (nm.pairs.size() >= 3) {
             if (other != null && other.synced && !other.lines.isEmpty()) {
                 int minNeed = Math.max(2, Math.min(other.lines.size(), nm.pairs.size()) / 4);
+                String[] before = new String[other.lines.size()];
+                for (int i = 0; i < before.length; i++) before[i] = other.lines.get(i).trans;
                 int matched = applyNamuwikiPairs(other, nm.pairs);
+                if (matched < minNeed) for (int i = 0; i < before.length; i++) other.lines.get(i).trans = before[i];   // wrong page: undo
                 if (matched >= minNeed) {
                     other.source = (other.source == null || other.source.isEmpty())
                             ? "Namuwiki" : ("Namuwiki · " + other.source);
                     return other;
                 }
+                // 9.5.31: synced lyrics exist and Namuwiki's text doesn't match them → Namuwiki found the wrong page
+                if (other.lines.size() >= 8) return other;
             }
             Result res = new Result();
             res.synced = false;
@@ -747,6 +955,7 @@ final class Lyrics {
                             ? "Namuwiki" : ("Namuwiki · " + other.source);
                     return other;
                 }
+                if (other.lines.size() >= 8) return other;   // see above
             }
             Result res = new Result();
             res.synced = false;
@@ -801,29 +1010,90 @@ final class Lyrics {
     }
 
     /** Extracts plain lyrics lines from a Namuwiki song article's lyrics box (supports Korean-only songs too). */
-    static List<String> parseNamuwikiPlainLines(String html) {
+    static List<String> parseNamuwikiPlainLines(String html) { return parseNamuwikiPlainLines(html, null); }
+
+    static List<String> parseNamuwikiPlainLines(String html, String title) {
         List<String> out = new ArrayList<>();
         if (html == null || html.isEmpty()) return out;
         String body = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
-        String block = extractNamuLyricsBlock(body);
+        NamuRegion reg = namuLyricsRegion(body, title);
+        if (reg == null) return out;
+        String block = reg.foldout != null ? reg.foldout : (reg.lyricsHeading ? reg.html : null);
         if (block == null) return out;
-        for (String line : splitCellLines(block)) {
-            if (line.length() >= 2 && line.length() <= 180 && !isMetaLine(line)) out.add(line);
+        List<String> lines = namuBlockLines(block);
+        // a foldout that is mostly page chrome isn't lyrics
+        if (junkShare(lines) > .3f) return out;
+        // a translated song ("original / Korean translation" alternating) is handled as pairs, not as plain lyrics
+        if (isTranslationLayout(lines)) return out;
+        for (String line : lines) {
+            if (line.length() <= 180 && !isMetaLine(line) && !isJunkLine(line)) out.add(line);
         }
         return out;
     }
 
+    /** The foldout's lines in order, without the member colour legend ("ALL 카리나 지젤 윈터 닝닝") at the top. */
+    static List<String> namuBlockLines(String block) {
+        List<String> lines = splitCellLines(block);
+        while (!lines.isEmpty() && isMemberLegend(lines.get(0))) lines.remove(0);
+        return lines;
+    }
+
+    /** "ALL 카리나 지젤 윈터 닝닝", "카리나 지젤 윈터 닝닝": short name tokens only, the part-colour key of a group song. */
+    static boolean isMemberLegend(String line) {
+        String t = line.trim();
+        String[] tok = t.split("\\s+");
+        if (tok.length < 3) return false;
+        boolean all = tok[0].equalsIgnoreCase("ALL") || tok[0].equals("전원") || tok[0].equals("모두");
+        int names = 0;
+        for (String k : tok) {
+            if (k.length() > 6) return false;
+            if (hasHangul(k) || k.equalsIgnoreCase("ALL")) names++;
+        }
+        return all || names == tok.length && t.length() <= 40 && !t.matches(".*[,.!?~].*");
+    }
+
+    /**
+     * Namuwiki writes a foreign song as original line + Korean translation (Japanese: + reading), strictly alternating.
+     * A Korean song mixes English and Korean freely — treating its next Korean line as the "translation" of an
+     * English line (9.5.30) mangled it: "Look at me go" got "재미 좀 볼" as a translation and Korean lines vanished.
+     */
+    static boolean isTranslationLayout(List<String> lines) {
+        int foreign = 0, followed = 0, hangul = 0, orphan = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            String l = lines.get(i);
+            if (isMetaLine(l) || isJunkLine(l) || !hasLettersStr(l)) continue;
+            if (!hasHangul(l)) {
+                foreign++;
+                if (i + 1 < lines.size() && hasHangul(lines.get(i + 1))) followed++;
+            } else {
+                hangul++;
+                boolean afterForeign = (i >= 1 && !hasHangul(lines.get(i - 1)) && hasLettersStr(lines.get(i - 1)))
+                        || (i >= 2 && hasHangul(lines.get(i - 1)) && !hasHangul(lines.get(i - 2)) && hasLettersStr(lines.get(i - 2)));
+                if (!afterForeign) orphan++;
+            }
+        }
+        return foreign >= 4 && hangul >= 4 && followed >= foreign * .85f && orphan <= hangul * .15f;
+    }
+
     /** Extracts (original, Korean translation) line pairs from a Namuwiki song article's HTML. */
-    static List<String[]> parseNamuwikiHtml(String html) {
+    static List<String[]> parseNamuwikiHtml(String html) { return parseNamuwikiHtml(html, null); }
+
+    static List<String[]> parseNamuwikiHtml(String html, String title) {
         List<String[]> pairs = new ArrayList<>();
         if (html == null || html.isEmpty()) return pairs;
-        String body = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
+        String full = HTML_SCRIPT_STYLE.matcher(html).replaceAll("");
+        // 9.5.31: never the whole article — the top of the page (infobox, overview, other tracks) isn't lyrics
+        NamuRegion reg = namuLyricsRegion(full, title);
+        if (reg == null) return pairs;
+        String body = reg.html;
 
         // 1) Modern Namuwiki collapsible "[ 가사 보기 ]" lyrics block (handles both 2-line EN/KO and 3-line JP/pronunciation/KO)
-        String lyricsBlock = extractNamuLyricsBlock(body);
+        String lyricsBlock = reg.foldout;
         if (lyricsBlock != null) {
-            extractPairsFromSequentialLines(splitCellLines(lyricsBlock), pairs);
-            if (pairs.size() >= 2) return pairs;
+            List<String> bl = namuBlockLines(lyricsBlock);
+            // only a real translated layout gives pairs; a Korean song is plain lyrics (parseNamuwikiPlainLines)
+            if (junkShare(bl) <= .3f && isTranslationLayout(bl)) extractPairsFromSequentialLines(bl, pairs);
+            return pairs;
         }
 
         // 2) Legacy 2-column / 3-column lyric tables (orig cell + Korean translation cell)
@@ -847,7 +1117,7 @@ final class Lyrics {
                 if (n > 0 && Math.abs(origLines.size() - koLines.size()) <= Math.max(2, n / 3)) {
                     for (int i = 0; i < n; i++) {
                         String o = origLines.get(i), k = koLines.get(i);
-                        if (!hasHangul(o) && hasHangul(k) && !isMetaLine(k)) {
+                        if (!hasHangul(o) && hasHangul(k) && !isMetaLine(k) && !isJunkLine(o) && !isJunkLine(k)) {
                             pairs.add(new String[]{o, k});
                         }
                     }
@@ -856,13 +1126,145 @@ final class Lyrics {
         }
         if (pairs.size() >= 2) return pairs;
 
-        // 3) Fallback: search from the LAST occurrence of "가사" heading (skipping the Table of Contents)
-        int startIdx = body.lastIndexOf("가사 보기");
-        if (startIdx < 0) startIdx = body.lastIndexOf(">가사<");
-        if (startIdx < 0) startIdx = body.indexOf("가사");
-        String slice = startIdx > 0 ? body.substring(startIdx, Math.min(body.length(), startIdx + 90000)) : body;
-        extractPairsFromSequentialLines(splitCellLines(slice), pairs);
+        // (9.5.31) the old 3rd fallback — pairing any English line with the next Korean line anywhere after the
+        // word "가사", or across the WHOLE page when it wasn't found — produced the unrelated "recommendation"-like
+        // text. Lyrics now come only from the lyrics foldout or lyric tables.
         return pairs;
+    }
+
+    private static final Pattern HTML_TITLE = Pattern.compile("(?is)<title[^>]*>(.*?)</title>");
+    private static final Pattern HTML_HEADING = Pattern.compile("(?is)<h([1-6])\\b[^>]*>(.*?)</h\\1>");
+
+    /** The part of an article that holds the lyrics: a section's HTML and the "[ 가사 보기 ]" foldout in it (if any). */
+    static final class NamuRegion {
+        final String html, foldout;
+        final boolean lyricsHeading;
+        NamuRegion(String html, String foldout, boolean lyricsHeading) { this.html = html; this.foldout = foldout; this.lyricsHeading = lyricsHeading; }
+    }
+
+    /** "3.1. Supernova[편집]" → "Supernova" */
+    static String headingText(String h) {
+        String t = decodeHtmlEntities(HTML_TAG.matcher(h).replaceAll(" ")).replace('\u00A0', ' ').trim();
+        t = t.replaceAll("^[0-9]+(?:\\.[0-9]+)*\\.?\\s*", "").replaceAll("\\s*\\[?편집\\]?$", "").trim();
+        return t;
+    }
+
+    private static boolean isLyricsHeading(String name) {
+        String n = name.replace(" ", "");
+        return n.equals("가사") || n.startsWith("가사") || n.endsWith("가사") || n.equals("Lyrics");
+    }
+
+    /**
+     * Finds where this song's lyrics are, by the article's section headings — never by scanning the whole page:
+     *  1. a "가사" section inside the section named after the song (album articles: "3.1. Supernova" › "가사")
+     *  2. a "가사" section ("2. 가사" in a song article)
+     *  3. the section named after the song ("2. Shape of You", "3.1. Supernova") — its lyrics foldout
+     *  4. no such heading: only when the whole article has exactly one "가사 보기" foldout
+     * The section ends at the next heading of the same or a higher level. Inside it, the FIRST lyrics foldout
+     * is used (the longest one was sometimes another track's lyrics in an album article).
+     */
+    static NamuRegion namuLyricsRegion(String body, String title) {
+        List<int[]> hs = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        Matcher m = HTML_HEADING.matcher(body);
+        while (m.find()) { hs.add(new int[]{m.start(), m.end(), Integer.parseInt(m.group(1))}); names.add(headingText(m.group(2))); }
+        String nt = title == null ? "" : norm(cleanTitle(title));
+        int best = -1, bestScore = 0;
+        for (int i = 0; i < hs.size(); i++) {
+            int lv = hs.get(i)[2];
+            if (lv <= 1) continue;   // the article title
+            String name = names.get(i);
+            boolean songHead = !nt.isEmpty() && norm(cleanTitle(name)).equals(nt);
+            int score = 0;
+            if (isLyricsHeading(name)) {
+                score = 3;
+                // inside the song's own section (nearest enclosing heading)?
+                for (int j = i - 1; j >= 0; j--) {
+                    if (hs.get(j)[2] < lv) { if (!nt.isEmpty() && norm(cleanTitle(names.get(j))).equals(nt)) score = 5; break; }
+                }
+            } else if (songHead) score = 2;
+            if (score > bestScore) { bestScore = score; best = i; }
+        }
+        if (best >= 0) {
+            int lv = hs.get(best)[2], end = body.length();
+            for (int j = best + 1; j < hs.size(); j++) if (hs.get(j)[2] <= lv) { end = hs.get(j)[0]; break; }
+            String region = body.substring(hs.get(best)[1], end);
+            String fold = firstLyricsFoldout(region);
+            if (fold != null || bestScore >= 3) return new NamuRegion(region, fold, bestScore >= 3);
+        }
+        // no lyrics / song heading: accept only an unambiguous single foldout in the article
+        Matcher dm = HTML_DETAILS_LYRICS.matcher(body);
+        String only = null;
+        int n = 0;
+        while (dm.find()) { n++; only = dm.group(1); }
+        return n == 1 ? new NamuRegion(only, only, false) : null;
+    }
+
+    private static String firstLyricsFoldout(String region) {
+        Matcher dm = HTML_DETAILS_LYRICS.matcher(region);
+        return dm.find() ? dm.group(1) : null;
+    }
+
+    /** Is this Namuwiki page the article about this song by this artist? */
+    static boolean isNamuSongArticle(String html, String artist, String origTitle, String clean) {
+        if (html == null) return false;
+        Matcher tm = HTML_TITLE.matcher(html);
+        String title = tm.find() ? decodeHtmlEntities(HTML_TAG.matcher(tm.group(1)).replaceAll("")).trim() : "";
+        title = title.replaceAll("\\s*-\\s*나무위키\\s*$", "").trim();
+        if (title.isEmpty()) return false;
+        String base = title, paren = null;
+        int p = title.lastIndexOf('(');
+        if (p > 0 && title.endsWith(")")) { base = title.substring(0, p).trim(); paren = title.substring(p + 1, title.length() - 1).trim(); }
+        String nb = norm(base), nc = norm(clean), no = norm(origTitle);
+        boolean titleOk = !nb.isEmpty() && (nb.equals(nc) || nb.equals(no)
+                || (nc.length() >= 3 && (nb.contains(nc) || nc.contains(nb)) && Math.min(nb.length(), nc.length()) * 10 >= Math.max(nb.length(), nc.length()) * 7));
+        if (!titleOk) return false;
+        String lower = html.toLowerCase(Locale.ROOT);
+        List<String> aliases = artistAliases(artist);
+        if (paren != null) {
+            String np = norm(paren);
+            boolean parenOk = np.equals("노래") || np.equals("곡") || np.equals("싱글") || np.startsWith("노래") || np.endsWith("노래") || np.endsWith("곡");
+            for (String a : aliases) if (!norm(a).isEmpty() && (np.contains(norm(a)) || norm(a).contains(np))) parenOk = true;
+            if (!parenOk) return false;   // e.g. "Supernova(천문학)", "Hype Boy(다른 가수)"
+        }
+        boolean artistOk = aliases.isEmpty();
+        for (String a : aliases) if (a.length() >= 2 && lower.contains(a.toLowerCase(Locale.ROOT))) { artistOk = true; break; }
+        if (!artistOk) return false;
+        // a song article lists its credits / release
+        return html.contains("작사") || html.contains("작곡") || html.contains("수록") || html.contains("발매");
+    }
+
+    /** "IVE (아이브)" → ["IVE (아이브)", "IVE", "아이브"] */
+    private static List<String> artistAliases(String artist) {
+        List<String> out = new ArrayList<>();
+        if (artist == null) return out;
+        String a = artist.trim();
+        if (a.isEmpty()) return out;
+        addUnique(out, a);
+        int par = a.indexOf('('), end = a.indexOf(')');
+        if (par > 0 && end > par) { addUnique(out, a.substring(0, par).trim()); addUnique(out, a.substring(par + 1, end).trim()); }
+        return out;
+    }
+
+    private static float junkShare(List<String> lines) {
+        if (lines == null || lines.isEmpty()) return 1f;
+        int j = 0;
+        for (String l : lines) if (isJunkLine(l)) j++;
+        return j / (float) lines.size();
+    }
+
+    /** Text that is page chrome, links or recommendations rather than a lyric line. */
+    static boolean isJunkLine(String s) {
+        if (s == null) return true;
+        String t = s.trim(), l = t.toLowerCase(Locale.ROOT);
+        if (t.length() < 2) return true;
+        if (l.contains("http") || l.contains("www.") || l.contains(".com") || l.contains("youtube") || l.contains("유튜브")) return true;
+        String[] chrome = {"조회수", "구독자", "재생목록", "추천 영상", "추천 문서", "광고", "최근 변경", "최근 토론", "문서로", "편집 요청", "분류:", "틀:", "각주",
+                "댓글", "알고리즘", "관련 영상", "다음 동영상", "앨범 정보", "수록곡", "트랙리스트", "뮤직비디오", "ⓒ", "©", "▶", "|", "[편집]"};
+        for (String c : chrome) if (t.contains(c)) return true;
+        int digits = 0;
+        for (int i = 0; i < t.length(); i++) if (Character.isDigit(t.charAt(i))) digits++;
+        return digits >= 5 || (t.length() > 3 && digits * 2 > t.length());
     }
 
     /**
@@ -874,7 +1276,7 @@ final class Lyrics {
         int i = 0;
         while (i < lines.size()) {
             String a = lines.get(i);
-            if (a.length() < 2 || a.length() > 180 || hasHangul(a) || !hasLettersStr(a) || isMetaLine(a)) {
+            if (a.length() < 2 || a.length() > 180 || hasHangul(a) || !hasLettersStr(a) || isMetaLine(a) || isJunkLine(a)) {
                 i++;
                 continue;
             }
@@ -883,7 +1285,7 @@ final class Lyrics {
             String bestKo = null;
             while (j < lines.size() && j <= i + 2) {
                 String cand = lines.get(j);
-                if (cand.length() < 2 || cand.length() > 180 || !hasHangul(cand) || isMetaLine(cand)) break;
+                if (cand.length() < 2 || cand.length() > 180 || !hasHangul(cand) || isMetaLine(cand) || isJunkLine(cand)) break;
                 bestKo = cand; // overwrite phonetic line with meaning translation line when 2 Korean lines follow
                 j++;
             }
@@ -1047,7 +1449,7 @@ final class Lyrics {
     // ---- disk cache (v5: Namuwiki top-priority lyrics + native translation tracks) ----
     private static File file(String id) {
         if (Img.appContext == null) return null;
-        File d = new File(Img.appContext.getCacheDir(), "lyrics_v5");
+        File d = new File(Img.appContext.getCacheDir(), "lyrics_v7");
         d.mkdirs();
         return new File(d, Integer.toHexString(id.hashCode()) + "_" + id.length() + ".json");
     }
@@ -1061,6 +1463,8 @@ final class Lyrics {
             Result r = new Result();
             r.synced = o.optBoolean("synced", false);
             r.source = o.optString("src", "");
+            String te = o.optString("te", "");
+            r.transEngine = te.isEmpty() ? null : te;
             JSONArray la = o.optJSONArray("lines");
             if (la == null) return null;
             for (int i = 0; i < la.length(); i++) {
@@ -1097,6 +1501,7 @@ final class Lyrics {
                 la.put(lo);
             }
             JSONObject o = new JSONObject().put("id", id).put("synced", r.synced).put("src", r.source).put("lines", la);
+            if (r.transEngine != null) o.put("te", r.transEngine);
             java.nio.file.Files.write(f.toPath(), o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
     }
