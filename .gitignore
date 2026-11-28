@@ -10,3 +10,10 @@ toolchain.path
 tests/ui/output/
 tests/ui/.cache/# local work notes (contain local paths)
 *Readme.txt
+# never publish screen recordings or videos
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+Screen_Recording_*
